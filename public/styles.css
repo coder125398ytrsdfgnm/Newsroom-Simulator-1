@@ -449,6 +449,7 @@ html, body { margin: 0; padding: 0; background: var(--soft); color: var(--ink); 
 .speed-btn { background: #2a2a2a; color: #aaa; border: 1px solid #444; padding: 3px 9px; font-size: 12px; font-weight: 700; letter-spacing: 0.5px; cursor: pointer; border-radius: 2px; transition: background 0.12s, color 0.12s; font-family: ui-monospace, monospace; }
 .speed-btn:hover { background: #3a3a3a; color: #fff; }
 .speed-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.speed-btn.paused { background: #d96b00; border-color: #d96b00; color: #fff; }
 
 /* ---------- Finance Panel ---------- */
 .finance-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }

@@ -574,6 +574,7 @@ function startGameLoop() {
 
 function tick() {
   if (state.bankrupt) return;
+  if (state.settings.paused) { renderClock(); renderStats(); return; }
   const speed = state.settings.speed || 2;
   for (let i = 0; i < speed; i++) advanceHour();
   updateLiveArticles();
@@ -991,16 +992,36 @@ function setupNav() {
 
 function setupSpeedButtons() {
   const btns = $$("#speed-controls .speed-btn");
+  const pauseBtn = $("#pause-btn");
+
   function syncActive() {
     const spd = state.settings.speed;
-    btns.forEach(b => b.classList.toggle("active", +b.dataset.speed === spd));
+    const paused = !!state.settings.paused;
+    btns.forEach(b => b.classList.toggle("active", !paused && +b.dataset.speed === spd));
+    if (pauseBtn) {
+      pauseBtn.textContent = paused ? "▶" : "⏸";
+      pauseBtn.title = paused ? "Resume" : "Pause";
+      pauseBtn.classList.toggle("paused", paused);
+    }
   }
+
   btns.forEach(b => b.addEventListener("click", () => {
+    state.settings.paused = false;
     state.settings.speed = +b.dataset.speed;
     syncActive();
     saveState();
-    toast({ title: `Speed: ${b.dataset.speed}×`, text: "Game speed updated.", timeout: 1500 });
+    toast({ title: `Speed: ${b.dataset.speed}×`, text: "Game speed updated.", timeout: 1200 });
   }));
+
+  if (pauseBtn) {
+    pauseBtn.addEventListener("click", () => {
+      state.settings.paused = !state.settings.paused;
+      syncActive();
+      saveState();
+      toast({ title: state.settings.paused ? "⏸ Paused" : "▶ Resumed", text: state.settings.paused ? "Time frozen." : "Time is moving again.", timeout: 1200 });
+    });
+  }
+
   syncActive();
 }
 
@@ -2586,7 +2607,9 @@ function openSettings() {
         <div style="font-size:11px;color:var(--slate);margin-top:8px">Export creates a JSON backup. Import replaces your current save.</div>
       </div>
       <div class="setting-block">
-        <button id="set-reset" class="reject-btn">Reset entire game</button>
+        <div id="set-reset-wrap">
+          <button id="set-reset" class="reject-btn">Reset entire game</button>
+        </div>
       </div>`;
     document.getElementById("set-density")?.addEventListener("input", e => { state.settings.density = +e.target.value; applyTheme(); saveState(); });
     document.getElementById("set-export")?.addEventListener("click", () => {
@@ -2611,9 +2634,23 @@ function openSettings() {
       reader.readAsText(file);
     });
     document.getElementById("set-reset")?.addEventListener("click", () => {
-      if (!confirm("Reset everything? This permanently wipes your save.")) return;
-      localStorage.removeItem(STORAGE_KEY);
-      location.reload();
+      const wrap = document.getElementById("set-reset-wrap");
+      if (!wrap) return;
+      wrap.innerHTML = `
+        <p style="font-size:13px;color:var(--accent);font-weight:700;margin:0 0 8px">Wipe everything permanently?</p>
+        <div style="display:flex;gap:8px">
+          <button id="set-reset-confirm" class="reject-btn" style="background:var(--accent);color:#fff;border-color:var(--accent)">Yes, delete save</button>
+          <button id="set-reset-cancel" class="ghost-btn">Cancel</button>
+        </div>`;
+      document.getElementById("set-reset-confirm")?.addEventListener("click", () => {
+        localStorage.removeItem(STORAGE_KEY);
+        location.reload();
+      });
+      document.getElementById("set-reset-cancel")?.addEventListener("click", () => {
+        wrap.innerHTML = `<button id="set-reset" class="reject-btn">Reset entire game</button>`;
+        // re-attach by re-opening settings (it rewrites the panel)
+        openSettings();
+      });
     });
   }
   $("#settings-drawer").classList.remove("hidden");
