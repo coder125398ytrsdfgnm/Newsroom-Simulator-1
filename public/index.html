@@ -11,6 +11,17 @@
 </head>
 <body>
 
+<!-- Toast container -->
+<div id="toasts" class="toasts" aria-live="polite"></div>
+
+<!-- Breaking news banner -->
+<div id="breaking-banner" class="breaking-banner hidden">
+  <span class="breaking-flag">BREAKING</span>
+  <span class="breaking-text" id="breaking-text"></span>
+  <button class="breaking-action" id="breaking-claim">Cover this →</button>
+  <button class="breaking-dismiss" id="breaking-dismiss">×</button>
+</div>
+
 <!-- Onboarding overlay -->
 <div id="onboarding" class="onboarding">
   <div class="onboarding-card">
@@ -19,19 +30,51 @@
       <h1>NEWSROOM</h1>
       <p class="brand-sub">Simulator</p>
     </div>
-    <p class="onboarding-lede">Found your newsroom. Hire reporters. Compete for the front page.</p>
+    <p class="onboarding-lede">Found your newsroom. Hire reporters. Open bureaus. Compete for the front page.</p>
 
-    <label>Your name
-      <input id="ob-player" type="text" placeholder="e.g. Alex Carter" maxlength="40" />
+    <div class="onboarding-grid">
+      <label>Your name
+        <input id="ob-player" type="text" placeholder="e.g. Alex Carter" maxlength="40" />
+      </label>
+      <label>Newsroom name
+        <input id="ob-newsroom" type="text" placeholder="e.g. The Daily Beacon" maxlength="40" />
+      </label>
+      <label>Logo emoji
+        <input id="ob-logo" type="text" placeholder="📰" maxlength="2" value="📰" />
+      </label>
+      <label>Newsroom motto
+        <input id="ob-motto" type="text" placeholder="All the news that fits." maxlength="60" />
+      </label>
+    </div>
+
+    <label>Headquarters city
+      <select id="ob-city">
+        <option value="metroville">Metroville (general beat)</option>
+        <option value="new-haven">New Haven (politics-heavy)</option>
+        <option value="silicon-bay">Silicon Bay (tech-heavy)</option>
+        <option value="gotham-east">Gotham East (crime-heavy)</option>
+        <option value="port-royal">Port Royal (business-heavy)</option>
+      </select>
     </label>
-    <label>Newsroom name
-      <input id="ob-newsroom" type="text" placeholder="e.g. The Daily Beacon" maxlength="40" />
+
+    <label>Editorial slant
+      <div class="slider-row">
+        <span class="slider-lo">Serious</span>
+        <input id="ob-slant" type="range" min="0" max="100" value="50" />
+        <span class="slider-hi">Tabloid</span>
+      </div>
+      <div class="slider-readout" id="ob-slant-readout">Balanced</div>
     </label>
-    <label>Logo emoji
-      <input id="ob-logo" type="text" placeholder="📰" maxlength="2" value="📰" />
-    </label>
-    <label>Newsroom motto (optional)
-      <input id="ob-motto" type="text" placeholder="All the news that fits." maxlength="60" />
+
+    <label>Theme color
+      <div class="swatch-row">
+        <button class="swatch" data-color="#cc0000" style="background:#cc0000"></button>
+        <button class="swatch" data-color="#1a4fd1" style="background:#1a4fd1"></button>
+        <button class="swatch" data-color="#0a8a3a" style="background:#0a8a3a"></button>
+        <button class="swatch" data-color="#7d2eb9" style="background:#7d2eb9"></button>
+        <button class="swatch" data-color="#d96b00" style="background:#d96b00"></button>
+        <button class="swatch" data-color="#111111" style="background:#111111"></button>
+      </div>
     </label>
 
     <button id="ob-start" class="primary-btn">Open the doors</button>
@@ -48,6 +91,7 @@
     </div>
     <div class="topbar-right">
       <span id="ai-status" class="ai-badge">AI: …</span>
+      <button class="icon-btn" id="open-settings" title="Settings">⚙</button>
     </div>
   </header>
 
@@ -61,20 +105,23 @@
         </div>
       </div>
       <div class="masthead-stats">
-        <div class="stat"><span class="stat-num" id="stat-articles">0</span><span class="stat-label">Articles</span></div>
-        <div class="stat"><span class="stat-num" id="stat-views">0</span><span class="stat-label">Total Views</span></div>
-        <div class="stat"><span class="stat-num" id="stat-rep">50</span><span class="stat-label">Reputation</span></div>
-        <div class="stat"><span class="stat-num" id="stat-cash">$5,000</span><span class="stat-label">Cash</span></div>
-        <div class="stat"><span class="stat-num" id="stat-reporters">0</span><span class="stat-label">Reporters</span></div>
+        <div class="stat"><span class="stat-num" data-stat="articles">0</span><span class="stat-label">Articles</span></div>
+        <div class="stat"><span class="stat-num" data-stat="views">0</span><span class="stat-label">Total Views</span></div>
+        <div class="stat"><span class="stat-num" data-stat="rep">50</span><span class="stat-label">Reputation</span></div>
+        <div class="stat"><span class="stat-num" data-stat="cash">$5,000</span><span class="stat-label">Cash</span></div>
+        <div class="stat"><span class="stat-num" data-stat="reporters">0</span><span class="stat-label">Reporters</span></div>
+        <div class="stat"><span class="stat-num" data-stat="share">5%</span><span class="stat-label">Market Share</span></div>
       </div>
     </div>
     <nav class="masthead-nav">
       <button class="nav-btn active" data-view="dashboard">Dashboard</button>
-      <button class="nav-btn" data-view="write">Write Article</button>
+      <button class="nav-btn" data-view="write">Write</button>
       <button class="nav-btn" data-view="reporters">Reporters</button>
-      <button class="nav-btn" data-view="approvals">Pending Approvals <span id="approvals-badge" class="badge hidden">0</span></button>
+      <button class="nav-btn" data-view="approvals">Approvals <span id="approvals-badge" class="badge hidden">0</span></button>
+      <button class="nav-btn" data-view="bureaus">Bureaus</button>
       <button class="nav-btn" data-view="public">Public Site</button>
       <button class="nav-btn" data-view="competitors">Competitors</button>
+      <button class="nav-btn" data-view="achievements">Achievements <span id="ach-badge" class="badge hidden">0</span></button>
     </nav>
   </div>
 
@@ -92,6 +139,16 @@
           <div id="dash-competitors" class="wire-list"></div>
         </div>
       </div>
+      <div class="section-grid">
+        <div class="card">
+          <h2 class="card-title">Newsroom pulse</h2>
+          <div id="pulse-panel" class="pulse-panel"></div>
+        </div>
+        <div class="card">
+          <h2 class="card-title">Market share</h2>
+          <div id="market-share" class="market-share"></div>
+        </div>
+      </div>
     </section>
 
     <!-- Write -->
@@ -99,11 +156,21 @@
       <div class="writer">
         <h2 class="section-h">Filing a story</h2>
         <input id="writer-title" class="writer-title" type="text" placeholder="Headline" maxlength="160" />
-        <select id="writer-category" class="writer-category">
-          <option>Politics</option><option>Business</option><option>Tech</option>
-          <option>Sports</option><option>Culture</option><option>World</option>
-          <option>Local</option><option>Crime</option>
-        </select>
+        <div class="writer-meta">
+          <select id="writer-category" class="writer-category">
+            <option>Politics</option><option>Business</option><option>Tech</option>
+            <option>Sports</option><option>Culture</option><option>World</option>
+            <option>Local</option><option>Crime</option><option>Health</option><option>Climate</option>
+          </select>
+          <div class="writer-slant">
+            <label>Angle</label>
+            <div class="slider-row compact">
+              <span class="slider-lo">Just facts</span>
+              <input id="writer-angle" type="range" min="0" max="100" value="50" />
+              <span class="slider-hi">Punchy</span>
+            </div>
+          </div>
+        </div>
         <textarea id="writer-body" class="writer-body" placeholder="Write your article here. Stronger leads, specific facts, and quotes will score better."></textarea>
         <div class="writer-actions">
           <span id="writer-wordcount" class="wordcount">0 words</span>
@@ -134,6 +201,13 @@
       <div id="approvals-list" class="approvals-list"></div>
     </section>
 
+    <!-- Bureaus -->
+    <section class="view" data-view="bureaus">
+      <h2 class="section-h">News bureaus</h2>
+      <p class="section-sub">Open bureaus in other cities to unlock specialized beats and boost market share.</p>
+      <div id="bureau-cards" class="bureau-cards"></div>
+    </section>
+
     <!-- Public Site -->
     <section class="view" data-view="public">
       <div class="public-frame">
@@ -158,6 +232,12 @@
       <div id="competitor-cards" class="competitor-cards"></div>
     </section>
 
+    <!-- Achievements -->
+    <section class="view" data-view="achievements">
+      <h2 class="section-h">Achievements</h2>
+      <div id="achievements-grid" class="achievements-grid"></div>
+    </section>
+
   </main>
 </div>
 
@@ -168,6 +248,59 @@
     <button class="modal-close" data-close>×</button>
     <div id="modal-body"></div>
   </div>
+</div>
+
+<!-- Settings drawer -->
+<div id="settings-drawer" class="drawer hidden">
+  <div class="drawer-backdrop" data-close-drawer></div>
+  <aside class="drawer-panel">
+    <button class="drawer-close" data-close-drawer>×</button>
+    <h2 class="drawer-title">Settings</h2>
+
+    <div class="setting-block">
+      <h3>Newsroom identity</h3>
+      <label>Name <input id="set-name" type="text" maxlength="40" /></label>
+      <label>Motto <input id="set-motto" type="text" maxlength="60" /></label>
+      <label>Logo emoji <input id="set-logo" type="text" maxlength="2" /></label>
+    </div>
+
+    <div class="setting-block">
+      <h3>Theme color</h3>
+      <div class="swatch-row">
+        <button class="swatch" data-color="#cc0000" style="background:#cc0000"></button>
+        <button class="swatch" data-color="#1a4fd1" style="background:#1a4fd1"></button>
+        <button class="swatch" data-color="#0a8a3a" style="background:#0a8a3a"></button>
+        <button class="swatch" data-color="#7d2eb9" style="background:#7d2eb9"></button>
+        <button class="swatch" data-color="#d96b00" style="background:#d96b00"></button>
+        <button class="swatch" data-color="#111111" style="background:#111111"></button>
+      </div>
+      <label class="custom-color-label">Custom: <input id="set-custom-color" type="color" value="#cc0000" /></label>
+    </div>
+
+    <div class="setting-block">
+      <h3>Editorial slant</h3>
+      <div class="slider-row">
+        <span class="slider-lo">Serious</span>
+        <input id="set-slant" type="range" min="0" max="100" />
+        <span class="slider-hi">Tabloid</span>
+      </div>
+      <div class="slider-readout" id="set-slant-readout">Balanced</div>
+    </div>
+
+    <div class="setting-block">
+      <h3>Layout density</h3>
+      <div class="slider-row">
+        <span class="slider-lo">Compact</span>
+        <input id="set-density" type="range" min="0" max="100" />
+        <span class="slider-hi">Spacious</span>
+      </div>
+    </div>
+
+    <div class="setting-block">
+      <button id="set-save" class="primary-btn">Save changes</button>
+      <button id="set-reset" class="reject-btn">Reset entire game</button>
+    </div>
+  </aside>
 </div>
 
 <script src="/app.js"></script>
