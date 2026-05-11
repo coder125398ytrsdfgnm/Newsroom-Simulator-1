@@ -70,6 +70,17 @@ const COMPETITORS_BASE = [
   { id: "tabloid", name: "The Tabloid Times", logo: "🔥", bio: "Pure sensationalism.",              personality: "tabloid",       baseShare: 20 },
 ];
 
+/* Sponsor tiers — unlocked by reputation. Each pays a fixed daily rate.
+   Sponsors will pull out if your reputation drops below their min. */
+const SPONSORS = [
+  { id: "indie",    name: "Civic Roast Coffee",  tier: "Local",     color: "#7a4a2a", minRep: 0,  daily: 60,  loseAt: -1 },
+  { id: "mid1",     name: "NorthBay Insurance",  tier: "Regional",  color: "#1a4fd1", minRep: 40, daily: 180, loseAt: 30 },
+  { id: "mid2",     name: "Halcyon Auto Group",  tier: "Regional",  color: "#222",    minRep: 50, daily: 240, loseAt: 38 },
+  { id: "premium1", name: "Meridian Bank",       tier: "Premium",   color: "#0a8a3a", minRep: 65, daily: 480, loseAt: 55 },
+  { id: "premium2", name: "Larkspur Pharma",     tier: "Premium",   color: "#d96b00", minRep: 70, daily: 600, loseAt: 60 },
+  { id: "platinum", name: "Vega Aerospace",      tier: "Platinum",  color: "#7d2eb9", minRep: 85, daily: 1200, loseAt: 75 },
+];
+
 const ACHIEVEMENTS = [
   { id: "first_article", title: "First Byline",   icon: "✍️", desc: "Publish your first article.",          test: s => s.articles.length >= 1 },
   { id: "ten_articles",  title: "Cub Reporter",   icon: "📝", desc: "Publish 10 articles.",                  test: s => s.articles.length >= 10 },
@@ -107,11 +118,12 @@ function defaultState() {
       founded: Date.now(),
     },
     player: { name: "You" },
-    stats: { cash: 5000, reputation: 50, totalViews: 0, marketShare: 5 },
+    stats: { cash: 5000, reputation: 50, totalViews: 0, marketShare: 5, subscribers: 0 },
     settings: { density: 50, speed: 2 },
     time: { day: 1, hour: 9, minute: 0 },
     reporters: [],
     pendingApprovals: [],
+    pendingPitches: [],
     articles: [],
     candidatePool: [],
     cities: CITIES.map(c => ({ ...c, owned: false })),
@@ -120,8 +132,10 @@ function defaultState() {
     breaking: null,
     achievements: {},
     tv: { founded: false, name: "", logoId: "satellite", accent: "#cc0000", shows: [] },
-    owner: null, // { name, type, demand, monthlyBudget, satisfaction }
+    owner: null,
     bankrupt: false,
+    // Revenue ledger - what happened today
+    revToday: { ads: 0, subs: 0, sponsors: 0, tv: 0, day: 1 },
   };
 }
 
@@ -345,43 +359,133 @@ function advanceMinute() {
 }
 
 function handleHourly() {
-  // owner monthly budget paid every game day; but every hour: slight competitor shift
   state.competitors.forEach(c => {
     c.share = Math.max(0.5, c.share + (Math.random() - 0.5) * 0.3);
   });
+  // Occasionally a reporter pitches you a story
+  if (state.reporters.length > 0 && state.pendingPitches.length < 3 && Math.random() < 0.18) {
+    rollReporterPitch();
+  }
+}
+
+async function rollReporterPitch() {
+  const r = pick(state.reporters);
+  // optimistic placeholder
+  const pitchId = uid();
+  state.pendingPitches.push({ id: pitchId, status: "loading", reporterId: r.id, reporterName: r.name, beat: r.beat });
+  saveState();
+  try {
+    const recent = state.articles.slice(-3).map(a => a.title);
+    const resp = await fetch("/api/reporter-pitch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reporterName: r.name, beat: r.beat, recentHistory: recent }) });
+    const data = await resp.json();
+    const idx = state.pendingPitches.findIndex(p => p.id === pitchId);
+    if (idx === -1) return;
+    state.pendingPitches[idx] = { id: pitchId, status: "ready", reporterId: r.id, reporterName: r.name, beat: r.beat, pitch: data.pitch, angle: data.angle, category: data.category };
+    saveState();
+    showPitchModal(pitchId);
+  } catch {
+    state.pendingPitches = state.pendingPitches.filter(p => p.id !== pitchId);
+    saveState();
+  }
+}
+
+function showPitchModal(pitchId) {
+  const p = state.pendingPitches.find(x => x.id === pitchId);
+  if (!p || p.status !== "ready") return;
+  $("#modal").dataset.articleId = "";
+  $("#modal-body").innerHTML = `<div class="modal-body pitch-card">
+    <div class="pitch-reporter">
+      <div class="avatar">${initials(p.reporterName)}</div>
+      <div class="pitch-reporter-meta">
+        <strong>${escapeHtml(p.reporterName)}</strong>
+        <span>${escapeHtml(p.beat)} · pitch</span>
+      </div>
+    </div>
+    <div class="pitch-quote">"${escapeHtml(p.pitch)}"</div>
+    <p style="color:var(--slate);font-size:13px"><strong>Angle:</strong> ${escapeHtml(p.angle)} · <strong>Category:</strong> ${escapeHtml(p.category)}</p>
+    <div class="pitch-actions">
+      <button class="primary-btn" id="pitch-accept">Greenlight — assign to ${escapeHtml(p.reporterName.split(/\s/)[0])}</button>
+      <button class="reject-btn" id="pitch-pass">Pass</button>
+    </div>
+  </div>`;
+  $("#modal").classList.remove("hidden");
+  $("#pitch-accept").addEventListener("click", () => {
+    state.pendingPitches = state.pendingPitches.filter(x => x.id !== pitchId);
+    saveState();
+    $("#modal").classList.add("hidden");
+    assignStory(p.reporterId, { tip: p.angle, beat: p.category });
+    $$(".nav-btn[data-view='approvals']")[0]?.click();
+  });
+  $("#pitch-pass").addEventListener("click", () => {
+    state.pendingPitches = state.pendingPitches.filter(x => x.id !== pitchId);
+    saveState();
+    $("#modal").classList.add("hidden");
+    toast({ title: "Pitch passed", text: `${p.reporterName} will keep digging.` });
+  });
+  toast({ title: `📞 ${p.reporterName} has a pitch`, text: p.angle, timeout: 5000 });
 }
 
 function handleDaily() {
-  // pay reporter salaries (skip — we charge per-article)
-  // pay owner stipend if we have one
+  // Reset today's revenue ledger
+  state.revToday = { ads: 0, subs: 0, sponsors: 0, tv: 0, day: state.time.day };
+
+  // --- Subscriber revenue ($1.5/sub/day) ---
+  const subRev = (state.stats.subscribers || 0) * 1.5;
+  state.stats.cash += subRev;
+  state.revToday.subs = subRev;
+
+  // --- Sponsor revenue ---
+  let sponsorRev = 0;
+  for (const s of SPONSORS) {
+    if (state.stats.reputation >= s.minRep) {
+      sponsorRev += s.daily;
+    }
+  }
+  state.stats.cash += sponsorRev;
+  state.revToday.sponsors = sponsorRev;
+
+  // --- Owner stipend ---
   if (state.owner) {
     state.stats.cash += state.owner.monthlyBudget;
-    // satisfaction decays slightly without alignment
     state.owner.satisfaction = Math.max(0, state.owner.satisfaction - 0.5);
-    if (state.owner.satisfaction < 25) {
-      toast({ title: `${state.owner.name} is unhappy`, text: state.owner.demand, kind: "warn" });
-    }
+    if (state.owner.satisfaction < 25) toast({ title: `${state.owner.name} is unhappy`, text: state.owner.demand, kind: "warn" });
     if (state.owner.satisfaction <= 0) {
       toast({ title: "Owner pulled out", text: `${state.owner.name} ended the partnership.`, kind: "warn", timeout: 6000 });
       state.owner = null;
     }
   }
-  // TV station revenue
+
+  // --- TV station revenue ---
   if (state.tv.founded && state.tv.shows.length) {
     let rev = 0, totalViewers = 0;
     state.tv.shows.forEach(sh => {
       const viewers = Math.round(sh.rating * 4000 + randInt(-5000, 5000));
       totalViewers += Math.max(0, viewers);
       rev += Math.max(0, viewers) * 0.03;
-      // drift
       sh.rating = Math.max(5, Math.min(99, sh.rating + (Math.random() - 0.5) * 4));
     });
     state.stats.cash += rev;
+    state.revToday.tv = rev;
     if (rev > 0) toast({ title: "TV ratings day", text: `${fmtNum(totalViewers)} viewers · ${fmtCash(rev)} earned`, kind: "success" });
   }
-  // refresh candidate pool occasionally
+
+  // Daily digest toast
+  const totalRev = subRev + sponsorRev + state.revToday.tv;
+  if (state.time.day > 1 && totalRev > 0) {
+    toast({ title: `Day ${state.time.day} payout`, text: `${fmtCash(totalRev)} from subs, sponsors, TV.`, kind: "success" });
+  }
+
+  // Subscriber churn if reputation tanks
+  if (state.stats.reputation < 40 && state.stats.subscribers > 0) {
+    const churn = Math.floor(state.stats.subscribers * 0.05);
+    state.stats.subscribers = Math.max(0, state.stats.subscribers - churn);
+    if (churn > 0) toast({ title: "Subscriber churn", text: `${fmtNum(churn)} cancellations.`, kind: "warn" });
+  }
+
+  // Refresh candidate pool occasionally
   if (Math.random() < 0.3) state.candidatePool = generateCandidates(3);
-  // refresh competitor wire
+
+  // Refresh competitor wire
   refreshCompetitorWire();
   saveState();
   if (state.stats.cash <= 0) triggerBankruptcy();
@@ -408,13 +512,14 @@ function updateLiveArticles() {
       const delta = newViews - a.currentViews;
       a.currentViews = newViews;
       state.stats.totalViews += delta;
+      // Ad revenue: $0.0025 per view, accumulates immediately
+      const adIncome = delta * 0.0025;
+      state.stats.cash += adIncome;
+      state.revToday.ads = (state.revToday.ads || 0) + adIncome;
       changed = true;
-      // chance to fetch more comments as views grow
       if (Math.random() < 0.06 && a.comments.length < 30) fetchMoreComments(a);
-      // chance to go viral if not already
       if (!a.viral && a.review.viral_factor > 70 && Math.random() < 0.08) goViral(a);
     }
-    // stop being "live" when 95% of target reached and 30+ min old
     if (a.currentViews >= target * 0.95 && ageMinutes > 30) {
       a.live = false; changed = true;
     }
@@ -438,15 +543,16 @@ function goViral(a) {
 
 async function fetchMoreComments(article, count = 2) {
   try {
+    // Pass recent article titles so the AI can occasionally reference prior coverage
+    const history = state.articles.slice(-5, -1).map(a => a.title);
     const resp = await fetch("/api/comments", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: article.title, body: article.body, author: article.author, count, review: article.review }),
+      body: JSON.stringify({ title: article.title, body: article.body, author: article.author, count, history }),
     });
     const data = await resp.json();
     if (data.comments && data.comments.length) {
       article.comments.push(...data.comments);
       saveState();
-      // re-render modal if open showing this article
       if ($("#modal").classList.contains("hidden") === false && $("#modal").dataset.articleId === article.id) {
         openArticleModal(article.id);
       }
@@ -491,6 +597,7 @@ function renderStats() {
   setStat("rep", fmtNum(state.stats.reputation));
   setStat("cash", fmtCash(state.stats.cash), state.stats.cash < 1000);
   setStat("reporters", fmtNum(state.reporters.length));
+  setStat("subs", fmtNum(state.stats.subscribers || 0));
   setStat("share", state.stats.marketShare.toFixed(1) + "%");
   const ap = $("#approvals-badge");
   if (state.pendingApprovals.length > 0) { ap.textContent = state.pendingApprovals.length; ap.classList.remove("hidden"); }
@@ -550,6 +657,10 @@ function renderDashboard() {
     $("#ticker").textContent = state.competitorHeadlines.map(h => `${h.outlet}: ${h.headline}`).join("   •   ");
   }
 
+  // revenue panel
+  renderRevenuePanel();
+  renderSponsorsPanel();
+
   // pulse
   const grades = state.articles.slice(-10).map(a => gradeToNumber(a.review.overall_grade));
   const avg = grades.length ? Math.round(grades.reduce((a,b)=>a+b,0)/grades.length) : 0;
@@ -575,6 +686,55 @@ function renderDashboard() {
       <span class="share-bar"><span class="share-fill ${r.you ? "you" : ""}" style="width:${r.pct.toFixed(1)}%"></span></span>
       <span class="share-pct">${r.pct.toFixed(1)}%</span>
     </div>`).join("");
+}
+
+function renderRevenuePanel() {
+  const host = $("#revenue-panel");
+  if (!host) return;
+  const rev = state.revToday || { ads: 0, subs: 0, sponsors: 0, tv: 0 };
+  const subDaily = (state.stats.subscribers || 0) * 1.5;
+  const activeSponsors = SPONSORS.filter(s => state.stats.reputation >= s.minRep);
+  const sponsorDaily = activeSponsors.reduce((sum, s) => sum + s.daily, 0);
+  const tvActive = state.tv.founded ? state.tv.shows.length : 0;
+  const projectedDaily = subDaily + sponsorDaily;
+  const total = rev.ads + rev.subs + rev.sponsors + rev.tv;
+  host.innerHTML = `
+    <div class="rev-row">
+      <div class="rev-label"><strong>Ad revenue</strong>$0.0025 per view (continuous)</div>
+      <div class="rev-amount">${fmtCash(rev.ads)}</div>
+    </div>
+    <div class="rev-row">
+      <div class="rev-label"><strong>Subscribers</strong>${fmtNum(state.stats.subscribers || 0)} × $1.50/day</div>
+      <div class="rev-amount">${fmtCash(rev.subs)} <span style="color:var(--slate);font-size:11px">/ ${fmtCash(subDaily)} per day</span></div>
+    </div>
+    <div class="rev-row">
+      <div class="rev-label"><strong>Sponsors</strong>${activeSponsors.length} active sponsor${activeSponsors.length === 1 ? "" : "s"}</div>
+      <div class="rev-amount">${fmtCash(rev.sponsors)} <span style="color:var(--slate);font-size:11px">/ ${fmtCash(sponsorDaily)} per day</span></div>
+    </div>
+    <div class="rev-row">
+      <div class="rev-label"><strong>TV station</strong>${tvActive} show${tvActive === 1 ? "" : "s"} on the air</div>
+      <div class="rev-amount">${fmtCash(rev.tv)}</div>
+    </div>
+    <div class="rev-total">
+      <div class="rev-label">Earned today (Day ${state.time.day})</div>
+      <div class="rev-amount">${fmtCash(total)}</div>
+    </div>`;
+}
+
+function renderSponsorsPanel() {
+  const host = $("#sponsors-panel");
+  if (!host) return;
+  host.innerHTML = SPONSORS.map(s => {
+    const active = state.stats.reputation >= s.minRep;
+    return `<div class="sponsor-row ${active ? "" : "sponsor-locked"}">
+      <div class="sponsor-logo" style="background:${s.color}">${s.name[0]}</div>
+      <div class="sponsor-meta">
+        <div class="sponsor-name">${escapeHtml(s.name)}${active ? "" : " · locked"}</div>
+        <div class="sponsor-tier">${s.tier} · ${active ? "active" : `needs rep ${s.minRep}`}</div>
+      </div>
+      <div class="sponsor-pay">${fmtCash(s.daily)}<span style="font-size:10px;color:var(--slate);display:block;text-align:right">per day</span></div>
+    </div>`;
+  }).join("");
 }
 
 /* ==================================================================== */
@@ -660,9 +820,30 @@ function createArticle({ title, body, author, review }) {
   };
   state.articles.push(article);
   state.stats.totalViews += article.currentViews;
-  const repDelta = Math.round((gradeToNumber(review.overall_grade) - 60) / 6);
+  // Immediate ad income on initial 5% views
+  const initialAd = article.currentViews * 0.0025;
+  state.stats.cash += initialAd;
+  state.revToday.ads = (state.revToday.ads || 0) + initialAd;
+
+  const gradeNum = gradeToNumber(review.overall_grade);
+  const repDelta = Math.round((gradeNum - 60) / 6);
   state.stats.reputation = Math.max(0, Math.min(100, state.stats.reputation + repDelta));
-  const performance = (gradeToNumber(review.overall_grade) - 60) / 100;
+
+  // Subscribers: gain if article is good, lose if it's terrible
+  let subDelta = 0;
+  if (gradeNum >= 65) {
+    subDelta = Math.floor((gradeNum - 50) * 1.4 + (review.ratings?.factual_credibility || 50) / 8);
+    if (article.viral) subDelta *= 3;
+  } else if (gradeNum < 50) {
+    subDelta = -Math.floor((50 - gradeNum) * 0.6);
+  }
+  if (subDelta !== 0) {
+    state.stats.subscribers = Math.max(0, (state.stats.subscribers || 0) + subDelta);
+    if (subDelta > 0) toast({ title: "+" + fmtNum(subDelta) + " subscribers", text: "Quality reporting earns readers.", kind: "success" });
+    else toast({ title: fmtNum(subDelta) + " subscribers", text: "Some readers canceled over this piece.", kind: "warn" });
+  }
+
+  const performance = (gradeNum - 60) / 100;
   state.stats.marketShare = Math.max(0.5, Math.min(60, state.stats.marketShare + performance * 1.5));
   state.competitors.forEach(c => { c.share = Math.max(0.5, c.share - performance * (c.share / 100) * 0.6); });
 
@@ -694,7 +875,6 @@ function renderReviewPanel(article) {
   </div>`;
   const comments = (article.comments || []).map((c, i) => `
     <div class="comment" style="animation-delay:${Math.min(i*80, 1200)}ms">
-      <span class="comment-tag ${c.personality || "supportive"}">${c.personality || "—"}</span>
       <div class="comment-body"><span class="comment-author">${escapeHtml(c.author)}</span><span class="comment-text">${escapeHtml(c.text)}</span></div>
     </div>`).join("") || `<div class="comment"><div class="comment-body" style="color:var(--slate);font-style:italic">Comments will stream in as views grow…</div></div>`;
   return `
@@ -1059,23 +1239,39 @@ function cancelShow(id) {
 
 function renderPublicSite() {
   const host = $("#public-articles");
-  if (state.articles.length === 0) { host.innerHTML = `<div class="public-empty" style="grid-column: 1 / -1;">No published stories yet.</div>`; return; }
+  if (state.articles.length === 0) {
+    host.innerHTML = `<div class="public-empty" style="grid-column: 1 / -1;">No published stories yet.</div>
+      <div class="site-banner-ad" style="grid-column:1/-1">Your ad space — publish to start earning.</div>`;
+    return;
+  }
   const sorted = state.articles.slice().reverse();
   const lead = sorted[0], rest = sorted.slice(1, 6);
+  const activeSponsors = SPONSORS.filter(s => state.stats.reputation >= s.minRep);
+  const sponsoredAd = activeSponsors.length ? pick(activeSponsors) : null;
+  const adCopy = sponsoredAd
+    ? `<div class="site-ad"><div class="site-ad-title">${escapeHtml(sponsoredAd.name)}</div><div class="site-ad-tag">${escapeHtml(sponsoredAd.tier)} sponsor of ${escapeHtml(state.newsroom.name)}</div></div>`
+    : `<div class="site-banner-ad">Ad space available — raise reputation to unlock sponsors</div>`;
+  const bannerCopy = sponsoredAd
+    ? `<div class="site-banner-ad live">${escapeHtml(sponsoredAd.name.toUpperCase())} · ${escapeHtml(sponsoredAd.tier)}</div>`
+    : `<div class="site-banner-ad">Available ad slot — 728×90</div>`;
   host.innerHTML = `
     <div class="public-lead" data-id="${lead.id}">
+      ${bannerCopy}
       <div class="public-category">${escapeHtml(lead.review.category || "Local")}</div>
       <h2>${escapeHtml(lead.title)}${lead.viral ? '<span class="viral-badge">VIRAL</span>' : ""}</h2>
       <p class="excerpt">${escapeHtml(lead.body.replace(/\s+/g, " ").slice(0, 240))}…</p>
       <div class="byline">By ${escapeHtml(lead.author)} · ${fmtNum(lead.currentViews)} views</div>
     </div>
-    <div class="public-side"><div class="public-side-list">
-      ${rest.map(a => `<div data-id="${a.id}">
-        <div class="public-category">${escapeHtml(a.review.category || "Local")}</div>
-        <h3>${escapeHtml(a.title)}</h3>
-        <div class="byline">By ${escapeHtml(a.author)} · ${fmtNum(a.currentViews)} views</div>
-      </div>`).join("")}
-    </div></div>`;
+    <div class="public-side">
+      ${adCopy}
+      <div class="public-side-list">
+        ${rest.map(a => `<div data-id="${a.id}">
+          <div class="public-category">${escapeHtml(a.review.category || "Local")}</div>
+          <h3>${escapeHtml(a.title)}</h3>
+          <div class="byline">By ${escapeHtml(a.author)} · ${fmtNum(a.currentViews)} views</div>
+        </div>`).join("")}
+      </div>
+    </div>`;
   $$("#public-articles [data-id]").forEach(el => el.addEventListener("click", () => openArticleModal(el.dataset.id)));
 }
 
@@ -1141,9 +1337,16 @@ function renderOwnerPanel() {
   if (!state.owner) {
     host.innerHTML = `<div class="owner-panel-empty">
       <h3>You are independent.</h3>
-      <p>The newsroom is owned by you. No external pressure, no monthly stipend.</p>
-      <p style="margin-top:14px;color:var(--slate);font-size:13px">If your cash hits zero, you'll be forced to auction the paper to outside buyers.</p>
+      <p>The newsroom is owned by you. No external pressure, no monthly stipend, but no safety net.</p>
+      <p style="margin-top:14px;color:var(--slate);font-size:13px">Putting yourself up for sale voluntarily attracts better bidders than a distressed auction. If your cash hits zero, you'll be forced to auction the paper anyway.</p>
+      <div style="margin-top:18px">
+        <button id="voluntary-auction-btn" class="primary-btn">Put paper up for voluntary auction</button>
+      </div>
     </div>`;
+    $("#voluntary-auction-btn").addEventListener("click", () => {
+      if (!confirm("Put yourself up for sale? You'll receive bids from investors with demands.")) return;
+      openAuction(true);
+    });
     return;
   }
   const o = state.owner;
@@ -1161,7 +1364,46 @@ function renderOwnerPanel() {
       <div class="satisfaction-bar"><div class="satisfaction-fill ${satClass}" style="width:${o.satisfaction}%"></div></div>
       <p style="font-size:12px;color:var(--slate);margin-top:8px">Articles that align with their demand raise satisfaction. If it hits zero, they pull out — and so does the cash.</p>
     </div>
+    <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap">
+      <button id="buyback-btn" class="primary-btn">Buy back independence (${fmtCash(o.bid * 1.5)})</button>
+      <button id="voluntary-auction-btn" class="ghost-btn">Re-auction</button>
+    </div>
   </div>`;
+  $("#buyback-btn").addEventListener("click", () => {
+    const cost = o.bid * 1.5;
+    if (state.stats.cash < cost) { toast({title:"Not enough cash", text:`Need ${fmtCash(cost)} to buy back.`, kind:"warn"}); return; }
+    if (!confirm(`Pay ${fmtCash(cost)} to buy back independence?`)) return;
+    state.stats.cash -= cost;
+    state.owner = null;
+    saveState(); renderStats(); renderOwnerPanel();
+    toast({ title: "Independent again", text: "The newsroom is yours alone.", kind: "success" });
+  });
+  $("#voluntary-auction-btn").addEventListener("click", () => {
+    if (!confirm("Sell to a new owner? Bids will replace your current owner.")) return;
+    openAuction(true);
+  });
+}
+
+function openAuction(voluntary) {
+  $("#bankruptcy-modal").classList.remove("hidden");
+  $("#auction-bidders").classList.add("hidden");
+  $("#auction-bidders").innerHTML = "";
+  // Adjust modal text for voluntary
+  const head = $("#bankruptcy-modal .auction-h");
+  const lede = $("#bankruptcy-modal .auction-lede");
+  const shutdown = $("#ba-shutdown");
+  if (voluntary) {
+    head.textContent = "Voluntary auction";
+    lede.textContent = "Solicit bids from outside investors. Pick the offer you can live with.";
+    shutdown.classList.add("hidden");
+  } else {
+    head.textContent = "📉 BANKRUPTCY";
+    lede.textContent = "You're out of money. The doors are closing — unless you sell.";
+    shutdown.classList.remove("hidden");
+  }
+  // Auto-trigger bid solicitation
+  $("#ba-auction").click();
+  $("#ba-auction").dataset.voluntary = voluntary ? "1" : "0";
 }
 
 function triggerBankruptcy() {
@@ -1179,12 +1421,13 @@ function setupBankruptcyHandlers() {
     location.reload();
   });
   $("#ba-auction").addEventListener("click", async () => {
+    const voluntary = $("#ba-auction").dataset.voluntary === "1";
     $("#ba-auction").disabled = true;
     $("#ba-auction").textContent = "Soliciting bidders…";
     $("#auction-bidders").classList.remove("hidden");
     $("#auction-bidders").innerHTML = `<div><span class="spinner"></span> Brokers calling around…</div>`;
     try {
-      const r = await fetch("/api/owner-bid", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ newsroom: state.newsroom.name }) });
+      const r = await fetch("/api/owner-bid", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ newsroom: state.newsroom.name, voluntary }) });
       const data = await r.json();
       const bidders = data.bidders || [];
       $("#auction-bidders").innerHTML = bidders.map((b, i) => `
@@ -1208,14 +1451,20 @@ function setupBankruptcyHandlers() {
   });
 }
 function acceptBid(b) {
+  const wasBankrupt = state.bankrupt;
   state.owner = {
     name: b.name, type: b.type, personality: b.personality, demand: b.demand,
     bid: b.bid, monthlyBudget: b.monthly_budget || 5000, satisfaction: 55,
   };
-  state.stats.cash = b.bid;
+  // Bankruptcy auction: cash replaced with bid; voluntary: bid added on top
+  state.stats.cash = wasBankrupt ? b.bid : state.stats.cash + b.bid;
   state.bankrupt = false;
   saveState();
   $("#bankruptcy-modal").classList.add("hidden");
+  // Reset button state for next time
+  $("#ba-auction").disabled = false;
+  $("#ba-auction").textContent = "Put the paper up for auction";
+  delete $("#ba-auction").dataset.voluntary;
   renderStats(); renderOwnerPanel();
   toast({ title: "Sold", text: `${b.name} now owns ${state.newsroom.name}.`, kind: "warn", timeout: 6000 });
   checkAchievements();

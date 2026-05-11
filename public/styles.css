@@ -222,14 +222,7 @@ html, body { margin: 0; padding: 0; background: var(--soft); color: var(--ink); 
 .comments-count { background: var(--soft); color: var(--ink); font-size: 11px; padding: 2px 8px; border-radius: 10px; }
 .comment { padding: 8px 0; border-bottom: 1px solid var(--rule); font-size: 14px; animation: fadeUp 0.35s ease both; display: flex; gap: 8px; align-items: flex-start; }
 .comment:last-child { border-bottom: 0; }
-.comment-tag { font-size: 9px; padding: 2px 6px; border-radius: 10px; text-transform: uppercase; letter-spacing: 1px; flex-shrink: 0; font-weight: 700; }
-.comment-tag.supportive { background: #e0f5e6; color: #1f7a3a; }
-.comment-tag.mean { background: #fce4e4; color: #a30000; }
-.comment-tag.oblivious { background: #fff4d6; color: #8a6500; }
-.comment-tag.skeptical { background: #e6eaf5; color: #2a4a8c; }
-.comment-tag.conspiracy { background: #efe0fc; color: #5b2d8a; }
-.comment-tag.troll { background: #444; color: #fff; }
-.comment-tag.specific { background: #e0f0fa; color: #1a4d6e; }
+.comment-tag { display: none; }
 .comment-body { flex: 1; }
 .comment-author { font-weight: 700; color: var(--ink); margin-right: 6px; }
 .comment-text { color: var(--slate); }
@@ -401,3 +394,44 @@ html, body { margin: 0; padding: 0; background: var(--soft); color: var(--ink); 
 .toast-text { color: var(--slate); }
 
 .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid #ccc; border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: -2px; margin-right: 8px; }
+
+/* ---------- Revenue & sponsors ---------- */
+.revenue-panel { display: flex; flex-direction: column; gap: 10px; }
+.rev-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px dashed var(--rule); }
+.rev-row:last-child { border-bottom: 0; }
+.rev-label { font-size: 13px; color: var(--slate); }
+.rev-label strong { color: var(--ink); display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 2px; }
+.rev-amount { font-family: 'Oswald', sans-serif; font-size: 18px; color: var(--green); }
+.rev-amount.neg { color: var(--accent); }
+.rev-total { background: var(--soft); margin: 8px -8px -8px; padding: 12px; border-radius: 3px; display: flex; justify-content: space-between; align-items: center; }
+.rev-total .rev-label { font-weight: 700; color: var(--ink); }
+.rev-total .rev-amount { font-size: 24px; }
+
+.sponsors-panel { display: flex; flex-direction: column; gap: 10px; }
+.sponsor-row { display: flex; align-items: center; gap: 10px; padding: 10px; border: 1px solid var(--rule); border-radius: 3px; background: #fff; }
+.sponsor-logo { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; color: #fff; font-weight: 700; flex-shrink: 0; }
+.sponsor-meta { flex: 1; }
+.sponsor-name { font-weight: 700; font-size: 14px; }
+.sponsor-tier { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--slate); }
+.sponsor-pay { font-family: 'Oswald', sans-serif; font-size: 18px; color: var(--green); }
+.sponsor-locked { background: var(--soft); border: 1px dashed var(--rule); color: var(--slate); }
+.sponsor-locked .sponsor-name { color: var(--slate); }
+
+/* ---------- Public-site ads (simulated) ---------- */
+.site-ad { background: linear-gradient(135deg, #f5f5f5, #ececec); border: 1px solid var(--rule); border-radius: 3px; padding: 14px 16px; margin: 18px 0; position: relative; text-align: center; }
+.site-ad::before { content: 'Sponsored'; position: absolute; top: 4px; right: 6px; font-size: 9px; color: #999; text-transform: uppercase; letter-spacing: 1px; }
+.site-ad-title { font-family: 'Source Serif 4', serif; font-weight: 700; font-size: 16px; color: #333; }
+.site-ad-tag { font-size: 11px; color: #666; margin-top: 4px; text-transform: uppercase; letter-spacing: 1px; }
+.site-banner-ad { display: flex; align-items: center; justify-content: center; min-height: 90px; background: repeating-linear-gradient(45deg, #fafafa, #fafafa 10px, #f0f0f0 10px, #f0f0f0 20px); border: 1px dashed var(--rule); border-radius: 3px; margin: 14px 0; color: #999; font-size: 12px; text-transform: uppercase; letter-spacing: 2px; position: relative; }
+.site-banner-ad.live { background: linear-gradient(135deg, #fff5e0, #ffe9c2); border: 1px solid #d99a3a; color: #8a5800; }
+.site-banner-ad::before { content: 'Ad'; position: absolute; top: 4px; left: 8px; font-size: 9px; color: #999; }
+
+/* ---------- Reporter pitch modal ---------- */
+.pitch-card { animation: fadeUp 0.4s ease; }
+.pitch-quote { font-family: 'Source Serif 4', serif; font-style: italic; font-size: 18px; line-height: 1.5; background: var(--soft); border-left: 4px solid var(--accent); padding: 14px 16px; margin: 12px 0; }
+.pitch-reporter { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.pitch-reporter .avatar { width: 48px; height: 48px; font-size: 16px; }
+.pitch-reporter-meta strong { display: block; font-size: 16px; }
+.pitch-reporter-meta span { font-size: 12px; color: var(--slate); text-transform: uppercase; letter-spacing: 1px; }
+.pitch-actions { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+
