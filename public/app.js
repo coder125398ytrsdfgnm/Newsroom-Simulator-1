@@ -1,6 +1,6 @@
 "use strict";
 
-const STORAGE_KEY = "newsroom-sim-state-v3";
+const STORAGE_KEY = "newsroom-sim-state-v4";
 
 /* ==================================================================== */
 /*                          LOGO LIBRARY (SVG)                          */
@@ -106,7 +106,7 @@ let gameLoopHandle = null;
 
 function defaultState() {
   return {
-    version: 3,
+    version: 4,
     onboarded: false,
     newsroom: {
       name: "The Daily",
@@ -119,23 +119,32 @@ function defaultState() {
     },
     player: { name: "You" },
     stats: { cash: 5000, reputation: 50, totalViews: 0, marketShare: 5, subscribers: 0 },
-    settings: { density: 50, speed: 2 },
+    settings: { density: 50, speed: 3 },
     time: { day: 1, hour: 9, minute: 0 },
     reporters: [],
     pendingApprovals: [],
     pendingPitches: [],
     articles: [],
     candidatePool: [],
-    cities: CITIES.map(c => ({ ...c, owned: false })),
-    competitors: COMPETITORS_BASE.map(c => ({ ...c, share: c.baseShare, latest: null })),
+    cities: CITIES.map(c => ({ ...c, owned: false, bureauRevenue: 0, bureauArticles: 0 })),
+    competitors: COMPETITORS_BASE.map(c => ({
+      ...c, share: c.baseShare, latest: null,
+      totalShares: 100, sharePrice: randInt(50, 200), playerShares: 0,
+      subjugated: false,
+    })),
     competitorHeadlines: [],
     breaking: null,
     achievements: {},
     tv: { founded: false, name: "", logoId: "satellite", accent: "#cc0000", shows: [] },
     owner: null,
     bankrupt: false,
-    // Revenue ledger - what happened today
-    revToday: { ads: 0, subs: 0, sponsors: 0, tv: 0, day: 1 },
+    revToday: { ads: 0, subs: 0, sponsors: 0, tv: 0, loans: 0, bureaus: 0, day: 1 },
+    // New in v4
+    loans: [],
+    marketing: { active: false, tier: null, articlesLeft: 0, bonusPct: 0, subBonus: 0 },
+    activeSponsors: ["indie"],
+    polls: [],
+    messages: [],
   };
 }
 
@@ -144,8 +153,12 @@ function loadState() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return defaultState();
     const parsed = JSON.parse(raw);
-    if (parsed.version !== 3) return defaultState();
+    if (parsed.version !== 4) return defaultState();
     const def = defaultState();
+    const competitors = (parsed.competitors || def.competitors).map(c => {
+      const d = def.competitors.find(x => x.id === c.id) || {};
+      return { ...d, ...c };
+    });
     return {
       ...def, ...parsed,
       newsroom: { ...def.newsroom, ...(parsed.newsroom || {}) },
@@ -154,14 +167,22 @@ function loadState() {
       time: { ...def.time, ...(parsed.time || {}) },
       tv: { ...def.tv, ...(parsed.tv || {}) },
       cities: mergeCities(parsed.cities, def.cities),
-      competitors: parsed.competitors || def.competitors,
+      competitors,
       achievements: parsed.achievements || {},
+      loans: parsed.loans || [],
+      marketing: { ...def.marketing, ...(parsed.marketing || {}) },
+      activeSponsors: parsed.activeSponsors || def.activeSponsors,
+      polls: parsed.polls || [],
+      messages: parsed.messages || [],
     };
   } catch { return defaultState(); }
 }
 function mergeCities(saved, defs) {
   if (!Array.isArray(saved)) return defs;
-  return defs.map(d => { const s = saved.find(x => x.id === d.id); return s ? { ...d, owned: !!s.owned } : d; });
+  return defs.map(d => {
+    const s = saved.find(x => x.id === d.id);
+    return s ? { ...d, owned: !!s.owned, bureauRevenue: s.bureauRevenue || 0, bureauArticles: s.bureauArticles || 0 } : d;
+  });
 }
 function saveState() { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
 
@@ -283,9 +304,25 @@ function obStep(n) {
   $("#ob-prev").disabled = n === 1;
   $("#ob-next").textContent = n === 4 ? "Open the doors" : "Next →";
 }
+const BAD_WORDS = /\b(ass|arse|shit|fuck|bitch|cunt|dick|cock|pussy|bastard|crap|piss|damn)\b/i;
+function validateText(val, label, min = 2) {
+  if (!val || val.trim().length < min) return `${label} must be at least ${min} characters.`;
+  if (BAD_WORDS.test(val)) return `${label} contains inappropriate language.`;
+  if (/^(.)\1{4,}$/.test(val.trim())) return `${label} looks like gibberish — try a real name.`;
+  return null;
+}
+
 function obNext() {
   if (obState.step === 1) {
-    if (!$("#ob-player").value.trim() || !$("#ob-newsroom").value.trim()) { toast({title:"Required", text:"Fill in name and newsroom.", kind:"warn"}); return; }
+    const playerVal = $("#ob-player").value.trim();
+    const roomVal = $("#ob-newsroom").value.trim();
+    const mottoVal = $("#ob-motto").value.trim();
+    const playerErr = validateText(playerVal, "Your name", 2);
+    const roomErr = validateText(roomVal, "Newsroom name", 3);
+    const mottoErr = mottoVal ? validateText(mottoVal, "Tagline", 4) : null;
+    if (playerErr) { toast({title:"Invalid name", text:playerErr, kind:"warn"}); return; }
+    if (roomErr) { toast({title:"Invalid newsroom name", text:roomErr, kind:"warn"}); return; }
+    if (mottoErr) { toast({title:"Invalid tagline", text:mottoErr, kind:"warn"}); return; }
     obStep(2);
   } else if (obState.step === 2) {
     if (!obState.logoId) { toast({title:"Pick a logo", text:"Choose one of the logos.", kind:"warn"}); return; }
@@ -360,11 +397,15 @@ function advanceMinute() {
 
 function handleHourly() {
   state.competitors.forEach(c => {
-    c.share = Math.max(0.5, c.share + (Math.random() - 0.5) * 0.3);
+    if (!c.subjugated) c.share = Math.max(0.5, c.share + (Math.random() - 0.5) * 0.3);
   });
   // Occasionally a reporter pitches you a story
   if (state.reporters.length > 0 && state.pendingPitches.length < 3 && Math.random() < 0.18) {
     rollReporterPitch();
+  }
+  // Owner sends a message if satisfaction is noteworthy
+  if (state.owner && Math.random() < 0.08) {
+    rollShareholderMessage();
   }
 }
 
@@ -429,17 +470,25 @@ function handleDaily() {
   // Reset today's revenue ledger
   state.revToday = { ads: 0, subs: 0, sponsors: 0, tv: 0, day: state.time.day };
 
-  // --- Subscriber revenue ($1.5/sub/day) ---
-  const subRev = (state.stats.subscribers || 0) * 1.5;
+  // --- Subscriber revenue ($5/sub/day) ---
+  const subRev = (state.stats.subscribers || 0) * 5;
   state.stats.cash += subRev;
   state.revToday.subs = subRev;
 
-  // --- Sponsor revenue ---
+  // --- Sponsor revenue (only sponsors player has actively signed) ---
   let sponsorRev = 0;
+  const activeSponsorIds = state.activeSponsors || [];
   for (const s of SPONSORS) {
-    if (state.stats.reputation >= s.minRep) {
-      sponsorRev += s.daily;
+    if (!activeSponsorIds.includes(s.id)) continue;
+    if (state.stats.reputation < s.minRep) {
+      // Sponsor drops out if rep falls below their floor
+      if (s.loseAt >= 0 && state.stats.reputation < s.loseAt) {
+        state.activeSponsors = state.activeSponsors.filter(id => id !== s.id);
+        toast({ title: `${s.name} pulled out`, text: `Reputation too low — sponsor contract terminated.`, kind: "warn" });
+        continue;
+      }
     }
+    sponsorRev += s.daily;
   }
   state.stats.cash += sponsorRev;
   state.revToday.sponsors = sponsorRev;
@@ -472,7 +521,7 @@ function handleDaily() {
   // Daily digest toast
   const totalRev = subRev + sponsorRev + state.revToday.tv;
   if (state.time.day > 1 && totalRev > 0) {
-    toast({ title: `Day ${state.time.day} payout`, text: `${fmtCash(totalRev)} from subs, sponsors, TV.`, kind: "success" });
+    toast({ title: `Day ${state.time.day} payout`, text: `${fmtCash(totalRev)} from subs, sponsors, TV, bureaus.`, kind: "success" });
   }
 
   // Subscriber churn if reputation tanks
@@ -482,13 +531,56 @@ function handleDaily() {
     if (churn > 0) toast({ title: "Subscriber churn", text: `${fmtNum(churn)} cancellations.`, kind: "warn" });
   }
 
-  // Refresh candidate pool occasionally
+  // --- Loan interest payments ---
+  let loanInterestTotal = 0;
+  for (const loan of state.loans) {
+    const interest = Math.round(loan.remaining * (loan.rate / 100));
+    loan.remaining += interest;
+    loan.accruedDays = (loan.accruedDays || 0) + 1;
+    loanInterestTotal += interest;
+  }
+  if (loanInterestTotal > 0) {
+    state.stats.cash -= loanInterestTotal;
+    state.revToday.loans = -loanInterestTotal;
+    if (loanInterestTotal > 200) toast({ title: "Loan interest", text: `-${fmtCash(loanInterestTotal)} due on outstanding loans.`, kind: "warn" });
+  }
+
+  // --- Bureau passive revenue ---
+  let bureauRev = 0;
+  state.cities.filter(c => c.owned && c.id !== state.newsroom.hqCityId).forEach(c => {
+    const rev = randInt(40, 120);
+    bureauRev += rev;
+    c.bureauRevenue = (c.bureauRevenue || 0) + rev;
+    // Occasional bureau-driven article in approvals
+    if (state.reporters.length && Math.random() < 0.15) {
+      const r = pick(state.reporters);
+      assignStory(r.id, { tip: `Local bureau story from ${c.name}`, beat: pick(c.unlocks), fromBureau: c.id });
+    }
+  });
+  if (bureauRev > 0) { state.stats.cash += bureauRev; state.revToday.bureaus = bureauRev; }
+
+  // --- TV show ratings history ---
+  if (state.tv.founded) {
+    state.tv.shows.forEach(sh => {
+      if (!sh.ratingHistory) sh.ratingHistory = [];
+      sh.ratingHistory.push(Math.round(sh.rating));
+      if (sh.ratingHistory.length > 30) sh.ratingHistory.shift();
+    });
+  }
+
+  // --- Competitor share price drift ---
+  state.competitors.forEach(c => {
+    const drift = (Math.random() - 0.48) * 8;
+    c.sharePrice = Math.max(5, Math.round(c.sharePrice + drift));
+  });
+
+  // --- Refresh candidate pool occasionally ---
   if (Math.random() < 0.3) state.candidatePool = generateCandidates(3);
 
-  // Refresh competitor wire
+  // --- Refresh competitor wire ---
   refreshCompetitorWire();
   saveState();
-  if (state.stats.cash <= 0) triggerBankruptcy();
+  if (state.stats.cash <= 0 && (state.loans.length === 0 || state.stats.cash < -10000)) triggerBankruptcy();
 }
 
 function renderClock() {
@@ -512,8 +604,10 @@ function updateLiveArticles() {
       const delta = newViews - a.currentViews;
       a.currentViews = newViews;
       state.stats.totalViews += delta;
-      // Ad revenue: $0.0025 per view, accumulates immediately
-      const adIncome = delta * 0.0025;
+      // Ad revenue: $0.10 per view. Bureau ownership multiplier.
+      const bureauMult = 1 + state.cities.filter(c => c.owned).length * 0.05;
+      const marketingMult = state.marketing.active ? (1 + state.marketing.bonusPct / 100) : 1;
+      const adIncome = delta * 0.10 * bureauMult * marketingMult;
       state.stats.cash += adIncome;
       state.revToday.ads = (state.revToday.ads || 0) + adIncome;
       changed = true;
@@ -623,7 +717,23 @@ function setupNav() {
     if (v === "studio") renderStudio();
     if (v === "owner") renderOwnerPanel();
     if (v === "achievements") renderAchievements();
+    if (v === "finance") renderFinancePanel();
   }));
+}
+
+function setupSpeedButtons() {
+  const btns = $$("#speed-controls .speed-btn");
+  function syncActive() {
+    const spd = state.settings.speed;
+    btns.forEach(b => b.classList.toggle("active", +b.dataset.speed === spd));
+  }
+  btns.forEach(b => b.addEventListener("click", () => {
+    state.settings.speed = +b.dataset.speed;
+    syncActive();
+    saveState();
+    toast({ title: `Speed: ${b.dataset.speed}×`, text: "Game speed updated.", timeout: 1500 });
+  }));
+  syncActive();
 }
 
 function renderDashboard() {
@@ -691,50 +801,87 @@ function renderDashboard() {
 function renderRevenuePanel() {
   const host = $("#revenue-panel");
   if (!host) return;
-  const rev = state.revToday || { ads: 0, subs: 0, sponsors: 0, tv: 0 };
-  const subDaily = (state.stats.subscribers || 0) * 1.5;
-  const activeSponsors = SPONSORS.filter(s => state.stats.reputation >= s.minRep);
+  const rev = state.revToday || { ads: 0, subs: 0, sponsors: 0, tv: 0, bureaus: 0, loans: 0 };
+  const subDaily = (state.stats.subscribers || 0) * 5;
+  const activeSponsorIds = state.activeSponsors || [];
+  const activeSponsors = SPONSORS.filter(s => activeSponsorIds.includes(s.id));
   const sponsorDaily = activeSponsors.reduce((sum, s) => sum + s.daily, 0);
   const tvActive = state.tv.founded ? state.tv.shows.length : 0;
-  const projectedDaily = subDaily + sponsorDaily;
-  const total = rev.ads + rev.subs + rev.sponsors + rev.tv;
+  const totalLoansOwed = (state.loans || []).reduce((s, l) => s + l.remaining, 0);
+  const loanInterest = rev.loans || 0;
+  const total = rev.ads + rev.subs + rev.sponsors + rev.tv + (rev.bureaus || 0) + loanInterest;
   host.innerHTML = `
     <div class="rev-row">
-      <div class="rev-label"><strong>Ad revenue</strong>$0.0025 per view (continuous)</div>
+      <div class="rev-label"><strong>Ad revenue</strong>$0.10/view · ${state.cities.filter(c=>c.owned).length} bureaus = ${(1+state.cities.filter(c=>c.owned).length*0.05).toFixed(2)}× multiplier</div>
       <div class="rev-amount">${fmtCash(rev.ads)}</div>
     </div>
     <div class="rev-row">
-      <div class="rev-label"><strong>Subscribers</strong>${fmtNum(state.stats.subscribers || 0)} × $1.50/day</div>
-      <div class="rev-amount">${fmtCash(rev.subs)} <span style="color:var(--slate);font-size:11px">/ ${fmtCash(subDaily)} per day</span></div>
+      <div class="rev-label"><strong>Subscribers</strong>${fmtNum(state.stats.subscribers || 0)} × $5/day</div>
+      <div class="rev-amount">${fmtCash(rev.subs)} <span style="color:var(--slate);font-size:11px">/ ${fmtCash(subDaily)}/day</span></div>
     </div>
     <div class="rev-row">
-      <div class="rev-label"><strong>Sponsors</strong>${activeSponsors.length} active sponsor${activeSponsors.length === 1 ? "" : "s"}</div>
-      <div class="rev-amount">${fmtCash(rev.sponsors)} <span style="color:var(--slate);font-size:11px">/ ${fmtCash(sponsorDaily)} per day</span></div>
+      <div class="rev-label"><strong>Sponsors</strong>${activeSponsors.length} active · <a href="#" id="rev-sponsor-link" style="color:var(--accent);">manage</a></div>
+      <div class="rev-amount">${fmtCash(rev.sponsors)} <span style="color:var(--slate);font-size:11px">/ ${fmtCash(sponsorDaily)}/day</span></div>
     </div>
     <div class="rev-row">
       <div class="rev-label"><strong>TV station</strong>${tvActive} show${tvActive === 1 ? "" : "s"} on the air</div>
       <div class="rev-amount">${fmtCash(rev.tv)}</div>
     </div>
+    <div class="rev-row">
+      <div class="rev-label"><strong>Bureaus</strong>${state.cities.filter(c=>c.owned&&c.id!==state.newsroom.hqCityId).length} remote bureaus</div>
+      <div class="rev-amount">${fmtCash(rev.bureaus || 0)}</div>
+    </div>
+    ${totalLoansOwed > 0 ? `<div class="rev-row">
+      <div class="rev-label"><strong>Loan interest</strong>${fmtCash(totalLoansOwed)} outstanding</div>
+      <div class="rev-amount" style="color:var(--accent)">${fmtCash(loanInterest)}</div>
+    </div>` : ""}
     <div class="rev-total">
-      <div class="rev-label">Earned today (Day ${state.time.day})</div>
-      <div class="rev-amount">${fmtCash(total)}</div>
+      <div class="rev-label">Net today (Day ${state.time.day})</div>
+      <div class="rev-amount" style="${total < 0 ? "color:var(--accent)" : ""}">${fmtCash(total)}</div>
     </div>`;
+  const lnk = host.querySelector("#rev-sponsor-link");
+  if (lnk) lnk.addEventListener("click", e => { e.preventDefault(); $$(".nav-btn[data-view='finance']")[0]?.click(); });
 }
 
 function renderSponsorsPanel() {
   const host = $("#sponsors-panel");
   if (!host) return;
+  const activeSponsorIds = state.activeSponsors || [];
   host.innerHTML = SPONSORS.map(s => {
-    const active = state.stats.reputation >= s.minRep;
-    return `<div class="sponsor-row ${active ? "" : "sponsor-locked"}">
+    const eligible = state.stats.reputation >= s.minRep;
+    const active = activeSponsorIds.includes(s.id);
+    const locked = !eligible;
+    let actionBtn = "";
+    if (locked) {
+      actionBtn = `<button class="sponsor-action-btn" disabled title="Need ${s.minRep} rep">Locked</button>`;
+    } else if (active) {
+      actionBtn = `<button class="sponsor-action-btn terminate" data-id="${s.id}">Terminate</button>`;
+    } else {
+      actionBtn = `<button class="sponsor-action-btn sign" data-id="${s.id}">Sign contract</button>`;
+    }
+    return `<div class="sponsor-row ${locked ? "sponsor-locked" : ""}">
       <div class="sponsor-logo" style="background:${s.color}">${s.name[0]}</div>
       <div class="sponsor-meta">
-        <div class="sponsor-name">${escapeHtml(s.name)}${active ? "" : " · locked"}</div>
-        <div class="sponsor-tier">${s.tier} · ${active ? "active" : `needs rep ${s.minRep}`}</div>
+        <div class="sponsor-name">${escapeHtml(s.name)}${active ? ' <span class="live-badge">ACTIVE</span>' : ""}</div>
+        <div class="sponsor-tier">${s.tier} · ${locked ? `needs rep ${s.minRep}` : eligible ? `${fmtCash(s.daily)}/day` : ""}</div>
       </div>
-      <div class="sponsor-pay">${fmtCash(s.daily)}<span style="font-size:10px;color:var(--slate);display:block;text-align:right">per day</span></div>
+      ${actionBtn}
     </div>`;
   }).join("");
+  host.querySelectorAll(".sign").forEach(btn => btn.addEventListener("click", () => {
+    const s = SPONSORS.find(x => x.id === btn.dataset.id);
+    if (!s) return;
+    if (!state.activeSponsors.includes(s.id)) state.activeSponsors.push(s.id);
+    saveState(); renderSponsorsPanel();
+    toast({ title: "Sponsor signed", text: `${s.name} · ${fmtCash(s.daily)}/day starts tomorrow.`, kind: "success" });
+  }));
+  host.querySelectorAll(".terminate").forEach(btn => btn.addEventListener("click", () => {
+    const s = SPONSORS.find(x => x.id === btn.dataset.id);
+    if (!s || !confirm(`Terminate contract with ${s.name}?`)) return;
+    state.activeSponsors = state.activeSponsors.filter(id => id !== s.id);
+    saveState(); renderSponsorsPanel();
+    toast({ title: "Contract ended", text: `${s.name} is no longer your sponsor.`, kind: "warn" });
+  }));
 }
 
 /* ==================================================================== */
@@ -758,20 +905,35 @@ async function onPublish() {
   btn.disabled = true;
   const result = $("#writer-result");
   result.classList.remove("hidden");
-  result.innerHTML = `<div><span class="spinner"></span> Sending to wire…</div>`;
+  result.innerHTML = `<div class="ai-reviewing">
+    <span class="spinner"></span>
+    <p><strong>AI critic is reading your article…</strong><br>This takes 10–30 seconds. The review will be real.</p>
+  </div>`;
 
-  // get instant baseline review
+  // AI-only review — no heuristic baseline shown
   let review;
   try {
-    const r = await fetch("/api/review", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title, body, author: state.player.name, newsroom: state.newsroom.name }) });
+    const r = await fetch("/api/review-ai", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title, body }) });
     review = await r.json();
   } catch (e) {
-    toast({ title: "Review failed", text: e.message, kind: "warn" });
+    toast({ title: "Review failed", text: "AI unreachable. Try again.", kind: "warn" });
     btn.disabled = false;
+    result.classList.add("hidden");
     return;
   }
 
+  // Apply marketing multiplier to estimated_views
+  if (state.marketing.active && state.marketing.articlesLeft > 0) {
+    review.estimated_views = Math.round(review.estimated_views * (1 + state.marketing.bonusPct / 100));
+    state.marketing.articlesLeft -= 1;
+    if (state.marketing.articlesLeft <= 0) {
+      state.marketing.active = false;
+      toast({ title: "Campaign ended", text: "Marketing boost has run its course.", kind: "info" });
+    }
+  }
+
   const article = createArticle({ title, body, author: state.player.name, review });
+  article.aiReviewed = true;
   result.innerHTML = renderReviewPanel(article);
   animateBars(result);
   $("#writer-title").value = "";
@@ -779,11 +941,10 @@ async function onPublish() {
   $("#writer-wordcount").textContent = "0 words";
   btn.disabled = false;
   toast({ title: "Published", text: `${title.slice(0, 40)} — Grade ${review.overall_grade}`, kind: "success" });
-
-  // upgrade with AI in background
-  upgradeArticleWithAI(article);
-  // initial 3 comments
+  // initial 3 comments and optional poll
   fetchMoreComments(article, 3);
+  if (Math.random() < 0.5) fetchArticlePoll(article);
+  saveState();
 }
 
 async function upgradeArticleWithAI(article) {
@@ -821,7 +982,7 @@ function createArticle({ title, body, author, review }) {
   state.articles.push(article);
   state.stats.totalViews += article.currentViews;
   // Immediate ad income on initial 5% views
-  const initialAd = article.currentViews * 0.0025;
+  const initialAd = article.currentViews * 0.10;
   state.stats.cash += initialAd;
   state.revToday.ads = (state.revToday.ads || 0) + initialAd;
 
@@ -995,7 +1156,9 @@ async function assignStory(id, opts = {}) {
     const draft = await resp.json();
     const idx = state.pendingApprovals.findIndex(p => p.id === draftingId);
     if (idx !== -1) {
-      state.pendingApprovals[idx] = { id: draftingId, status: "ready", reporterId: r.id, reporterName: r.name, title: draft.title, body: draft.body, category: draft.category || "Local" };
+      state.pendingApprovals[idx] = { id: draftingId, status: "ready", reporterId: r.id, reporterName: r.name, title: draft.title, body: draft.body, category: draft.category || "Local", fromBureau: opts.fromBureau || null };
+      // Track bureau article counter
+      if (opts.fromBureau) { const bureau = state.cities.find(c => c.id === opts.fromBureau); if (bureau) bureau.bureauArticles = (bureau.bureauArticles || 0) + 1; }
       saveState(); renderApprovals(); renderStats();
       toast({ title: "Draft filed", text: `${r.name}: ${draft.title.slice(0, 50)}…` });
     }
@@ -1025,16 +1188,22 @@ async function approvePending(id) {
   const p = state.pendingApprovals.find(x => x.id === id);
   if (!p || p.status !== "ready") return;
   const btn = document.querySelector(`.approve-btn[data-id="${id}"]`);
-  if (btn) { btn.disabled = true; btn.textContent = "Reviewing…"; }
+  if (btn) { btn.disabled = true; btn.textContent = "AI reviewing…"; }
   try {
-    const r = await fetch("/api/review", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: p.title, body: p.body, author: p.reporterName }) });
+    const r = await fetch("/api/review-ai", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: p.title, body: p.body }) });
     const review = await r.json();
+    if (state.marketing.active && state.marketing.articlesLeft > 0) {
+      review.estimated_views = Math.round(review.estimated_views * (1 + state.marketing.bonusPct / 100));
+      state.marketing.articlesLeft -= 1;
+      if (state.marketing.articlesLeft <= 0) { state.marketing.active = false; toast({ title: "Campaign ended", text: "Marketing boost has run its course.", kind: "info" }); }
+    }
     const article = createArticle({ title: p.title, body: p.body, author: p.reporterName, review });
+    article.aiReviewed = true;
     state.pendingApprovals = state.pendingApprovals.filter(x => x.id !== id);
     saveState(); renderApprovals();
-    upgradeArticleWithAI(article);
     fetchMoreComments(article, 3);
-    toast({ title: "Published", text: `Grade ${review.overall_grade}`, kind: "success" });
+    if (Math.random() < 0.4) fetchArticlePoll(article);
+    toast({ title: "Published", text: `${p.reporterName}: Grade ${review.overall_grade}`, kind: "success" });
   } catch (e) {
     toast({ title: "Review failed", text: e.message, kind: "warn" });
     if (btn) { btn.disabled = false; btn.textContent = "Approve & Publish"; }
@@ -1074,12 +1243,20 @@ function showCityInfo(id) {
   if (!c) return;
   const info = $("#map-info");
   const isHQ = c.id === state.newsroom.hqCityId;
+  const bureauStats = c.owned && !isHQ ? `<div class="bureau-stats-list">
+    <div class="bureau-stat-row"><span class="bureau-stat-label">Revenue generated</span><span class="bureau-stat-value">${fmtCash(c.bureauRevenue || 0)}</span></div>
+    <div class="bureau-stat-row"><span class="bureau-stat-label">Articles filed</span><span class="bureau-stat-value">${c.bureauArticles || 0}</span></div>
+    <div class="bureau-stat-row"><span class="bureau-stat-label">Daily passive income</span><span class="bureau-stat-value">$40–$120</span></div>
+    <div class="bureau-stat-row"><span class="bureau-stat-label">Ad revenue boost</span><span class="bureau-stat-value">+5% per bureau</span></div>
+  </div>` : "";
   info.innerHTML = `
     <h3>${c.flag} ${escapeHtml(c.name)} ${isHQ ? '<span class="skill-pill" style="background:gold">HQ</span>' : ""}</h3>
-    <p>${escapeHtml(c.desc)} <strong>Unlocks:</strong> ${c.unlocks.join(", ")}</p>
+    <p style="margin:4px 0 8px;">${escapeHtml(c.desc)}</p>
+    <p style="margin:0 0 6px;font-size:12px;"><strong>Unlocks beats:</strong> ${c.unlocks.join(", ")}</p>
+    ${bureauStats}
     <div class="map-info-row">
       ${c.owned
-        ? '<span class="skill-pill" style="background:var(--green);color:#fff">Operational</span>'
+        ? '<span class="skill-pill" style="background:var(--green);color:#fff">Bureau operational</span>'
         : `<button class="primary-btn" id="buy-bureau-btn">Open bureau · ${fmtCash(c.cost)}</button>`
       }
       <button class="ghost-btn" id="close-map-info">Close</button>
@@ -1163,56 +1340,111 @@ function renderStudio() {
   $("#add-show").addEventListener("click", showNewShowDialog);
   const grid = $("#shows-grid");
   if (state.tv.shows.length === 0) grid.innerHTML = `<div class="public-empty">No shows on the air. Click <strong>+ New show</strong> to launch.</div>`;
-  else grid.innerHTML = state.tv.shows.map(sh => `
-    <div class="show-card">
-      <div class="show-slot">${escapeHtml(sh.slot)}</div>
+  else grid.innerHTML = state.tv.shows.map(sh => {
+    const hist = sh.ratingHistory || [];
+    const sparkline = buildSparkline(hist);
+    return `<div class="show-card">
+      <div class="show-slot">${escapeHtml(sh.slot)} · ${escapeHtml(sh.format)}</div>
       <div class="show-title">${escapeHtml(sh.title)}</div>
-      <div class="show-host">Hosted by ${escapeHtml(sh.host)} · ${escapeHtml(sh.format)}</div>
+      <div class="show-host">Host: <strong>${escapeHtml(sh.host)}</strong></div>
       <div class="show-ratings">
         <div class="show-rating">${Math.round(sh.rating)}</div>
         <div class="show-trend trend-${sh.trend}">${sh.trend === "rising" ? "↗" : sh.trend === "falling" ? "↘" : "→"} ${sh.trend}</div>
       </div>
-      <div class="comp-meta">
-        <span>${escapeHtml(sh.verdict || "")}</span>
-      </div>
-      <div style="margin-top:10px;display:flex;gap:6px;">
+      ${hist.length > 1 ? `<div class="show-graph">${sparkline}</div>` : ""}
+      ${sh.verdict ? `<div class="comp-meta" style="font-style:italic;font-family:'Source Serif 4',serif;font-size:13px;">"${escapeHtml(sh.verdict)}"</div>` : ""}
+      <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap;">
         <button class="ghost-btn promote-show" data-id="${sh.id}">Promote ($1k)</button>
+        <button class="ghost-btn invest-show" data-id="${sh.id}">Invest ($3k)</button>
         <button class="reject-btn cancel-show" data-id="${sh.id}">Cancel</button>
       </div>
-    </div>`).join("");
+    </div>`;
+  }).join("");
   $$(".promote-show").forEach(b => b.addEventListener("click", () => promoteShow(b.dataset.id)));
+  $$(".invest-show").forEach(b => b.addEventListener("click", () => investShow(b.dataset.id)));
   $$(".cancel-show").forEach(b => b.addEventListener("click", () => cancelShow(b.dataset.id)));
+}
+
+function buildSparkline(history) {
+  if (!history || history.length < 2) return "";
+  const W = 200, H = 48, pad = 4;
+  const min = Math.max(0, Math.min(...history) - 5);
+  const max = Math.min(100, Math.max(...history) + 5);
+  const range = max - min || 1;
+  const pts = history.map((v, i) => {
+    const x = pad + (i / (history.length - 1)) * (W - pad * 2);
+    const y = H - pad - ((v - min) / range) * (H - pad * 2);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  const polyline = pts.join(" ");
+  const areaClose = `${pts[pts.length-1].split(",")[0]},${H-pad} ${pts[0].split(",")[0]},${H-pad}`;
+  return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
+    <polyline class="sparkline-area" points="${polyline} ${areaClose}"/>
+    <polyline class="sparkline" points="${polyline}"/>
+    <text x="4" y="${H-2}" font-size="9" fill="#999">${history[0]}</text>
+    <text x="${W-4}" y="${H-2}" font-size="9" fill="var(--accent)" text-anchor="end">${history[history.length-1]}</text>
+  </svg>`;
 }
 
 function showNewShowDialog() {
   if (state.stats.cash < 3500) { toast({title:"Not enough cash", text:"$3,500 to launch a show.", kind:"warn"}); return; }
   const slots = ["Morning","Midday","Primetime","Late Night","Weekend"];
-  const formats = ["News","Talk","Debate","Interview","Investigations"];
-  const title = prompt("Show title?", `${pick(["The","On","Inside","Late"])} ${pick(["Hour","Edition","Report","Brief","Beat"])}`) || "Untitled";
-  const slot = prompt(`Slot? (${slots.join("/")}):`, "Primetime") || "Primetime";
-  const format = prompt(`Format? (${formats.join("/")}):`, "News") || "News";
-  let host;
-  if (state.reporters.length && confirm("Use one of your reporters as host? (OK = yes, Cancel = hire external talent)")) {
-    host = pick(state.reporters).name;
-  } else {
-    host = `${pick(FIRST_NAMES)} ${pick(LAST_NAMES)}`;
-  }
-  state.stats.cash -= 3500;
-  const show = { id: uid(), title, slot, format, host, rating: randInt(35, 60), trend: pick(["rising","steady","falling"]), verdict: "" };
-  state.tv.shows.push(show);
-  saveState();
-  renderStudio(); renderStats();
-  toast({ title: "Show launched", text: `${title} (${slot}) starring ${host}.`, kind: "success" });
-  // ask AI for verdict
-  fetch("/api/show-review", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ showTitle: title, hostName: host, format, viewership: "new launch" }) })
-    .then(r => r.json()).then(j => {
-      if (j && typeof j.rating === "number") {
-        show.rating = j.rating;
-        show.verdict = j.verdict;
-        show.trend = j.trend || "steady";
-        saveState(); renderStudio(); checkAchievements();
-      }
-    }).catch(() => {});
+  const formats = ["News","Talk","Debate","Interview","Investigations","Documentary","Live Event","Sports Desk"];
+  const reporterOpts = state.reporters.map(r => `<option value="${escapeHtml(r.name)}">${escapeHtml(r.name)} (${escapeHtml(r.beat)})</option>`).join("");
+  const externalName = `${pick(FIRST_NAMES)} ${pick(LAST_NAMES)}`;
+  const defaultTitle = `${pick(["The","On","Inside","Late Night","Breaking"])} ${pick(["Hour","Edition","Report","Brief","Beat","Pulse","Wire"])}`;
+  const modalBody = `<div class="modal-body">
+    <h2 style="font-family:'Oswald',sans-serif;letter-spacing:2px;text-transform:uppercase;">Launch a New Show</h2>
+    <p style="color:var(--slate);margin-bottom:18px;">$3,500 upfront. AI will rate it after launch.</p>
+    <label class="step-h">Show Title</label>
+    <input id="ns-title" type="text" value="${defaultTitle}" maxlength="60" style="display:block;width:100%;padding:10px 12px;font-size:15px;border:1px solid var(--rule);border-radius:2px;font-family:inherit;margin-bottom:14px;"/>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
+      <div>
+        <label class="step-h">Time Slot</label>
+        <select id="ns-slot" style="width:100%;padding:8px 10px;border:1px solid var(--rule);border-radius:2px;font-family:inherit;">
+          ${slots.map(s => `<option ${s==="Primetime"?"selected":""}>${s}</option>`).join("")}
+        </select>
+      </div>
+      <div>
+        <label class="step-h">Format</label>
+        <select id="ns-format" style="width:100%;padding:8px 10px;border:1px solid var(--rule);border-radius:2px;font-family:inherit;">
+          ${formats.map(f => `<option>${f}</option>`).join("")}
+        </select>
+      </div>
+    </div>
+    <label class="step-h">Host</label>
+    <select id="ns-host" style="width:100%;padding:8px 10px;border:1px solid var(--rule);border-radius:2px;font-family:inherit;margin-bottom:18px;">
+      <option value="${externalName}">Hire external: ${externalName}</option>
+      ${reporterOpts}
+    </select>
+    <div style="display:flex;gap:10px;">
+      <button id="ns-launch" class="primary-btn">Launch show ($3,500)</button>
+      <button class="reject-btn" data-close>Cancel</button>
+    </div>
+  </div>`;
+  $("#modal-body").innerHTML = modalBody;
+  $("#modal").classList.remove("hidden");
+  $("#ns-launch").addEventListener("click", () => {
+    const title = $("#ns-title").value.trim() || defaultTitle;
+    const slot = $("#ns-slot").value;
+    const format = $("#ns-format").value;
+    const host = $("#ns-host").value;
+    state.stats.cash -= 3500;
+    const show = { id: uid(), title, slot, format, host, rating: randInt(35, 60), trend: pick(["rising","steady","falling"]), verdict: "", ratingHistory: [] };
+    state.tv.shows.push(show);
+    saveState(); renderStats();
+    $("#modal").classList.add("hidden");
+    renderStudio();
+    toast({ title: "Show launched", text: `${title} (${slot}) with ${host}.`, kind: "success" });
+    fetch("/api/show-review", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ showTitle: title, hostName: host, format, viewership: "new launch" }) })
+      .then(r => r.json()).then(j => {
+        if (j && typeof j.rating === "number") {
+          show.rating = j.rating; show.verdict = j.verdict; show.trend = j.trend || "steady";
+          show.ratingHistory.push(Math.round(j.rating));
+          saveState(); renderStudio(); checkAchievements();
+        }
+      }).catch(() => {});
+  });
 }
 function promoteShow(id) {
   if (state.stats.cash < 1000) { toast({title:"Not enough cash", text:"Promotion costs $1,000.", kind:"warn"}); return; }
@@ -1223,6 +1455,19 @@ function promoteShow(id) {
   sh.trend = "rising";
   saveState(); renderStats(); renderStudio();
   toast({ title: "Promotion run", text: `${sh.title} now at ${Math.round(sh.rating)} rating.`, kind: "success" });
+  checkAchievements();
+}
+function investShow(id) {
+  if (state.stats.cash < 3000) { toast({title:"Not enough cash", text:"Investing costs $3,000.", kind:"warn"}); return; }
+  const sh = state.tv.shows.find(x => x.id === id);
+  if (!sh) return;
+  state.stats.cash -= 3000;
+  sh.rating = Math.min(99, sh.rating + randInt(8, 18));
+  sh.trend = "rising";
+  if (!sh.ratingHistory) sh.ratingHistory = [];
+  sh.ratingHistory.push(Math.round(sh.rating));
+  saveState(); renderStats(); renderStudio();
+  toast({ title: "Production investment", text: `${sh.title} surges to ${Math.round(sh.rating)} rating.`, kind: "success" });
   checkAchievements();
 }
 function cancelShow(id) {
@@ -1508,6 +1753,297 @@ function setupBreakingHandlers() {
 }
 
 /* ==================================================================== */
+/*                         FINANCE PANEL                                */
+/* ==================================================================== */
+
+const LOAN_PRODUCTS = [
+  { id: "small",   amount: 5000,  rate: 1.5, label: "Small loan",   desc: "1.5% daily interest" },
+  { id: "medium",  amount: 15000, rate: 2.0, label: "Medium loan",  desc: "2% daily interest" },
+  { id: "large",   amount: 35000, rate: 2.5, label: "Large loan",   desc: "2.5% daily interest" },
+  { id: "massive", amount: 80000, rate: 3.5, label: "Emergency bailout", desc: "3.5% daily — loan shark territory" },
+];
+
+const MARKETING_TIERS = [
+  { id: "grassroots", name: "Grassroots",  cost: 500,   bonusPct: 30,  articles: 4,  subBonus: 50,   desc: "+30% views on next 4 articles, +50 subscribers" },
+  { id: "local",      name: "Local",       cost: 2000,  bonusPct: 70,  articles: 7,  subBonus: 250,  desc: "+70% views on next 7 articles, +250 subscribers" },
+  { id: "regional",   name: "Regional",    cost: 6000,  bonusPct: 130, articles: 10, subBonus: 800,  desc: "+130% views on next 10 articles, +800 subscribers" },
+  { id: "national",   name: "National",    cost: 18000, bonusPct: 250, articles: 15, subBonus: 3000, desc: "+250% views on next 15 articles, +3,000 subscribers" },
+];
+
+function renderFinancePanel() {
+  const host = $("#finance-panel");
+  if (!host) return;
+  const activeLoans = state.loans || [];
+  const totalOwed = activeLoans.reduce((s, l) => s + l.remaining, 0);
+  const mkt = state.marketing || {};
+
+  host.innerHTML = `
+    <h2 class="section-h">Finance</h2>
+    <div class="finance-grid">
+      <!-- Loans -->
+      <div class="finance-card">
+        <div class="finance-card-title">Loans${totalOwed > 0 ? `<span style="font-size:13px;color:var(--accent)">${fmtCash(totalOwed)} owed</span>` : ""}</div>
+        ${activeLoans.length > 0 ? `<div class="active-loans">${activeLoans.map(l => `
+          <div class="active-loan-row">
+            <div class="active-loan-meta">
+              <strong>${fmtCash(l.remaining)}</strong> remaining · <span class="loan-interest-tag">${l.rate}%/day</span>
+              <div style="font-size:11px;color:var(--slate);margin-top:2px">Day ${l.accruedDays || 0} · originally ${fmtCash(l.amount)}</div>
+            </div>
+            <button class="primary-btn" data-loan="${l.id}" style="font-size:12px;padding:6px 12px;">Repay</button>
+          </div>`).join("")}
+        </div>` : ""}
+        <div style="margin-top:${activeLoans.length ? 14 : 0}px;">
+          <div style="font-size:12px;color:var(--slate);margin-bottom:10px;text-transform:uppercase;letter-spacing:1px;">Borrow money</div>
+          <div class="loan-options">
+            ${LOAN_PRODUCTS.map(lp => `<div class="loan-option">
+              <div class="loan-option-meta">
+                <div class="loan-option-amount">${fmtCash(lp.amount)}</div>
+                <div class="loan-option-terms">${lp.label} · ${lp.desc}</div>
+              </div>
+              <button class="primary-btn take-loan" data-loan="${lp.id}" style="font-size:12px;padding:6px 14px;">Borrow</button>
+            </div>`).join("")}
+          </div>
+        </div>
+      </div>
+
+      <!-- Marketing -->
+      <div class="finance-card">
+        <div class="finance-card-title">Marketing Campaigns</div>
+        ${mkt.active ? `<div class="marketing-active-banner">
+          <div class="marketing-active-title">🚀 ${escapeHtml(mkt.tier || "Campaign")} active</div>
+          <div style="font-size:13px;opacity:0.9;">${mkt.articlesLeft} article${mkt.articlesLeft===1?"":"s"} remaining · +${mkt.bonusPct}% view boost</div>
+          <div class="marketing-progress"><div class="marketing-progress-fill" style="width:${Math.min(100,(mkt.startArticles-mkt.articlesLeft)/mkt.startArticles*100).toFixed(0)}%"></div></div>
+        </div>` : ""}
+        <div class="marketing-options">
+          ${MARKETING_TIERS.map(mt => `<div class="marketing-option">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+              <div>
+                <div class="marketing-option-name">${mt.name} · ${fmtCash(mt.cost)}</div>
+                <div class="marketing-option-desc">${mt.desc}</div>
+              </div>
+              <button class="primary-btn run-marketing" data-tier="${mt.id}" style="font-size:12px;padding:6px 12px;"${mkt.active ? " disabled" : ""}>Run</button>
+            </div>
+          </div>`).join("")}
+        </div>
+      </div>
+    </div>
+
+    <!-- Stocks / Shareholdings -->
+    <div class="finance-card" style="margin-bottom:20px;">
+      <div class="finance-card-title">Stock Market</div>
+      <p style="font-size:13px;color:var(--slate);margin:0 0 14px;">Buy shares in rival outlets. Own 51+ shares to take over and subjugate them.</p>
+      <div class="stocks-grid">
+        ${state.competitors.map(c => {
+          const pct = c.totalShares > 0 ? Math.round((c.playerShares / c.totalShares) * 100) : 0;
+          return `<div class="stock-row">
+            <div class="stock-outlet">${c.logo} ${escapeHtml(c.name)}${c.subjugated ? '<span class="subjugated-badge">OWNED</span>' : pct >= 51 ? '<span class="stock-takeover-badge">MAJORITY</span>' : ""}</div>
+            <div class="stock-price">${fmtCash(c.sharePrice)}/share</div>
+            <div class="stock-owned">${c.playerShares}/${c.totalShares} shares (${pct}%)</div>
+            <div class="stock-actions">
+              <button class="ghost-btn buy-shares" data-id="${c.id}" data-qty="1">Buy 1</button>
+              <button class="ghost-btn buy-shares" data-id="${c.id}" data-qty="5">Buy 5</button>
+              ${pct >= 51 && !c.subjugated ? `<button class="primary-btn takeover-btn" data-id="${c.id}">Take over</button>` : ""}
+              ${c.playerShares > 0 ? `<button class="reject-btn sell-shares" data-id="${c.id}">Sell 1</button>` : ""}
+            </div>
+          </div>`;
+        }).join("")}
+      </div>
+    </div>
+
+    <!-- Messages from owner/shareholders -->
+    ${state.messages && state.messages.length > 0 ? `<div class="finance-card">
+      <div class="finance-card-title">Messages <span class="badge">${state.messages.length}</span></div>
+      <div class="messages-list">
+        ${state.messages.slice(-5).reverse().map((m, i) => `<div class="message-card ${m.urgent ? "urgent" : ""}">
+          <div class="message-subject">${escapeHtml(m.subject || "Message")}</div>
+          <div class="message-from">From: ${escapeHtml(m.from)}</div>
+          <div class="message-body">${escapeHtml(m.body)}</div>
+          <span class="message-dismiss" data-idx="${i}">Dismiss</span>
+        </div>`).join("")}
+      </div>
+    </div>` : ""}
+  `;
+
+  // Loan repay buttons
+  host.querySelectorAll(".repay-btn, [data-loan]").forEach(btn => {
+    if (!btn.classList.contains("take-loan")) {
+      btn.addEventListener("click", () => {
+        const loan = state.loans.find(l => l.id === btn.dataset.loan);
+        if (!loan) return;
+        if (state.stats.cash < loan.remaining) { toast({title:"Not enough cash", text:`Need ${fmtCash(loan.remaining)} to repay.`, kind:"warn"}); return; }
+        if (!confirm(`Repay ${fmtCash(loan.remaining)}?`)) return;
+        state.stats.cash -= loan.remaining;
+        state.loans = state.loans.filter(l => l.id !== loan.id);
+        saveState(); renderStats(); renderFinancePanel();
+        toast({ title: "Loan repaid", text: "Debt cleared.", kind: "success" });
+      });
+    }
+  });
+
+  // Borrow buttons
+  host.querySelectorAll(".take-loan").forEach(btn => btn.addEventListener("click", () => {
+    const lp = LOAN_PRODUCTS.find(x => x.id === btn.dataset.loan);
+    if (!lp) return;
+    if (!confirm(`Borrow ${fmtCash(lp.amount)} at ${lp.rate}% daily interest?`)) return;
+    const loan = { id: uid(), amount: lp.amount, remaining: lp.amount, rate: lp.rate, accruedDays: 0 };
+    state.loans.push(loan);
+    state.stats.cash += lp.amount;
+    saveState(); renderStats(); renderFinancePanel();
+    toast({ title: "Loan approved", text: `${fmtCash(lp.amount)} deposited. ${lp.rate}%/day interest.`, kind: "warn" });
+  }));
+
+  // Marketing buttons
+  host.querySelectorAll(".run-marketing").forEach(btn => btn.addEventListener("click", () => {
+    if (state.marketing.active) { toast({title:"Campaign running", text:"Wait for current campaign to finish.", kind:"warn"}); return; }
+    const mt = MARKETING_TIERS.find(x => x.id === btn.dataset.tier);
+    if (!mt) return;
+    if (state.stats.cash < mt.cost) { toast({title:"Not enough cash", text:`Need ${fmtCash(mt.cost)}.`, kind:"warn"}); return; }
+    if (!confirm(`Run ${mt.name} campaign for ${fmtCash(mt.cost)}?`)) return;
+    state.stats.cash -= mt.cost;
+    state.stats.subscribers = (state.stats.subscribers || 0) + mt.subBonus;
+    state.marketing = { active: true, tier: mt.name, bonusPct: mt.bonusPct, articlesLeft: mt.articles, startArticles: mt.articles, subBonus: mt.subBonus };
+    saveState(); renderStats(); renderFinancePanel();
+    toast({ title: `${mt.name} campaign launched`, text: `+${mt.bonusPct}% views for next ${mt.articles} articles, +${fmtNum(mt.subBonus)} subscribers.`, kind: "success" });
+  }));
+
+  // Stock buy/sell
+  host.querySelectorAll(".buy-shares").forEach(btn => btn.addEventListener("click", () => {
+    const c = state.competitors.find(x => x.id === btn.dataset.id);
+    if (!c) return;
+    const qty = parseInt(btn.dataset.qty) || 1;
+    const cost = c.sharePrice * qty;
+    if (state.stats.cash < cost) { toast({title:"Not enough cash", text:`${qty} share${qty>1?"s":""} costs ${fmtCash(cost)}.`, kind:"warn"}); return; }
+    const available = c.totalShares - c.playerShares;
+    if (available <= 0) { toast({title:"No shares available", text:"You own all shares.", kind:"warn"}); return; }
+    const actualQty = Math.min(qty, available);
+    state.stats.cash -= c.sharePrice * actualQty;
+    c.playerShares += actualQty;
+    saveState(); renderStats(); renderFinancePanel();
+    toast({ title: `Bought ${actualQty} share${actualQty>1?"s":""}`, text: `${c.name} · ${c.playerShares}/${c.totalShares} shares`, kind: "success" });
+  }));
+
+  host.querySelectorAll(".sell-shares").forEach(btn => btn.addEventListener("click", () => {
+    const c = state.competitors.find(x => x.id === btn.dataset.id);
+    if (!c || c.playerShares <= 0) return;
+    state.stats.cash += c.sharePrice;
+    c.playerShares -= 1;
+    saveState(); renderStats(); renderFinancePanel();
+    toast({ title: "Sold 1 share", text: `+${fmtCash(c.sharePrice)} · ${c.playerShares} shares left`, kind: "success" });
+  }));
+
+  host.querySelectorAll(".takeover-btn").forEach(btn => btn.addEventListener("click", () => {
+    const c = state.competitors.find(x => x.id === btn.dataset.id);
+    if (!c) return;
+    const cost = c.sharePrice * 10;
+    if (!confirm(`Finalize takeover of ${c.name}? Costs ${fmtCash(cost)} in acquisition fees.`)) return;
+    if (state.stats.cash < cost) { toast({title:"Not enough cash", text:`Need ${fmtCash(cost)} in acquisition fees.`, kind:"warn"}); return; }
+    state.stats.cash -= cost;
+    c.subjugated = true;
+    c.share = Math.max(c.share - 5, 1);
+    state.stats.marketShare = Math.min(60, state.stats.marketShare + 5);
+    saveState(); renderStats(); renderFinancePanel(); renderDashboard();
+    toast({ title: `${c.name} acquired!`, text: "They now operate under your editorial direction.", kind: "success", timeout: 6000 });
+  }));
+
+  // Dismiss messages
+  host.querySelectorAll(".message-dismiss").forEach(el => el.addEventListener("click", () => {
+    const idx = parseInt(el.dataset.idx);
+    const visible = state.messages.slice(-5).reverse();
+    const msg = visible[idx];
+    if (msg) state.messages = state.messages.filter(m => m !== msg);
+    saveState(); renderFinancePanel();
+  }));
+}
+
+/* ==================================================================== */
+/*                           POLLS                                       */
+/* ==================================================================== */
+
+async function fetchArticlePoll(article) {
+  try {
+    const r = await fetch("/api/poll", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: article.title, body: article.body, category: article.review?.category }) });
+    const data = await r.json();
+    if (!data || !data.question) return;
+    const poll = {
+      id: uid(), articleId: article.id, question: data.question,
+      options: data.options.map(o => ({ label: o, votes: 0 })),
+      totalVotes: 0, userVoted: false,
+    };
+    state.polls = (state.polls || []);
+    state.polls = state.polls.filter(p => p.articleId !== article.id);
+    state.polls.push(poll);
+    saveState();
+    // Simulate some reader votes after a bit
+    setTimeout(() => {
+      poll.options.forEach(o => { o.votes = randInt(0, Math.round(30 + state.stats.subscribers / 20)); });
+      poll.totalVotes = poll.options.reduce((s, o) => s + o.votes, 0);
+      saveState();
+    }, 8000);
+  } catch {}
+}
+
+function renderPollForArticle(articleId, scope) {
+  const poll = (state.polls || []).find(p => p.articleId === articleId);
+  if (!poll) return;
+  const el = scope || document;
+  const host = el.querySelector ? el.querySelector(".poll-slot") : null;
+  if (!host) return;
+  const total = poll.totalVotes || 1;
+  host.innerHTML = `<div class="poll-card">
+    <div class="poll-label">Reader Poll</div>
+    <div class="poll-question">${escapeHtml(poll.question)}</div>
+    <div class="poll-options">
+      ${poll.options.map((o, i) => {
+        const pct = Math.round((o.votes / total) * 100) || 0;
+        return `<div class="poll-option${poll.userVoted ? " voted" : ""}" data-i="${i}">
+          <div class="poll-option-fill" style="width:${poll.userVoted ? pct : 0}%"></div>
+          <div class="poll-option-label">
+            <span>${escapeHtml(o.label)}</span>
+            ${poll.userVoted ? `<span class="poll-votes-label">${pct}% (${o.votes})</span>` : ""}
+          </div>
+        </div>`;
+      }).join("")}
+    </div>
+    ${poll.userVoted ? `<div style="font-size:11px;color:var(--slate);margin-top:8px;">${poll.totalVotes} votes</div>` : ""}
+  </div>`;
+  if (!poll.userVoted) {
+    host.querySelectorAll(".poll-option").forEach(el => el.addEventListener("click", () => {
+      const idx = parseInt(el.dataset.i);
+      if (poll.userVoted) return;
+      poll.options[idx].votes += 1;
+      poll.totalVotes += 1;
+      poll.userVoted = true;
+      saveState();
+      renderPollForArticle(articleId, scope);
+      toast({ title: "Vote cast", text: `You voted: ${poll.options[idx].label}` });
+    }));
+  }
+}
+
+/* ==================================================================== */
+/*                      SHAREHOLDER MESSAGES                             */
+/* ==================================================================== */
+
+async function rollShareholderMessage() {
+  if (!state.owner) return;
+  const o = state.owner;
+  try {
+    const lastArticle = state.articles.slice(-1)[0];
+    const r = await fetch("/api/shareholder-message", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ownerName: o.name, ownerPersonality: o.personality, recentArticleTitle: lastArticle?.title || "recent coverage", satisfaction: o.satisfaction, demand: o.demand }) });
+    const data = await r.json();
+    if (!data || !data.message) return;
+    const msg = { id: uid(), from: o.name, subject: data.subject || "A note from ownership", body: data.message, urgent: o.satisfaction < 35 };
+    state.messages = state.messages || [];
+    state.messages.push(msg);
+    if (state.messages.length > 20) state.messages.shift();
+    saveState();
+    toast({ title: `✉️ ${o.name}`, text: data.subject || "You have a message from ownership.", kind: o.satisfaction < 40 ? "warn" : "info", timeout: 5500 });
+  } catch {}
+}
+
+/* ==================================================================== */
 /*                          ACHIEVEMENTS                                */
 /* ==================================================================== */
 
@@ -1546,10 +2082,12 @@ function openArticleModal(id) {
     <h1>${escapeHtml(a.title)}${a.viral ? '<span class="viral-badge">VIRAL</span>' : ""}</h1>
     <div class="article-text">${escapeHtml(a.body)}</div>
     <div class="views-line">${fmtNum(a.currentViews)} of ${fmtNum(a.review.estimated_views)} views · Grade ${a.review.overall_grade} · ${a.comments.length} comments${a.live ? ' · <span class="live-badge">LIVE</span>' : ""}</div>
+    <div class="poll-slot"></div>
     ${renderReviewPanel(a)}
   </div>`;
   $("#modal").classList.remove("hidden");
   animateBars($("#modal-body"));
+  renderPollForArticle(id, $("#modal-body"));
 }
 function setupModal() {
   $$("#modal [data-close]").forEach(el => el.addEventListener("click", () => {
@@ -1615,6 +2153,7 @@ document.addEventListener("DOMContentLoaded", () => {
   applyTheme();
   showOnboardingIfNeeded();
   setupNav();
+  setupSpeedButtons();
   setupWriter();
   setupModal();
   setupSettings();

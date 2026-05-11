@@ -222,9 +222,23 @@ app.post("/api/review", async (req, res) => {
 app.post("/api/review-ai", async (req, res) => {
   const { title, body } = req.body || {};
   if (!title || !body) return res.status(400).json({ error: "title and body required" });
-  const prompt = `Rate this news article for a newsroom game. Return ONLY JSON. Schema: {"category":"Tech|Politics|Business|Sports|Culture|World|Local|Crime|Health|Climate","ratings":{"writing_quality":0-100,"factual_credibility":0-100,"engagement":0-100,"sensationalism":0-100,"originality":0-100},"overall_grade":"A+|A|A-|B+|B|B-|C+|C|C-|D|F","headline_score":0-100,"estimated_views":number 200-5000000,"tone":"short phrase","viral_factor":0-100,"controversy":0-100,"critique":"2-3 sentences in CJR style"}\n\nHEADLINE: ${title}\nARTICLE:\n${body.slice(0, 1500)}`;
-  const ai = await aiJson(prompt, { timeoutMs: 26000 });
+  const wordCount = (body || "").trim().split(/\s+/).filter(Boolean).length;
+  const isGarbage = wordCount < 20 || /^(\s*\w{1,6}\s*){1,10}$/.test(body.trim().slice(0, 100));
+  const prompt = `You are a blunt, unsparing journalism critic rating a news article for a newspaper simulation game. Return ONLY valid JSON matching this exact schema: {"category":"Tech|Politics|Business|Sports|Culture|World|Local|Crime|Health|Climate","ratings":{"writing_quality":0-100,"factual_credibility":0-100,"engagement":0-100,"sensationalism":0-100,"originality":0-100},"overall_grade":"A+|A|A-|B+|B|B-|C+|C|C-|D|F","headline_score":0-100,"estimated_views":number 200-5000000,"tone":"short phrase","viral_factor":0-100,"controversy":0-100,"critique":"2-4 sentences, brutally specific to THIS article's actual content"}
+
+CRITICAL RULES — follow these or the game breaks:
+- If the article is gibberish, profanity, fewer than 20 real words, random letters, or obvious placeholder text (e.g. "ass ass ass", "test test", "asdfjkl"): grade MUST be F, ALL ratings under 10, estimated_views 200-400, viral_factor 0, critique must call it unpublishable garbage by name. DO NOT be diplomatic.
+- Short articles (20-100 words): grade C or below, critique must cite the word count explicitly.
+- Only A or B grades for articles with a real lede, at least one specific fact or quote, and logical structure.
+- Your critique must name specific things from THIS article — never generic advice like "could use more quotations" for an article with no quotations.
+- estimated_views must make sense: F articles get 200-600; C articles 1,000-15,000; B articles 20,000-150,000; A articles 100,000-2,000,000.
+
+HEADLINE: ${title}
+ARTICLE (${wordCount} words):
+${body.slice(0, 1500)}`;
+  const ai = await aiJson(prompt, { timeoutMs: 30000 });
   if (ai && ai.ratings && ai.overall_grade) return res.json(ai);
+  // fallback to heuristic only if AI completely fails (network error)
   res.json(simulateReview({ title, body }));
 });
 
@@ -336,6 +350,33 @@ app.post("/api/owner-bid", async (req, res) => {
       { name: "Vance Reinhardt", type: "billionaire", bid: voluntary ? 400000 : 250000, demand: "Quadruple tech and innovation coverage; no profiles of competitors.", personality: "meddling", monthly_budget: 12000 },
     ],
   });
+});
+
+app.post("/api/poll", async (req, res) => {
+  const { title, body, category } = req.body || {};
+  if (!title) return res.status(400).json({ error: "title required" });
+  const prompt = `Generate a short reader poll for a news article. Return ONLY JSON: {"question":"One direct question readers would debate about this story (max 15 words)","options":["option1","option2","option3"]}
+HEADLINE: ${title}
+CATEGORY: ${category || "Local"}
+EXCERPT: ${(body || "").slice(0, 300)}`;
+  const ai = await aiJson(prompt, { timeoutMs: 15000 });
+  if (ai && ai.question && Array.isArray(ai.options) && ai.options.length >= 2) return res.json(ai);
+  res.json({ question: "Was this story covered fairly?", options: ["Yes", "No", "Needs more context"] });
+});
+
+app.post("/api/shareholder-message", async (req, res) => {
+  const { ownerName, ownerPersonality, recentArticleTitle, satisfaction, demand } = req.body || {};
+  const tone = satisfaction < 25 ? "furious, threatening, about to pull funding"
+    : satisfaction < 45 ? "deeply disappointed and impatient"
+    : satisfaction < 65 ? "cautious and pointed"
+    : "cautiously pleased but still demanding";
+  const prompt = `Write a short direct message (2-3 sentences) from ${ownerName || "the owner"}, a ${ownerPersonality || "profit-driven"} media owner, to their newspaper editor. Tone: ${tone}. Their standing editorial demand: "${demand || "maintain quality and profit"}". Most recent article they're reacting to: "${recentArticleTitle || "recent coverage"}". The message must be specific, in-character, and feel like a real owner venting — not corporate boilerplate. Return ONLY JSON: {"message":"text","subject":"4-7 word subject line"}`;
+  const ai = await aiJson(prompt, { timeoutMs: 18000 });
+  if (ai && ai.message) return res.json(ai);
+  const fallbackMsg = satisfaction < 40
+    ? `I've been watching the coverage and I'm not impressed. ${demand || "Step it up"} — or we need to have a serious conversation about the future here.`
+    : `Good effort on the recent work. Keep the momentum going — I want to see those numbers move.`;
+  res.json({ message: fallbackMsg, subject: satisfaction < 40 ? "We need to talk" : "Checking in" });
 });
 
 app.get("/api/health", (_req, res) => res.json({ ok: true, aiProvider: "pollinations.ai (free)", model: MODEL, catalogSize: STORY_CATALOG.length }));
