@@ -7,11 +7,20 @@
   --rule: #e2e2e2;
   --soft: #f6f6f6;
   --paper: #ffffff;
+  --paper-bg: #ffffff;
+  --paper-text: #1a1a1a;
+  --headline-font: 'Oswald', sans-serif;
   --gold: #b8860b;
   --green: #1f7a3a;
   --shadow: 0 1px 2px rgba(0,0,0,0.06), 0 4px 12px rgba(0,0,0,0.05);
   --pad: 24px;
 }
+.masthead-title, .public-title { font-family: var(--headline-font) !important; }
+.public-site { background: var(--paper-bg) !important; color: var(--paper-text); }
+.public-site h2, .public-side h3 { color: var(--paper-text); }
+.slogan-presets { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.slogan-chip { background: var(--soft); border: 1px solid var(--rule); border-radius: 12px; padding: 4px 10px; font-size: 11px; cursor: pointer; transition: background 0.15s; font-family: inherit; color: var(--slate); }
+.slogan-chip:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
 
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; background: var(--soft); color: var(--ink); font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }

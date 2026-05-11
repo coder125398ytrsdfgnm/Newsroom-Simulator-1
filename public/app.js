@@ -19,6 +19,13 @@ const LOGOS = {
   quill:    { name: "Quill",    svg: '<svg viewBox="0 0 64 64"><path d="M52 6 Q14 30 6 58 Q34 50 58 12 Z" fill="var(--accent)"/><line x1="6" y1="58" x2="24" y2="40" stroke="#fff" stroke-width="3"/></svg>' },
   flame:    { name: "Flame",    svg: '<svg viewBox="0 0 64 64"><path d="M32 4 Q14 24 18 40 Q20 56 32 60 Q44 56 46 40 Q50 24 32 4 Z" fill="var(--accent)"/><path d="M32 22 Q24 32 26 42 Q28 52 32 54 Q36 52 38 42 Q40 32 32 22 Z" fill="#ffaa00"/></svg>' },
   obelisk:  { name: "Obelisk",  svg: '<svg viewBox="0 0 64 64"><polygon points="32,4 26,56 38,56" fill="var(--accent)"/><rect x="20" y="56" width="24" height="4" fill="var(--accent)"/></svg>' },
+  compass:  { name: "Compass",  svg: '<svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="26" fill="none" stroke="var(--accent)" stroke-width="4"/><polygon points="32,10 38,32 32,54 26,32" fill="var(--accent)"/><circle cx="32" cy="32" r="4" fill="#fff"/></svg>' },
+  anchor:   { name: "Anchor",   svg: '<svg viewBox="0 0 64 64"><circle cx="32" cy="14" r="6" fill="none" stroke="var(--accent)" stroke-width="3"/><line x1="32" y1="20" x2="32" y2="50" stroke="var(--accent)" stroke-width="4"/><line x1="22" y1="30" x2="42" y2="30" stroke="var(--accent)" stroke-width="3"/><path d="M14 44 Q14 56 32 56 Q50 56 50 44" fill="none" stroke="var(--accent)" stroke-width="4"/></svg>' },
+  cogwheel: { name: "Cogwheel", svg: '<svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="14" fill="none" stroke="var(--accent)" stroke-width="4"/><g fill="var(--accent)"><rect x="29" y="2" width="6" height="10"/><rect x="29" y="52" width="6" height="10"/><rect x="2" y="29" width="10" height="6"/><rect x="52" y="29" width="10" height="6"/></g><circle cx="32" cy="32" r="5" fill="var(--accent)"/></svg>' },
+  lighthouse: { name: "Lighthouse", svg: '<svg viewBox="0 0 64 64"><polygon points="26,12 38,12 36,52 28,52" fill="var(--accent)"/><rect x="22" y="52" width="20" height="4" fill="var(--accent)"/><circle cx="32" cy="18" r="6" fill="#fff" stroke="var(--accent)" stroke-width="2"/><line x1="14" y1="18" x2="22" y2="18" stroke="var(--accent)" stroke-width="2"/><line x1="42" y1="18" x2="50" y2="18" stroke="var(--accent)" stroke-width="2"/></svg>' },
+  scroll:   { name: "Scroll",   svg: '<svg viewBox="0 0 64 64"><rect x="10" y="14" width="44" height="36" fill="var(--accent)" rx="2"/><line x1="18" y1="24" x2="46" y2="24" stroke="#fff" stroke-width="2"/><line x1="18" y1="32" x2="46" y2="32" stroke="#fff" stroke-width="2"/><line x1="18" y1="40" x2="38" y2="40" stroke="#fff" stroke-width="2"/></svg>' },
+  hexagon:  { name: "Hexagon",  svg: '<svg viewBox="0 0 64 64"><polygon points="32,6 56,20 56,44 32,58 8,44 8,20" fill="var(--accent)"/><polygon points="32,18 46,26 46,38 32,46 18,38 18,26" fill="#fff"/></svg>' },
+  beacon:   { name: "Beacon",   svg: '<svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="10" fill="var(--accent)"/><circle cx="32" cy="32" r="18" fill="none" stroke="var(--accent)" stroke-width="2" opacity="0.6"/><circle cx="32" cy="32" r="26" fill="none" stroke="var(--accent)" stroke-width="1.5" opacity="0.35"/></svg>' },
 };
 
 const TV_LOGOS = {
@@ -37,9 +44,43 @@ const IDENTITIES = [
   { id: "tabloid",       name: "Tabloid",       desc: "Loud, fast, sensational. Massive views, low credibility ceiling." },
   { id: "investigative", name: "Investigative", desc: "Deep, dangerous, irregular. High reputation, slow cash." },
   { id: "wire",          name: "Wire Service",  desc: "Fast, factual, terse. Reliable income, modest views." },
+  { id: "digital",       name: "Digital-Native",desc: "Social-first, hot takes, fast metabolism. High views, fickle audience." },
+  { id: "alt-weekly",    name: "Alt Weekly",    desc: "Counter-cultural, local focus. Modest scale, devoted base." },
+  { id: "magazine",      name: "Magazine",      desc: "Long-form, glossy, deeply edited. Slow cadence, premium ad rates." },
+  { id: "watchdog",      name: "Public Watchdog",desc: "Nonprofit-style accountability outlet. Donor-driven, reputation > revenue." },
 ];
 
-const BRAND_COLORS = ["#cc0000","#1a4fd1","#0a8a3a","#7d2eb9","#d96b00","#111111","#0e7c92","#a8276a"];
+const BRAND_COLORS = [
+  "#cc0000","#1a4fd1","#0a8a3a","#7d2eb9","#d96b00","#111111","#0e7c92","#a8276a",
+  "#5e2a82","#1e6f8a","#c41a4a","#2e8b57","#b8860b","#34495e","#3a3a3a","#8b4513"
+];
+
+const HEADLINE_FONTS = [
+  { id: "oswald",    name: "Oswald",        css: "'Oswald', sans-serif",                desc: "Bold condensed sans — modern broadsheet" },
+  { id: "serif",     name: "Source Serif",  css: "'Source Serif 4', Georgia, serif",    desc: "Classic newspaper serif" },
+  { id: "playfair",  name: "Display Serif", css: "Georgia, 'Times New Roman', serif",   desc: "Elegant editorial display" },
+  { id: "mono",      name: "Type Wire",     css: "ui-monospace, 'Courier New', monospace", desc: "Telex-style monospace wire" },
+];
+
+const PAPER_STYLES = [
+  { id: "classic",   name: "Classic White", bg: "#ffffff", text: "#1a1a1a", desc: "Crisp white newsprint" },
+  { id: "cream",     name: "Cream Stock",   bg: "#fbf6e9", text: "#1a1a1a", desc: "Warm vintage paper" },
+  { id: "gray",      name: "Newsprint",     bg: "#eeeae0", text: "#1a1a1a", desc: "Recycled grey stock" },
+  { id: "midnight",  name: "Midnight",      bg: "#0e0e12", text: "#f0f0f0", desc: "Dark-mode digital edition" },
+];
+
+const SLOGAN_PRESETS = [
+  "All the news that fits.",
+  "Truth, on deadline.",
+  "Watching the watchers.",
+  "Your city, your paper.",
+  "Where the story breaks first.",
+  "Read it here, then everywhere.",
+  "Print never blinks.",
+  "Hold power to account.",
+  "Local. Loud. Loyal.",
+  "Tomorrow's history, today.",
+];
 
 const CITIES = [
   { id: "metroville",  name: "Metroville",   x: 480, y: 290, flag: "🏙️", desc: "Generalist hub.",                unlocks: ["Local","Culture"],        cost: 0 },
@@ -116,6 +157,10 @@ function defaultState() {
       identity: "broadsheet",
       hqCityId: "metroville",
       founded: Date.now(),
+      fontId: "oswald",
+      paperStyleId: "classic",
+      foundedYear: 2026,
+      slogan2: "",
     },
     player: { name: "You" },
     stats: { cash: 5000, reputation: 50, totalViews: 0, marketShare: 5, subscribers: 0 },
@@ -129,7 +174,7 @@ function defaultState() {
     cities: CITIES.map(c => ({ ...c, owned: false, bureauRevenue: 0, bureauArticles: 0 })),
     competitors: COMPETITORS_BASE.map(c => ({
       ...c, share: c.baseShare, latest: null,
-      totalShares: 100, sharePrice: randInt(50, 200), playerShares: 0,
+      totalShares: 100, sharePrice: Math.floor(50 + Math.random() * 150), playerShares: 0,
       subjugated: false,
     })),
     competitorHeadlines: [],
@@ -215,6 +260,11 @@ function applyTheme() {
   document.documentElement.style.setProperty("--accent-dark", shade(state.newsroom.accent, -20));
   const pad = 14 + Math.round((state.settings.density ?? 50) / 100 * 16);
   document.documentElement.style.setProperty("--pad", pad + "px");
+  const font = HEADLINE_FONTS.find(f => f.id === state.newsroom.fontId) || HEADLINE_FONTS[0];
+  document.documentElement.style.setProperty("--headline-font", font.css);
+  const paper = PAPER_STYLES.find(p => p.id === state.newsroom.paperStyleId) || PAPER_STYLES[0];
+  document.documentElement.style.setProperty("--paper-bg", paper.bg);
+  document.documentElement.style.setProperty("--paper-text", paper.text);
 }
 
 function logoSvg(id) { return (LOGOS[id] || LOGOS.star).svg; }
@@ -237,7 +287,7 @@ function toast({ title, text, kind = "info", timeout = 4000 }) {
 /*                            ONBOARDING                                */
 /* ==================================================================== */
 
-const obState = { step: 1, logoId: null, accent: null, identity: null, cityId: null };
+const obState = { step: 1, logoId: null, accent: null, identity: null, cityId: null, fontId: "oswald", paperStyleId: "classic", year: 2026 };
 
 function showOnboardingIfNeeded() {
   if (state.onboarded) { $("#onboarding").classList.add("hidden"); $("#app").classList.remove("hidden"); return; }
@@ -247,6 +297,9 @@ function showOnboardingIfNeeded() {
   renderColorGrid();
   renderIdentityGrid();
   renderCityGrid();
+  renderFontGrid();
+  renderPaperGrid();
+  renderSloganPresets();
   obStep(1);
 
   $("#ob-next").addEventListener("click", obNext);
@@ -296,6 +349,38 @@ function renderCityGrid() {
     $$("#ob-cities .city-tile").forEach(x => x.classList.toggle("selected", x === t));
   }));
 }
+function renderFontGrid() {
+  const host = $("#ob-fonts"); if (!host) return;
+  host.innerHTML = HEADLINE_FONTS.map(f => `
+    <div class="identity-tile ${f.id === obState.fontId ? "selected" : ""}" data-id="${f.id}">
+      <h4 style="font-family:${f.css}">${escapeHtml(f.name)}</h4>
+      <p>${escapeHtml(f.desc)}</p>
+    </div>`).join("");
+  $$("#ob-fonts .identity-tile").forEach(t => t.addEventListener("click", () => {
+    obState.fontId = t.dataset.id;
+    $$("#ob-fonts .identity-tile").forEach(x => x.classList.toggle("selected", x === t));
+  }));
+}
+function renderPaperGrid() {
+  const host = $("#ob-paper"); if (!host) return;
+  host.innerHTML = PAPER_STYLES.map(p => `
+    <div class="identity-tile ${p.id === obState.paperStyleId ? "selected" : ""}" data-id="${p.id}" style="background:${p.bg};color:${p.text}">
+      <h4>${escapeHtml(p.name)}</h4>
+      <p style="color:${p.text};opacity:0.75">${escapeHtml(p.desc)}</p>
+    </div>`).join("");
+  $$("#ob-paper .identity-tile").forEach(t => t.addEventListener("click", () => {
+    obState.paperStyleId = t.dataset.id;
+    $$("#ob-paper .identity-tile").forEach(x => x.classList.toggle("selected", x === t));
+  }));
+}
+function renderSloganPresets() {
+  const host = $("#ob-slogan-presets"); if (!host) return;
+  host.innerHTML = `<div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--slate);margin:6px 0 4px;">Or pick one</div>` +
+    SLOGAN_PRESETS.map(s => `<button type="button" class="slogan-chip" data-slogan="${escapeHtml(s)}">${escapeHtml(s)}</button>`).join("");
+  host.querySelectorAll(".slogan-chip").forEach(b => b.addEventListener("click", () => {
+    $("#ob-motto").value = b.dataset.slogan;
+  }));
+}
 
 function obStep(n) {
   obState.step = n;
@@ -329,6 +414,7 @@ function obNext() {
     obStep(3);
   } else if (obState.step === 3) {
     if (!obState.accent || !obState.identity) { toast({title:"Pick color and identity", text:"Both required.", kind:"warn"}); return; }
+    if (!obState.fontId || !obState.paperStyleId) { toast({title:"Pick typography and paper", text:"Both required.", kind:"warn"}); return; }
     obStep(4);
   } else {
     if (!obState.cityId) { toast({title:"Pick a city", text:"Choose your HQ.", kind:"warn"}); return; }
@@ -345,6 +431,10 @@ function finishOnboarding() {
   state.newsroom.accent = obState.accent;
   state.newsroom.identity = obState.identity;
   state.newsroom.hqCityId = obState.cityId;
+  state.newsroom.fontId = obState.fontId || "oswald";
+  state.newsroom.paperStyleId = obState.paperStyleId || "classic";
+  const yearVal = parseInt(($("#ob-year") && $("#ob-year").value) || "2026");
+  state.newsroom.foundedYear = (yearVal >= 1800 && yearVal <= 2099) ? yearVal : 2026;
   const hq = state.cities.find(c => c.id === obState.cityId);
   if (hq) hq.owned = true;
   state.candidatePool = generateCandidates(3);
@@ -663,7 +753,8 @@ function renderBrand() {
   $("#brand-name").textContent = state.newsroom.name.toUpperCase();
   $("#brand-motto").textContent = state.newsroom.motto;
   const identity = IDENTITIES.find(i => i.id === state.newsroom.identity);
-  $("#brand-identity").textContent = identity ? identity.name : "";
+  const yr = state.newsroom.foundedYear || new Date(state.newsroom.founded).getFullYear();
+  $("#brand-identity").textContent = identity ? `${identity.name} · Est. ${yr}` : `Est. ${yr}`;
   $("#public-logo").innerHTML = logoSvg(state.newsroom.logoId);
   $("#public-title").textContent = state.newsroom.name.toUpperCase();
   $("#public-motto").textContent = state.newsroom.motto;
@@ -1491,7 +1582,8 @@ function renderPublicSite() {
   }
   const sorted = state.articles.slice().reverse();
   const lead = sorted[0], rest = sorted.slice(1, 6);
-  const activeSponsors = SPONSORS.filter(s => state.stats.reputation >= s.minRep);
+  const activeSponsorIds = state.activeSponsors || [];
+  const activeSponsors = SPONSORS.filter(s => activeSponsorIds.includes(s.id));
   const sponsoredAd = activeSponsors.length ? pick(activeSponsors) : null;
   const adCopy = sponsoredAd
     ? `<div class="site-ad"><div class="site-ad-title">${escapeHtml(sponsoredAd.name)}</div><div class="site-ad-tag">${escapeHtml(sponsoredAd.tier)} sponsor of ${escapeHtml(state.newsroom.name)}</div></div>`
