@@ -207,6 +207,127 @@ const SHADY_DEALS = [
   },
 ];
 
+/* ==================================================================== */
+/*                          CRISIS EVENTS                               */
+/* ==================================================================== */
+
+const CRISIS_EVENTS = [
+  {
+    id: "libel_suit",
+    icon: "⚖️",
+    title: "Libel suit filed against you",
+    body: "A subject of recent coverage is suing for defamation. Their lawyers claim a specific fact was wrong. You think they're bluffing, but court is expensive.",
+    minDay: 6,
+    choices: [
+      { label: "Settle out of court", effect: { cash: -12000 }, outcome: "Settled quietly. Costly but contained." },
+      { label: "Fight it in court", effect: { rep: 10, cash: -25000 }, outcome: "You won at trial. Reputation as a fighter cemented." },
+      { label: "Issue a retraction", effect: { rep: -10, cash: -1000 }, outcome: "Humiliating but cheap. The retraction is now part of your record." },
+    ],
+  },
+  {
+    id: "subpoena",
+    icon: "📜",
+    title: "Federal subpoena for your sources",
+    body: "A federal grand jury wants the source list from last week's investigation. Refuse and you face contempt charges. Comply and no anonymous source will ever trust you again.",
+    minDay: 10,
+    minRep: 35,
+    choices: [
+      { label: "Reveal sources (legal compliance)", effect: { rep: -28, cash: 0 }, outcome: "Credibility crushed. Your sources have gone dark across the industry." },
+      { label: "Fight in court (principled stand)", effect: { rep: 15, cash: -10000 }, outcome: "Hailed by press freedom groups. Industry takes notice." },
+      { label: "Have the reporter quietly resign", effect: { rep: -6, cash: -2000 }, outcome: "Quiet capitulation. Newsroom morale takes a hit." },
+    ],
+  },
+  {
+    id: "staff_strike",
+    icon: "✊",
+    title: "Reporters threatening to strike",
+    body: "Your reporters say they're underpaid and demand a raise. They've drafted an open letter. If they walk, your operation halts for days.",
+    minDay: 4,
+    requires: s => s.reporters.length >= 2,
+    choices: [
+      { label: "Give the raise (+25% salaries)", effect: { reporterSalaryMult: 1.25, rep: 4 }, outcome: "Crisis averted. Payroll is heavier now but morale soared." },
+      { label: "Refuse — call their bluff", effect: { rep: -8, fireRandomReporter: true }, outcome: "One reporter quit. The others returned to work, resentful." },
+      { label: "Negotiate a smaller raise (+10%)", effect: { reporterSalaryMult: 1.10, cash: 0 }, outcome: "Compromise reached. Nobody's thrilled but everyone's at their desk." },
+    ],
+  },
+  {
+    id: "leaked_document",
+    icon: "📄",
+    title: "Explosive leaked documents land in your lap",
+    body: "An anonymous source has dropped 800 pages of internal corporate emails on your doorstep. The story could be career-defining — or career-ending if you misread them.",
+    minDay: 5,
+    choices: [
+      { label: "Publish immediately (big swing)", effect: { rep: 20, cash: 8000, viral: true }, outcome: "Bombshell exclusive. Industry is buzzing. You're getting calls." },
+      { label: "Vet for two weeks first (safe play)", effect: { rep: 5, cash: 0 }, outcome: "Solid, careful piece. Less impact but no errors. The slow burn pays off." },
+      { label: "Pass on the story", effect: { rep: -3 }, outcome: "Decided it was too risky. The competition will probably get there first." },
+    ],
+  },
+  {
+    id: "advertiser_pressure",
+    icon: "💼",
+    title: "Major advertiser demands a story killed",
+    body: "A long-time advertiser saw a draft of an investigation into their industry. They're threatening to pull their entire ad spend unless you kill it.",
+    minDay: 7,
+    choices: [
+      { label: "Kill the story (keep the money)", effect: { rep: -18, cash: 6000 }, outcome: "The story is dead. Your accountant is happy. Your ethics officer is not." },
+      { label: "Publish anyway (lose the advertiser)", effect: { rep: 15, cash: -7000 }, outcome: "Advertiser pulled. The piece ran. You did the right thing — at a cost." },
+      { label: "Negotiate softer framing", effect: { rep: -4, cash: 1000 }, outcome: "Compromise. The story ran with a few edges sanded off. Most people won't notice." },
+    ],
+  },
+  {
+    id: "scandal_in_house",
+    icon: "🚨",
+    title: "Your star reporter has a plagiarism problem",
+    body: "An anonymous tipster has pointed out that your highest-skilled reporter lifted three paragraphs from another outlet last month. The evidence is solid.",
+    minDay: 12,
+    requires: s => s.reporters.some(r => r.skill > 70),
+    choices: [
+      { label: "Fire them publicly", effect: { rep: 3, fireTopReporter: true }, outcome: "Painful but credible. You showed you have standards." },
+      { label: "Cover it up", effect: { rep: -22, smear: true }, outcome: "Someone else found out. Now it's a scandal AND a coverup." },
+      { label: "Issue a correction, suspend them", effect: { rep: -5, cash: -1500 }, outcome: "Middle path. The reporter is suspended without pay. Things blow over." },
+    ],
+  },
+  {
+    id: "viral_misquote",
+    icon: "📢",
+    title: "Politician claims you misquoted them",
+    body: "A city councilmember is on social media claiming a quote in your recent piece was fabricated. You have the audio, but the claim is going viral.",
+    minDay: 3,
+    choices: [
+      { label: "Release the audio publicly", effect: { rep: 12 }, outcome: "Caught them dead to rights. Your traffic is through the roof. The councilmember is now silent." },
+      { label: "Stay above the fray", effect: { rep: -8 }, outcome: "Silence read as guilt. Your readers are confused." },
+      { label: "Apologize and clarify", effect: { rep: -3 }, outcome: "De-escalation. You took the loss. The story dies down." },
+    ],
+  },
+  {
+    id: "newsroom_hacked",
+    icon: "🔐",
+    title: "Your CMS has been hacked",
+    body: "Someone breached your publishing system overnight and inserted defamatory content into one of your live articles. Subscribers saw it for at least two hours.",
+    minDay: 8,
+    choices: [
+      { label: "Pay $4,000 for emergency security overhaul", effect: { cash: -4000, rep: 2 }, outcome: "System hardened. Subscribers were forgiving." },
+      { label: "Issue a public statement & take the loss", effect: { rep: -10 }, outcome: "Transparency appreciated, but the damage is done." },
+      { label: "Suppress news of the breach", effect: { rep: -4, smear: true }, outcome: "Word leaked anyway. A rival is sniffing around." },
+    ],
+  },
+];
+
+/* ==================================================================== */
+/*                              AWARDS                                  */
+/* ==================================================================== */
+
+const AWARDS_CATALOG = [
+  { id: "pulitzer_first", icon: "🏆", name: "Pulitzer Prize",          desc: "Your first A+ article has been honored by the journalism establishment.", test: s => s.articles.some(a => a.review.overall_grade === "A+") },
+  { id: "press_freedom",  icon: "🕊️", name: "Press Freedom Medal",     desc: "Awarded by an international press freedom NGO. Reputation 90+.",          test: s => s.stats.reputation >= 90 },
+  { id: "scoop_master",   icon: "📰", name: "Scoop of the Year",       desc: "An article you ran went viral and reshaped public discourse.",            test: s => s.articles.some(a => a.viral && a.currentViews > 500000) },
+  { id: "muckraker",      icon: "🔍", name: "Muckraker Honor",         desc: "Awarded for filing 50 articles. The grind pays off.",                     test: s => s.articles.length >= 50 },
+  { id: "watchdog",       icon: "🛡️", name: "Public Service Award",   desc: "Three A-grade investigations on the record.",                              test: s => s.articles.filter(a => /A/.test(a.review.overall_grade) && (a.review.ratings?.factual_credibility||0) > 75).length >= 3 },
+  { id: "media_titan",    icon: "👑", name: "Media Titan Award",       desc: "You command 35%+ of the market and 80+ reputation.",                       test: s => s.stats.marketShare >= 35 && s.stats.reputation >= 80 },
+  { id: "survivor_award", icon: "♻️", name: "Industry Survivor",       desc: "Reached Day 100. Most outlets fold before then.",                          test: s => s.time.day >= 100 },
+  { id: "subscriber_king",icon: "📬", name: "Subscriber Champion",     desc: "Reached 10,000 paying subscribers.",                                       test: s => (s.stats.subscribers || 0) >= 10000 },
+];
+
 /* Helper — get only active sponsorContracts, deduplicated by sponsorId */
 function getActiveSponsorContracts() {
   return (state.sponsorContracts || []).filter(c => c.status === "active");
@@ -288,6 +409,10 @@ function defaultState() {
     shadyDeals: { history: [], cooldowns: {}, exposures: [] },
     activeSmearsAgainstUs: [],
     dynamicCompetitors: [], // competitors who entered market after game start
+    inbox: [],
+    activeCrisis: null, // pending crisis prompt
+    awards: [], // unlocked awards
+    lastCrisisDay: 0,
   };
 }
 
@@ -303,6 +428,10 @@ function loadState() {
     const competitors = def.competitors.map(d => {
       const saved = savedById[d.id];
       return saved ? { ...d, ...saved } : d;
+    });
+    // Preserve dynamic competitors that aren't in the default base
+    (parsed.competitors || []).forEach(c => {
+      if (!def.competitors.find(d => d.id === c.id)) competitors.push(c);
     });
     // Migrate old activeSponsors → sponsorContracts if needed
     let sponsorContracts = parsed.sponsorContracts || null;
@@ -332,6 +461,10 @@ function loadState() {
       shadyDeals: parsed.shadyDeals || { history: [], cooldowns: {}, exposures: [] },
       activeSmearsAgainstUs: parsed.activeSmearsAgainstUs || [],
       dynamicCompetitors: parsed.dynamicCompetitors || [],
+      inbox: parsed.inbox || [],
+      activeCrisis: parsed.activeCrisis || null,
+      awards: parsed.awards || [],
+      lastCrisisDay: parsed.lastCrisisDay || 0,
     };
   } catch { return defaultState(); }
 }
@@ -682,10 +815,16 @@ function handleDaily() {
         state.sponsorContracts.push(contract);
         nowApproved.push(contract);
         const s = getSponsor(pc.sponsorId);
-        if (s) toast({ title: `✅ ${s.name} signed`, text: `Contract approved — ${fmtCash(pc.dailyRate)}/day for ${pc.duration ? pc.duration + " days" : "ongoing"}.`, kind: "success" });
+        if (s) {
+          toast({ title: `✅ ${s.name} signed`, text: `Contract approved — ${fmtCash(pc.dailyRate)}/day.`, kind: "success" });
+          addInbox({ type: "sponsor", from: s.name, subject: `Contract approved`, body: `Your proposal for ${pc.duration ? pc.duration + "-day" : "rolling"} contract at ${fmtCash(pc.dailyRate)}/day has been approved. Funds begin tomorrow.` });
+        }
       } else {
         const s = getSponsor(pc.sponsorId);
-        if (s) toast({ title: `❌ ${s.name} declined`, text: "They reviewed your metrics and passed. Try again later.", kind: "warn" });
+        if (s) {
+          toast({ title: `❌ ${s.name} declined`, text: "Check your inbox for their note.", kind: "warn" });
+          addInbox({ type: "sponsor", from: s.name, subject: `Contract declined`, body: `After review, we've decided against the proposed contract terms at this time. We'll keep an eye on your coverage and may reconsider in a few weeks.` });
+        }
       }
       return false;
     }
@@ -844,7 +983,15 @@ function handleDaily() {
 
   // --- Refresh competitor wire ---
   refreshCompetitorWire();
+
+  // --- Maybe roll a crisis event ---
+  maybeRollCrisis();
+
+  // --- Check awards ---
+  checkAwards();
+
   saveState();
+  renderInboxBadge();
   if (state.stats.cash <= 0 && (state.loans.length === 0 || state.stats.cash < -10000)) triggerBankruptcy();
 }
 
@@ -1292,6 +1439,13 @@ async function onPublish() {
   }
   clearInterval(msgInterval);
 
+  // Apply shady deal: fabricated source credibility bonus
+  if (state.shadyDeals?.nextCredBonus && review.ratings) {
+    review.ratings.factual_credibility = Math.min(99, (review.ratings.factual_credibility || 50) + state.shadyDeals.nextCredBonus);
+    state.shadyDeals.nextCredBonus = 0;
+    toast({ title: "🎭 Source took", text: "Your fabricated quote was bought. Credibility score boosted.", kind: "info" });
+  }
+
   // Apply marketing multiplier to estimated_views
   if (state.marketing.active && state.marketing.articlesLeft > 0) {
     review.estimated_views = Math.round(review.estimated_views * (1 + state.marketing.bonusPct / 100));
@@ -1395,6 +1549,7 @@ function createArticle({ title, body, author, review }) {
   renderStats();
   renderDashboard();
   checkAchievements();
+  checkAwards();
   return article;
 }
 
@@ -2491,12 +2646,12 @@ async function rollShareholderMessage() {
       body: JSON.stringify({ ownerName: o.name, ownerPersonality: o.personality, recentArticleTitle: lastArticle?.title || "recent coverage", satisfaction: o.satisfaction, demand: o.demand }) });
     const data = await r.json();
     if (!data || !data.message) return;
-    const msg = { id: uid(), from: o.name, subject: data.subject || "A note from ownership", body: data.message, urgent: o.satisfaction < 35 };
-    state.messages = state.messages || [];
-    state.messages.push(msg);
-    if (state.messages.length > 20) state.messages.shift();
-    saveState();
-    toast({ title: `✉️ ${o.name}`, text: data.subject || "You have a message from ownership.", kind: o.satisfaction < 40 ? "warn" : "info", timeout: 5500 });
+    addInbox({
+      type: "owner", from: o.name, urgent: o.satisfaction < 35,
+      subject: data.subject || "A note from ownership",
+      body: data.message,
+    });
+    toast({ title: `✉️ ${o.name}`, text: data.subject || "Message from ownership in inbox.", kind: o.satisfaction < 40 ? "warn" : "info", timeout: 5500 });
   } catch {}
 }
 
@@ -2840,11 +2995,238 @@ async function triggerSmearCampaign(deal) {
 
   sd.exposures.push({ dealName: deal.name, repLost: Math.abs(immediateRepDmg) + damage * 3, day: state.time.day });
 
+  addInbox({
+    type: "scandal", from: smearSource.name, urgent: true,
+    subject: `🚨 SCANDAL: ${headline.slice(0, 70)}${headline.length > 70 ? "…" : ""}`,
+    body: `${smearSource.name} just published an exposé about you. Immediate damage: -${Math.abs(immediateRepDmg)} reputation. Ongoing damage: ~${damage} rep over the next 3 days.`,
+  });
   saveState(); renderStats();
-  toast({ title: `"${headline.slice(0, 60)}…"`, text: `${smearSource.name} just published it. -${Math.abs(immediateRepDmg)} rep immediately + ongoing damage.`, kind: "warn", timeout: 8000 });
+  toast({ title: `"${headline.slice(0, 60)}…"`, text: `${smearSource.name} just published it. Check inbox.`, kind: "warn", timeout: 8000 });
 
   if (document.querySelector(".view.active[data-view='competitors']")) renderCompetitors();
   if (document.querySelector(".view.active[data-view='underground']")) renderUnderground();
+}
+
+/* ==================================================================== */
+/*                                INBOX                                 */
+/* ==================================================================== */
+
+function addInbox({ type = "system", subject, body, from, urgent = false, action = null }) {
+  state.inbox = state.inbox || [];
+  const item = {
+    id: uid(),
+    type, subject, body, from: from || "System",
+    day: state.time.day, urgent, read: false, action,
+  };
+  state.inbox.unshift(item);
+  if (state.inbox.length > 80) state.inbox = state.inbox.slice(0, 80);
+  saveState();
+  renderInboxBadge();
+  return item;
+}
+
+function renderInboxBadge() {
+  const unread = (state.inbox || []).filter(i => !i.read).length;
+  const badge = $("#inbox-badge");
+  if (!badge) return;
+  if (unread > 0) { badge.textContent = unread > 99 ? "99+" : unread; badge.classList.remove("hidden"); }
+  else badge.classList.add("hidden");
+}
+
+let inboxFilter = "all";
+function renderInbox() {
+  const list = $("#inbox-list"); if (!list) return;
+  const items = (state.inbox || []).filter(i => {
+    if (inboxFilter === "all") return true;
+    if (inboxFilter === "unread") return !i.read;
+    return i.type === inboxFilter;
+  });
+  const countPill = $("#inbox-count-pill");
+  if (countPill) {
+    const unread = (state.inbox || []).filter(i => !i.read).length;
+    countPill.textContent = unread > 0 ? `${unread} unread` : "all caught up";
+  }
+  if (items.length === 0) {
+    list.innerHTML = `<div class="inbox-empty">No messages${inboxFilter === "all" ? " yet" : ` in ${inboxFilter}`}. Things will arrive as the days go by.</div>`;
+    return;
+  }
+  list.innerHTML = items.map(i => `
+    <div class="inbox-item type-${escapeHtml(i.type)} ${i.read ? "" : "unread"} ${i.urgent ? "urgent" : ""}" data-id="${i.id}">
+      <div class="inbox-item-from">${escapeHtml(i.from)} · ${escapeHtml(i.type)}</div>
+      <div class="inbox-item-subject">${escapeHtml(i.subject)}</div>
+      <div class="inbox-item-body">${escapeHtml(i.body)}</div>
+      <div class="inbox-item-day">Day ${i.day}</div>
+      ${i.action ? `<span class="inbox-item-action" data-action="${i.id}">${escapeHtml(i.action.label)} →</span>` : ""}
+    </div>`).join("");
+  list.querySelectorAll(".inbox-item").forEach(el => el.addEventListener("click", e => {
+    if (e.target.classList.contains("inbox-item-action")) return;
+    const item = (state.inbox || []).find(x => x.id === el.dataset.id);
+    if (!item) return;
+    item.read = true;
+    saveState();
+    renderInbox();
+    renderInboxBadge();
+  }));
+  list.querySelectorAll(".inbox-item-action").forEach(el => el.addEventListener("click", () => {
+    const item = (state.inbox || []).find(x => x.id === el.dataset.action);
+    if (!item || !item.action) return;
+    item.read = true;
+    saveState();
+    // Built-in action handlers by name
+    if (item.action.handler === "openCrisis") { $("#inbox-drawer").classList.add("hidden"); showCrisisModal(item.action.crisisId); }
+    else if (item.action.handler === "navigate") { $("#inbox-drawer").classList.add("hidden"); document.querySelector(`.nav-btn[data-view='${item.action.view}']`)?.click(); }
+    renderInbox(); renderInboxBadge();
+  }));
+}
+
+function openInbox() {
+  renderInbox();
+  $("#inbox-drawer").classList.remove("hidden");
+}
+
+function setupInbox() {
+  $("#open-inbox")?.addEventListener("click", openInbox);
+  $$("#inbox-drawer [data-close-inbox]").forEach(el => el.addEventListener("click", () => $("#inbox-drawer").classList.add("hidden")));
+  $$(".inbox-tab").forEach(t => t.addEventListener("click", () => {
+    inboxFilter = t.dataset.filter;
+    $$(".inbox-tab").forEach(x => x.classList.toggle("active", x === t));
+    renderInbox();
+  }));
+}
+
+/* ==================================================================== */
+/*                          CRISIS EVENTS                               */
+/* ==================================================================== */
+
+function maybeRollCrisis() {
+  if (state.activeCrisis) return; // one at a time
+  if (state.bankrupt) return;
+  const since = state.time.day - (state.lastCrisisDay || 0);
+  if (since < 7) return; // cool down ~7 days minimum
+  if (Math.random() > 0.35) return; // 35% chance on check
+  const eligible = CRISIS_EVENTS.filter(c =>
+    state.time.day >= (c.minDay || 0) &&
+    (c.minRep ? state.stats.reputation >= c.minRep : true) &&
+    (c.requires ? c.requires(state) : true)
+  );
+  if (!eligible.length) return;
+  const crisis = pick(eligible);
+  state.activeCrisis = { id: crisis.id, day: state.time.day };
+  state.lastCrisisDay = state.time.day;
+  saveState();
+  addInbox({
+    type: "crisis", from: crisis.icon + " Crisis", urgent: true,
+    subject: crisis.title,
+    body: crisis.body.slice(0, 160) + (crisis.body.length > 160 ? "…" : ""),
+    action: { label: "Open & Decide", handler: "openCrisis", crisisId: crisis.id },
+  });
+  toast({ title: `${crisis.icon} CRISIS: ${crisis.title}`, text: "Open your inbox to make the call.", kind: "warn", timeout: 6500 });
+}
+
+function showCrisisModal(crisisId) {
+  const crisis = CRISIS_EVENTS.find(c => c.id === crisisId);
+  if (!crisis) return;
+  const body = $("#crisis-modal-body");
+  body.innerHTML = `
+    <div class="crisis-head">
+      <span class="crisis-icon">${crisis.icon}</span>
+      <div>
+        <div class="crisis-stamp">URGENT · DECISION REQUIRED</div>
+        <h2 class="crisis-title">${escapeHtml(crisis.title)}</h2>
+      </div>
+    </div>
+    <p class="crisis-body">${escapeHtml(crisis.body)}</p>
+    <div class="crisis-choices">
+      ${crisis.choices.map((c, i) => {
+        const tags = [];
+        if (c.effect.cash) tags.push(`${c.effect.cash > 0 ? "+" : ""}${fmtCash(c.effect.cash)}`);
+        if (c.effect.rep) tags.push(`${c.effect.rep > 0 ? "+" : ""}${c.effect.rep} rep`);
+        if (c.effect.viral) tags.push("possible viral hit");
+        if (c.effect.smear) tags.push("smear risk");
+        return `<button class="crisis-choice-btn" data-i="${i}">
+          <div class="crisis-choice-label">${escapeHtml(c.label)}</div>
+          <div class="crisis-choice-meta">${tags.join(" · ") || "no obvious cost"}</div>
+        </button>`;
+      }).join("")}
+    </div>`;
+  $("#crisis-modal").classList.remove("hidden");
+  body.querySelectorAll(".crisis-choice-btn").forEach(btn => btn.addEventListener("click", () => {
+    resolveCrisis(crisis, parseInt(btn.dataset.i));
+  }));
+}
+
+function resolveCrisis(crisis, choiceIdx) {
+  const choice = crisis.choices[choiceIdx];
+  const ef = choice.effect || {};
+  if (ef.cash) state.stats.cash += ef.cash;
+  if (ef.rep) state.stats.reputation = Math.max(0, Math.min(100, state.stats.reputation + ef.rep));
+  if (ef.reporterSalaryMult && state.reporters.length) {
+    state.reporters.forEach(r => { r.salary = Math.round(r.salary * ef.reporterSalaryMult); });
+  }
+  if (ef.fireRandomReporter && state.reporters.length) {
+    const idx = Math.floor(Math.random() * state.reporters.length);
+    const r = state.reporters.splice(idx, 1)[0];
+    if (r) toast({ title: "Reporter quit", text: `${r.name} walked out.`, kind: "warn" });
+  }
+  if (ef.fireTopReporter && state.reporters.length) {
+    state.reporters.sort((a, b) => b.skill - a.skill);
+    const r = state.reporters.shift();
+    if (r) toast({ title: "Reporter fired", text: `${r.name} dismissed for misconduct.`, kind: "warn" });
+  }
+  if (ef.smear) {
+    // Schedule a smear campaign
+    const fakeDeal = { name: crisis.title, caughtEffect: { dealType: "the " + crisis.title.toLowerCase() + " scandal" } };
+    setTimeout(() => triggerSmearCampaign(fakeDeal), 1500);
+  }
+  if (ef.viral && state.articles.length) {
+    const targetArticle = state.articles[state.articles.length - 1];
+    if (targetArticle && !targetArticle.viral) goViral(targetArticle);
+  }
+  state.activeCrisis = null;
+  saveState();
+  $("#crisis-modal").classList.add("hidden");
+  addInbox({
+    type: "system", from: "Editor's Log", subject: `Resolved: ${crisis.title}`,
+    body: choice.outcome || "Decision made and recorded.",
+  });
+  toast({ title: `${crisis.icon} Resolved`, text: choice.outcome || "Decision made.", kind: "info", timeout: 5500 });
+  renderStats();
+  if (document.querySelector(".view.active[data-view='dashboard']")) renderDashboard();
+  if (document.querySelector(".view.active[data-view='reporters']")) renderReporters();
+}
+
+/* ==================================================================== */
+/*                              AWARDS                                  */
+/* ==================================================================== */
+
+function checkAwards() {
+  state.awards = state.awards || [];
+  for (const award of AWARDS_CATALOG) {
+    if (state.awards.includes(award.id)) continue;
+    if (award.test(state)) {
+      state.awards.push(award.id);
+      saveState();
+      showAwardModal(award);
+      addInbox({
+        type: "award", from: "Awards Committee", urgent: false,
+        subject: `🏆 You won the ${award.name}`,
+        body: award.desc,
+      });
+    }
+  }
+}
+
+function showAwardModal(award) {
+  $("#modal").dataset.articleId = "";
+  $("#modal-body").innerHTML = `<div class="modal-body award-card">
+    <div class="award-icon-big">${award.icon}</div>
+    <div class="award-h">PRESENTED IN RECOGNITION OF</div>
+    <h2 class="award-name">${escapeHtml(award.name)}</h2>
+    <p class="award-desc">${escapeHtml(award.desc)}</p>
+    <div style="font-size:11px;color:var(--slate);text-transform:uppercase;letter-spacing:2px;margin-bottom:18px;">Awarded to ${escapeHtml(state.newsroom.name)} · Day ${state.time.day}</div>
+    <button class="primary-btn" data-close>Accept the honor</button>
+  </div>`;
+  $("#modal").classList.remove("hidden");
 }
 
 /* ==================================================================== */
@@ -2879,17 +3261,32 @@ document.addEventListener("DOMContentLoaded", () => {
   setupWriter();
   setupModal();
   setupSettings();
+  setupInbox();
   setupBreakingHandlers();
   setupBankruptcyHandlers();
   loadAiStatus();
   if (state.onboarded) {
     refreshAll();
+    renderInboxBadge();
     refreshCompetitorWire();
     startGameLoop();
     if (state.bankrupt) $("#bankruptcy-modal").classList.remove("hidden");
+    if (state.activeCrisis) {
+      // Re-surface in-progress crisis after reload
+      setTimeout(() => showCrisisModal(state.activeCrisis.id), 1500);
+    }
   }
   $("#refresh-pool").addEventListener("click", () => { state.candidatePool = generateCandidates(3); saveState(); renderReporters(); });
   setInterval(refreshCompetitorWire, 3 * 60 * 1000);
   setTimeout(pollBreakingNews, 25000);
   setInterval(pollBreakingNews, 90 * 1000);
+
+  // Spacebar to pause/resume (skip if user is typing in input/textarea)
+  document.addEventListener("keydown", e => {
+    if (e.code !== "Space") return;
+    const tag = (e.target && e.target.tagName) || "";
+    if (tag === "INPUT" || tag === "TEXTAREA" || e.target.isContentEditable) return;
+    e.preventDefault();
+    $("#pause-btn")?.click();
+  });
 });

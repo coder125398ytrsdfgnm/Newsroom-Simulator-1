@@ -108,6 +108,7 @@
         <button class="speed-btn" data-speed="10">10×</button>
       </div>
       <span id="ai-status" class="ai-badge">AI: …</span>
+      <button class="icon-btn inbox-icon-btn" id="open-inbox" title="Inbox">✉<span id="inbox-badge" class="inbox-badge hidden">0</span></button>
       <button class="icon-btn" id="open-settings" title="Settings">⚙</button>
     </div>
   </header>
@@ -289,6 +290,32 @@
   <div class="modal-card">
     <button class="modal-close" data-close>×</button>
     <div id="modal-body"></div>
+  </div>
+</div>
+
+<!-- Inbox drawer -->
+<div id="inbox-drawer" class="drawer hidden">
+  <div class="drawer-backdrop" data-close-inbox></div>
+  <aside class="drawer-panel inbox-drawer-panel">
+    <button class="drawer-close" data-close-inbox>×</button>
+    <h2 class="drawer-title">Inbox <span id="inbox-count-pill" class="inbox-count-pill"></span></h2>
+    <div class="inbox-tabs">
+      <button class="inbox-tab active" data-filter="all">All</button>
+      <button class="inbox-tab" data-filter="unread">Unread</button>
+      <button class="inbox-tab" data-filter="owner">Owner</button>
+      <button class="inbox-tab" data-filter="sponsor">Sponsors</button>
+      <button class="inbox-tab" data-filter="crisis">Crises</button>
+      <button class="inbox-tab" data-filter="award">Awards</button>
+    </div>
+    <div id="inbox-list" class="inbox-list"></div>
+  </aside>
+</div>
+
+<!-- Crisis prompt modal -->
+<div id="crisis-modal" class="modal hidden">
+  <div class="modal-backdrop"></div>
+  <div class="modal-card crisis-card">
+    <div id="crisis-modal-body"></div>
   </div>
 </div>
 
