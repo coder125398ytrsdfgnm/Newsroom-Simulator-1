@@ -203,13 +203,50 @@ function simulateReview({ title, body }) {
   };
 }
 
-/* ============================ MINIMAL COMMENT FALLBACK ============================ */
+/* ============================ COMMENT FALLBACK POOL ============================ */
 
-const MINIMAL_FALLBACK_COMMENTS = [
-  { author: "@reader37", text: "Trying to understand what the actual takeaway is here. Anyone?" },
-  { author: "L. Donnelly", text: "Decent reporting but I'd like to see who's quoted on the other side." },
-  { author: "@following_along", text: "Saved this one to come back to once there's more info." },
+const FALLBACK_COMMENT_POOL = [
+  { author: "@civic_minded", text: "Finally someone covering this. Shared to three different group chats already." },
+  { author: "T. Beaumont", text: "The sourcing here is thin. I want names, not 'officials said'." },
+  { author: "@doomscroller99", text: "I can't believe I'm reading about this at 2am but here we are." },
+  { author: "Priya K.", text: "Good start but this raises more questions than it answers, which I suppose is the point." },
+  { author: "@justpassingthrough", text: "Confused. Is this good news or bad news? Asking for a friend." },
+  { author: "HarveyToronto", text: "I actually know one of the people involved here. This tracks." },
+  { author: "@contrarian_takes", text: "Hot take: everyone in this story is wrong, including the journalist." },
+  { author: "V. Osei-Mensah", text: "The headline doesn't match the article at all. Click-baity. Disappointing." },
+  { author: "@alwaysreading", text: "Okay but where's the follow-up? This can't be the whole story." },
+  { author: "RetiredJournalist62", text: "Used to cover this beat. The real angle is buried four paragraphs down." },
+  { author: "@firsttime_commenter", text: "I never comment but this made me log in. Infuriating." },
+  { author: "D. Marchetti", text: "Why is this the first I'm hearing about this? Three weeks late." },
+  { author: "@skepticaldave", text: "Who paid for this reporting. I'm asking seriously. Who funded it." },
+  { author: "Neighborhood Watch Gail", text: "Shared to the community board. We need answers." },
+  { author: "@actuallyread_it", text: "People in the comments clearly didn't get past the headline. The article is more nuanced." },
+  { author: "Marcus_Builds", text: "I've been saying this for two years. Glad it's finally getting coverage." },
+  { author: "@lurker_no_more", text: "Usually I just scroll past but this one actually got me." },
+  { author: "C. Whitmore III", text: "Competent if unspectacular. The lede buries the most interesting fact." },
+  { author: "@yikes_forever", text: "Every time I think things can't get more chaotic… they do." },
+  { author: "Francesca P.", text: "The quote in paragraph three is doing a lot of heavy lifting in this piece." },
+  { author: "@politicallyexhausted", text: "I don't know who to be angry at anymore and this didn't help." },
+  { author: "Owen Strathmore", text: "Bookmarked. This will be important in six months when nobody remembers it." },
+  { author: "@localfirst", text: "Nationals picked this up yet? Because they should." },
+  { author: "TiredOfItAll_Barb", text: "I've read four articles on this today and this one is the only one with actual numbers." },
+  { author: "@crypsis_mode", text: "The comment section on this one is going to be a disaster. I'll check back in an hour." },
+  { author: "Jules N.", text: "This is why I still pay for a newspaper subscription. Good, old-fashioned legwork." },
+  { author: "@aggressivelyneutral", text: "This is either a big deal or nothing at all and I truly cannot tell which." },
+  { author: "Remy_Dupont", text: "Anyone notice the timestamp on the official response? Three hours after publication. Scripted." },
+  { author: "@readseverything", text: "The follow-up piece is going to be more interesting than this one, mark my words." },
+  { author: "Sondra L.", text: "Shared this to my work Slack and immediately regretted it because now I have to talk about it." },
 ];
+
+function pickFallbackComments(count) {
+  const pool = [...FALLBACK_COMMENT_POOL];
+  const out = [];
+  for (let i = 0; i < Math.min(count, pool.length); i++) {
+    const idx = Math.floor(Math.random() * pool.length);
+    out.push(pool.splice(idx, 1)[0]);
+  }
+  return out;
+}
 
 /* ============================ ROUTES ============================ */
 
@@ -264,7 +301,7 @@ app.post("/api/comments", async (req, res) => {
     }));
     return res.json({ comments: cleaned });
   }
-  res.json({ comments: MINIMAL_FALLBACK_COMMENTS.slice(0, count), _fallback: true });
+  res.json({ comments: pickFallbackComments(count), _fallback: true });
 });
 
 /* Reporter article — seeded by the story catalog */
@@ -377,6 +414,22 @@ app.post("/api/shareholder-message", async (req, res) => {
     ? `I've been watching the coverage and I'm not impressed. ${demand || "Step it up"} — or we need to have a serious conversation about the future here.`
     : `Good effort on the recent work. Keep the momentum going — I want to see those numbers move.`;
   res.json({ message: fallbackMsg, subject: satisfaction < 40 ? "We need to talk" : "Checking in" });
+});
+
+app.post("/api/smear-campaign", async (req, res) => {
+  const { targetNewsroom, smearingOutlet, dealType, repLevel } = req.body || {};
+  const prompt = `You are writing a sensationalist exposé headline and brief story for a rival newspaper "${smearingOutlet || "The Daily Ledger"}" attacking the credibility of the newsroom "${targetNewsroom || "The Beacon"}". The scandal they are reporting on: ${dealType || "undisclosed financial arrangements with advertisers"}. Their reputation level: ${repLevel || 50}/100.
+
+Return ONLY JSON: {"headline":"Damning, specific 12-18 word headline (name the target outlet explicitly)","lede":"2-3 sentence punchy opening paragraph, tabloid style, loaded with implication","damage":${repLevel > 70 ? "number 15-25" : "number 8-18"}}
+
+Rules: Make the headline specific to the scandal. Use loaded language. The lede should feel like it was written by a rival with an axe to grind.`;
+  const ai = await aiJson(prompt, { timeoutMs: 20000 });
+  if (ai && ai.headline) return res.json(ai);
+  res.json({
+    headline: `${targetNewsroom || "The Beacon"}: Inside the secret deals their readers don't know about`,
+    lede: `Exclusive sources confirm the outlet has engaged in undisclosed arrangements that raise serious questions about editorial independence. Industry observers say the pattern is damning.`,
+    damage: Math.floor(10 + Math.random() * 10),
+  });
 });
 
 app.get("/api/health", (_req, res) => res.json({ ok: true, aiProvider: "pollinations.ai (free)", model: MODEL, catalogSize: STORY_CATALOG.length }));

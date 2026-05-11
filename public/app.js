@@ -104,11 +104,23 @@ const LAST_NAMES = ["Carter","Brooks","Vega","Patel","Nguyen","Cohen","Okafor","
 const BEATS = ["City Hall","Tech","Business","Crime","Sports","Culture","World","Investigations","Climate","Health","Politics","Education","Arts","Finance"];
 
 const COMPETITORS_BASE = [
-  { id: "ledger",  name: "The Daily Ledger",  logo: "🗞️", bio: "Establishment broadsheet.",         personality: "serious",       baseShare: 22 },
-  { id: "wire",    name: "Metro Wire",        logo: "📡", bio: "Wire service. Fast and factual.",   personality: "newswire",      baseShare: 18 },
-  { id: "post",    name: "Capital Post",      logo: "🏛️", bio: "DC-style political insider.",       personality: "politicojuicy", baseShare: 16 },
-  { id: "tribune", name: "Tribune North",     logo: "🧭", bio: "Regional paper of record.",         personality: "broadsheet",    baseShare: 14 },
-  { id: "tabloid", name: "The Tabloid Times", logo: "🔥", bio: "Pure sensationalism.",              personality: "tabloid",       baseShare: 20 },
+  { id: "ledger",   name: "The Daily Ledger",   logo: "🗞️", bio: "Establishment broadsheet. The paper of record.",     personality: "serious",       baseShare: 18 },
+  { id: "wire",     name: "Metro Wire",          logo: "📡", bio: "Wire service. Fast, terse, and always first.",       personality: "newswire",      baseShare: 14 },
+  { id: "post",     name: "Capital Post",        logo: "🏛️", bio: "DC-style political insider. Anonymous sources only.", personality: "politicojuicy", baseShare: 12 },
+  { id: "tribune",  name: "Tribune North",       logo: "🧭", bio: "Regional paper of record. Proud and slow.",          personality: "broadsheet",    baseShare: 11 },
+  { id: "tabloid",  name: "The Tabloid Times",   logo: "🔥", bio: "Pure sensationalism. Terrible ethics, huge numbers.", personality: "tabloid",       baseShare: 16 },
+  { id: "herald",   name: "The Morning Herald",  logo: "☀️", bio: "Family-owned morning daily. Staid but trusted.",    personality: "broadsheet",    baseShare: 8  },
+  { id: "dispatch", name: "City Dispatch",       logo: "📋", bio: "Community-focused hyper-local paper.",              personality: "newswire",      baseShare: 6  },
+  { id: "chronicle",name: "The Chronicle",       logo: "📰", bio: "Long-form investigative. Slow output, deep impact.", personality: "serious",       baseShare: 5  },
+  { id: "buzz",     name: "BuzzLocal",           logo: "⚡", bio: "Viral-first digital startup. No standards, big reach.", personality: "tabloid",    baseShare: 4  },
+];
+
+// Potential dynamic entrants (enter market when player dominates)
+const DYNAMIC_ENTRANT_POOL = [
+  { id: "dyn-beacon", name: "The Upstart Beacon", logo: "📣", bio: "Scrappy newcomer backed by a tech billionaire.", personality: "digital", baseShare: 3 },
+  { id: "dyn-wire2",  name: "NationalWire Plus",  logo: "🛜", bio: "Subscription wire service disrupting the market.", personality: "newswire", baseShare: 4 },
+  { id: "dyn-reform", name: "Reform Report",      logo: "⚖️", bio: "Nonprofit outlet backed by media reform advocates.", personality: "serious", baseShare: 2 },
+  { id: "dyn-flash",  name: "FlashDesk",          logo: "💥", bio: "24/7 breaking-news machine with aggressive tactics.", personality: "tabloid", baseShare: 3 },
 ];
 
 /* Sponsor tiers — unlocked by reputation. Each pays a fixed daily rate.
@@ -121,6 +133,85 @@ const SPONSORS = [
   { id: "premium2", name: "Larkspur Pharma",     tier: "Premium",   color: "#d96b00", minRep: 70, daily: 600, loseAt: 60 },
   { id: "platinum", name: "Vega Aerospace",      tier: "Platinum",  color: "#7d2eb9", minRep: 85, daily: 1200, loseAt: 75 },
 ];
+
+/* ==================================================================== */
+/*                         SHADY DEALS CATALOG                          */
+/* ==================================================================== */
+
+const SHADY_DEALS = [
+  {
+    id: "bank_coverage",
+    name: "Media-for-Credit Arrangement",
+    emoji: "🏦",
+    desc: "Meridian National Bank offers a $12,000 line of credit in exchange for favorable coverage — three articles slanted toward their interests. Nothing on paper. Totally deniable.",
+    reward: { cash: 12000 },
+    catchProb: 0.25,
+    caughtEffect: { rep: -22, smear: true, dealType: "secret banking arrangement" },
+    cooldownDays: 25,
+    minRep: 0,
+  },
+  {
+    id: "suppress_story",
+    name: "Suppress a Competitor Investigation",
+    emoji: "🗑️",
+    desc: "A local corporation pays you $7,500 to kill a damaging story about them before it reaches the public. The reporter who filed it will think it was spiked for quality.",
+    reward: { cash: 7500 },
+    catchProb: 0.20,
+    caughtEffect: { rep: -18, smear: true, dealType: "suppression of editorial content" },
+    cooldownDays: 20,
+    minRep: 0,
+  },
+  {
+    id: "fake_exclusive",
+    name: "Fabricated Exclusive Source",
+    emoji: "🎭",
+    desc: "Add a convincing fictional expert quote to your next article. Boosts credibility score in your next review. Risk: if caught, it's career-ending for the whole outlet.",
+    reward: { nextArticleCredBonus: 28 },
+    catchProb: 0.30,
+    caughtEffect: { rep: -30, smear: true, dealType: "fabricated sources and journalistic fraud" },
+    cooldownDays: 30,
+    minRep: 0,
+  },
+  {
+    id: "ad_fraud",
+    name: "Bot Traffic Injection",
+    emoji: "🤖",
+    desc: "Pay a traffic service $2,000 to inflate your ad metrics with bot views for 1 game day. Generates $9,000 in fake ad revenue before advertisers notice.",
+    reward: { cash: 9000, cost: 2000 },
+    catchProb: 0.35,
+    caughtEffect: { rep: -12, smear: false, cash: -8000, dealType: "ad fraud and traffic manipulation" },
+    cooldownDays: 15,
+    minRep: 0,
+  },
+  {
+    id: "political_deal",
+    name: "Political Coverage Arrangement",
+    emoji: "🤝",
+    desc: "A city councilmember offers advance notice of major policy announcements — giving you scoops — in exchange for softer coverage of their office. Exclusive tips for 5 days.",
+    reward: { breakingBonus: 5 },
+    catchProb: 0.18,
+    caughtEffect: { rep: -20, smear: true, dealType: "undisclosed political arrangement with elected official" },
+    cooldownDays: 40,
+    minRep: 30,
+  },
+  {
+    id: "spy_competitor",
+    name: "Infiltrate a Rival Newsroom",
+    emoji: "🕵️",
+    desc: "Pay $3,000 to plant a contact inside a competitor's staff. For the next 10 days, you see their editorial plans 24 hours before publication — and can steal their angles.",
+    reward: { competitorSpy: 10, cost: 3000 },
+    catchProb: 0.22,
+    caughtEffect: { rep: -25, smear: true, dealType: "corporate espionage and staff infiltration" },
+    cooldownDays: 35,
+    minRep: 40,
+  },
+];
+
+/* Helper — get only active sponsorContracts, deduplicated by sponsorId */
+function getActiveSponsorContracts() {
+  return (state.sponsorContracts || []).filter(c => c.status === "active");
+}
+function getSponsor(id) { return SPONSORS.find(s => s.id === id); }
 
 const ACHIEVEMENTS = [
   { id: "first_article", title: "First Byline",   icon: "✍️", desc: "Publish your first article.",          test: s => s.articles.length >= 1 },
@@ -165,7 +256,7 @@ function defaultState() {
     player: { name: "You" },
     stats: { cash: 5000, reputation: 50, totalViews: 0, marketShare: 5, subscribers: 0 },
     settings: { density: 50, speed: 3 },
-    time: { day: 1, hour: 9, minute: 0 },
+    time: { day: 1, hour: 9 },
     reporters: [],
     pendingApprovals: [],
     pendingPitches: [],
@@ -188,8 +279,15 @@ function defaultState() {
     loans: [],
     marketing: { active: false, tier: null, articlesLeft: 0, bonusPct: 0, subBonus: 0 },
     activeSponsors: ["indie"],
+    sponsorContracts: [
+      { id: "default-indie", sponsorId: "indie", startDay: 1, duration: null, dailyRate: 60, status: "active" }
+    ],
+    pendingContracts: [],
     polls: [],
     messages: [],
+    shadyDeals: { history: [], cooldowns: {}, exposures: [] },
+    activeSmearsAgainstUs: [],
+    dynamicCompetitors: [], // competitors who entered market after game start
   };
 }
 
@@ -200,10 +298,20 @@ function loadState() {
     const parsed = JSON.parse(raw);
     if (parsed.version !== 4) return defaultState();
     const def = defaultState();
-    const competitors = (parsed.competitors || def.competitors).map(c => {
-      const d = def.competitors.find(x => x.id === c.id) || {};
-      return { ...d, ...c };
+    // Merge competitors: saved state may have fewer competitors than current COMPETITORS_BASE
+    const savedById = Object.fromEntries((parsed.competitors || []).map(c => [c.id, c]));
+    const competitors = def.competitors.map(d => {
+      const saved = savedById[d.id];
+      return saved ? { ...d, ...saved } : d;
     });
+    // Migrate old activeSponsors → sponsorContracts if needed
+    let sponsorContracts = parsed.sponsorContracts || null;
+    if (!sponsorContracts && parsed.activeSponsors) {
+      sponsorContracts = (parsed.activeSponsors || []).map(id => {
+        const s = SPONSORS.find(x => x.id === id);
+        return { id: "migrated-" + id, sponsorId: id, startDay: 1, duration: null, dailyRate: s ? s.daily : 60, status: "active" };
+      });
+    }
     return {
       ...def, ...parsed,
       newsroom: { ...def.newsroom, ...(parsed.newsroom || {}) },
@@ -217,8 +325,13 @@ function loadState() {
       loans: parsed.loans || [],
       marketing: { ...def.marketing, ...(parsed.marketing || {}) },
       activeSponsors: parsed.activeSponsors || def.activeSponsors,
+      sponsorContracts: sponsorContracts || def.sponsorContracts,
+      pendingContracts: parsed.pendingContracts || [],
       polls: parsed.polls || [],
       messages: parsed.messages || [],
+      shadyDeals: parsed.shadyDeals || { history: [], cooldowns: {}, exposures: [] },
+      activeSmearsAgainstUs: parsed.activeSmearsAgainstUs || [],
+      dynamicCompetitors: parsed.dynamicCompetitors || [],
     };
   } catch { return defaultState(); }
 }
@@ -453,7 +566,7 @@ function finishOnboarding() {
 /*                            TIME ENGINE                               */
 /* ==================================================================== */
 
-// 1 real second × speed = 1 game minute
+// 1 real second × speed = 1 game hour
 function startGameLoop() {
   if (gameLoopHandle) clearInterval(gameLoopHandle);
   gameLoopHandle = setInterval(tick, 1000);
@@ -462,26 +575,19 @@ function startGameLoop() {
 function tick() {
   if (state.bankrupt) return;
   const speed = state.settings.speed || 2;
-  for (let i = 0; i < speed; i++) advanceMinute();
+  for (let i = 0; i < speed; i++) advanceHour();
   updateLiveArticles();
   renderClock();
   renderStats();
-  // periodic things
-  if (state.time.minute === 0) { // every game hour
-    handleHourly();
-  }
 }
 
-function advanceMinute() {
-  state.time.minute += 1;
-  if (state.time.minute >= 60) {
-    state.time.minute = 0;
-    state.time.hour += 1;
-    if (state.time.hour >= 24) {
-      state.time.hour = 0;
-      state.time.day += 1;
-      handleDaily();
-    }
+function advanceHour() {
+  state.time.hour += 1;
+  if (state.time.hour % 6 === 0) handleHourly(); // every 6 hours
+  if (state.time.hour >= 24) {
+    state.time.hour = 0;
+    state.time.day += 1;
+    handleDaily();
   }
 }
 
@@ -565,20 +671,47 @@ function handleDaily() {
   state.stats.cash += subRev;
   state.revToday.subs = subRev;
 
-  // --- Sponsor revenue (only sponsors player has actively signed) ---
-  let sponsorRev = 0;
-  const activeSponsorIds = state.activeSponsors || [];
-  for (const s of SPONSORS) {
-    if (!activeSponsorIds.includes(s.id)) continue;
-    if (state.stats.reputation < s.minRep) {
-      // Sponsor drops out if rep falls below their floor
-      if (s.loseAt >= 0 && state.stats.reputation < s.loseAt) {
-        state.activeSponsors = state.activeSponsors.filter(id => id !== s.id);
-        toast({ title: `${s.name} pulled out`, text: `Reputation too low — sponsor contract terminated.`, kind: "warn" });
-        continue;
+  // --- Process pending sponsor contracts (approve after 1 day) ---
+  const nowApproved = [];
+  state.pendingContracts = (state.pendingContracts || []).filter(pc => {
+    if (state.time.day >= pc.approvalDay) {
+      if (Math.random() < 0.88) {
+        const contract = { ...pc, status: "active", startDay: state.time.day };
+        state.sponsorContracts = state.sponsorContracts || [];
+        state.sponsorContracts.push(contract);
+        nowApproved.push(contract);
+        const s = getSponsor(pc.sponsorId);
+        if (s) toast({ title: `✅ ${s.name} signed`, text: `Contract approved — ${fmtCash(pc.dailyRate)}/day for ${pc.duration ? pc.duration + " days" : "ongoing"}.`, kind: "success" });
+      } else {
+        const s = getSponsor(pc.sponsorId);
+        if (s) toast({ title: `❌ ${s.name} declined`, text: "They reviewed your metrics and passed. Try again later.", kind: "warn" });
       }
+      return false;
     }
-    sponsorRev += s.daily;
+    return true;
+  });
+
+  // --- Check expired sponsor contracts ---
+  state.sponsorContracts = (state.sponsorContracts || []).filter(sc => {
+    if (sc.duration && state.time.day > sc.startDay + sc.duration) {
+      const s = getSponsor(sc.sponsorId);
+      if (s) toast({ title: `Contract expired`, text: `${s.name} · ${sc.duration}-day contract has ended.`, kind: "info" });
+      return false;
+    }
+    // Check rep-based dropout
+    const s = getSponsor(sc.sponsorId);
+    if (s && s.loseAt >= 0 && state.stats.reputation < s.loseAt) {
+      toast({ title: `${s.name} pulled out`, text: "Reputation fell below their minimum — contract voided.", kind: "warn" });
+      return false;
+    }
+    return true;
+  });
+
+  // --- Sponsor revenue from active contracts ---
+  let sponsorRev = 0;
+  for (const sc of getActiveSponsorContracts()) {
+    const s = getSponsor(sc.sponsorId);
+    if (s) sponsorRev += sc.dailyRate;
   }
   state.stats.cash += sponsorRev;
   state.revToday.sponsors = sponsorRev;
@@ -667,6 +800,47 @@ function handleDaily() {
   // --- Refresh candidate pool occasionally ---
   if (Math.random() < 0.3) state.candidatePool = generateCandidates(3);
 
+  // --- Active smear damage ---
+  if (state.activeSmearsAgainstUs && state.activeSmearsAgainstUs.length > 0) {
+    state.activeSmearsAgainstUs = state.activeSmearsAgainstUs.filter(sm => {
+      sm.daysLeft = (sm.daysLeft || 3) - 1;
+      const dailyRepDmg = Math.ceil(sm.damage / 3);
+      state.stats.reputation = Math.max(0, state.stats.reputation - dailyRepDmg);
+      if (sm.daysLeft <= 0) {
+        toast({ title: "Smear campaign ended", text: `Coverage of the scandal about ${state.newsroom.name} has died down.`, kind: "info" });
+        return false;
+      }
+      return true;
+    });
+  }
+
+  // --- Shady deal: political scoops bonus ---
+  const sd = state.shadyDeals || {};
+  if (sd.activePoliticalDeal && state.time.day <= sd.activePoliticalDeal.endDay) {
+    if (Math.random() < 0.4) {
+      toast({ title: "💼 Political tip", text: "Your city hall contact slipped you an embargo-breaking brief.", kind: "info" });
+    }
+  } else if (sd.activePoliticalDeal && state.time.day > sd.activePoliticalDeal.endDay) {
+    sd.activePoliticalDeal = null;
+  }
+
+  // --- Dynamic competitor market entrant ---
+  const allComps = [...state.competitors, ...(state.dynamicCompetitors || [])];
+  const entrantPool = DYNAMIC_ENTRANT_POOL.filter(e => !allComps.find(c => c.id === e.id));
+  if (entrantPool.length && state.stats.marketShare > 22 && state.time.day % 30 === 0 && Math.random() < 0.45) {
+    const entrant = pick(entrantPool);
+    const newComp = {
+      ...entrant, share: entrant.baseShare,
+      latest: null, totalShares: 100,
+      sharePrice: Math.floor(30 + Math.random() * 100), playerShares: 0,
+      subjugated: false, dynamic: true,
+    };
+    state.dynamicCompetitors = state.dynamicCompetitors || [];
+    state.dynamicCompetitors.push(newComp);
+    state.competitors.push(newComp);
+    toast({ title: `📰 New rival enters market`, text: `${newComp.name} has launched. The market just got more competitive.`, kind: "warn", timeout: 6000 });
+  }
+
   // --- Refresh competitor wire ---
   refreshCompetitorWire();
   saveState();
@@ -675,7 +849,9 @@ function handleDaily() {
 
 function renderClock() {
   const t = state.time;
-  $("#game-clock").textContent = `Day ${t.day} · ${String(t.hour).padStart(2,"0")}:${String(t.minute).padStart(2,"0")}`;
+  const ampm = t.hour < 12 ? "AM" : "PM";
+  const h12 = t.hour % 12 || 12;
+  $("#game-clock").textContent = `Day ${t.day} · ${h12}${ampm}`;
 }
 
 /* ==================================================================== */
@@ -809,6 +985,7 @@ function setupNav() {
     if (v === "owner") renderOwnerPanel();
     if (v === "achievements") renderAchievements();
     if (v === "finance") renderFinancePanel();
+    if (v === "underground") renderUnderground();
   }));
 }
 
@@ -874,19 +1051,25 @@ function renderDashboard() {
     <div class="pulse-item"><div class="pulse-label">Live stories</div><div class="pulse-value">${state.articles.filter(a => a.live).length}</div></div>
   `;
 
-  // market share (sums to 100% of competition+you)
-  const allShares = [
+  // market share — normalized display
+  const allShareEntries = [
     { name: state.newsroom.name, share: state.stats.marketShare, you: true },
     ...state.competitors.map(c => ({ name: c.name, share: c.share, you: false }))
   ];
-  const total = allShares.reduce((sum, r) => sum + r.share, 0);
-  const normalized = allShares.map(r => ({ ...r, pct: (r.share / total) * 100 })).sort((a,b) => b.pct - a.pct);
-  $("#market-share").innerHTML = normalized.map(r => `
-    <div class="share-row">
-      <span class="share-name">${escapeHtml(r.name)}</span>
-      <span class="share-bar"><span class="share-fill ${r.you ? "you" : ""}" style="width:${r.pct.toFixed(1)}%"></span></span>
-      <span class="share-pct">${r.pct.toFixed(1)}%</span>
-    </div>`).join("");
+  const shareTotal = allShareEntries.reduce((sum, r) => sum + Math.max(0.1, r.share), 0);
+  const normalizedShares = allShareEntries
+    .map(r => ({ ...r, pct: (Math.max(0.1, r.share) / shareTotal) * 100 }))
+    .sort((a, b) => b.pct - a.pct)
+    .slice(0, 8); // show top 8 to keep it readable
+  const msHost = $("#market-share");
+  if (msHost) {
+    msHost.innerHTML = normalizedShares.map(r => `
+      <div class="share-row">
+        <span class="share-name" title="${escapeHtml(r.name)}">${escapeHtml(r.name.length > 18 ? r.name.slice(0, 16) + "…" : r.name)}</span>
+        <span class="share-bar"><span class="share-fill ${r.you ? "you" : ""}" style="width:${r.pct.toFixed(1)}%"></span></span>
+        <span class="share-pct">${r.pct.toFixed(1)}%</span>
+      </div>`).join("");
+  }
 }
 
 function renderRevenuePanel() {
@@ -894,9 +1077,9 @@ function renderRevenuePanel() {
   if (!host) return;
   const rev = state.revToday || { ads: 0, subs: 0, sponsors: 0, tv: 0, bureaus: 0, loans: 0 };
   const subDaily = (state.stats.subscribers || 0) * 5;
-  const activeSponsorIds = state.activeSponsors || [];
-  const activeSponsors = SPONSORS.filter(s => activeSponsorIds.includes(s.id));
-  const sponsorDaily = activeSponsors.reduce((sum, s) => sum + s.daily, 0);
+  const activeContracts = getActiveSponsorContracts();
+  const activeSponsors = activeContracts.map(c => getSponsor(c.sponsorId)).filter(Boolean);
+  const sponsorDaily = activeContracts.reduce((sum, c) => sum + c.dailyRate, 0);
   const tvActive = state.tv.founded ? state.tv.shows.length : 0;
   const totalLoansOwed = (state.loans || []).reduce((s, l) => s + l.remaining, 0);
   const loanInterest = rev.loans || 0;
@@ -937,42 +1120,107 @@ function renderRevenuePanel() {
 function renderSponsorsPanel() {
   const host = $("#sponsors-panel");
   if (!host) return;
-  const activeSponsorIds = state.activeSponsors || [];
+  const contracts = state.sponsorContracts || [];
+  const pending = state.pendingContracts || [];
+
   host.innerHTML = SPONSORS.map(s => {
     const eligible = state.stats.reputation >= s.minRep;
-    const active = activeSponsorIds.includes(s.id);
     const locked = !eligible;
+    const activeContract = contracts.find(c => c.sponsorId === s.id && c.status === "active");
+    const pendingContract = pending.find(c => c.sponsorId === s.id);
     let actionBtn = "";
+    let statusBadge = "";
     if (locked) {
-      actionBtn = `<button class="sponsor-action-btn" disabled title="Need ${s.minRep} rep">Locked</button>`;
-    } else if (active) {
-      actionBtn = `<button class="sponsor-action-btn terminate" data-id="${s.id}">Terminate</button>`;
+      actionBtn = `<button class="sponsor-action-btn" disabled>Rep ${s.minRep} needed</button>`;
+    } else if (activeContract) {
+      const daysLeft = activeContract.duration ? Math.max(0, (activeContract.startDay + activeContract.duration) - state.time.day) : null;
+      statusBadge = `<span class="live-badge">ACTIVE${daysLeft !== null ? ` · ${daysLeft}d left` : " · ongoing"}</span>`;
+      actionBtn = `<button class="sponsor-action-btn terminate" data-cid="${activeContract.id}">Terminate early</button>`;
+    } else if (pendingContract) {
+      statusBadge = `<span class="skill-pill" style="background:#d96b00;color:#fff">PENDING REVIEW</span>`;
+      actionBtn = `<button class="sponsor-action-btn" disabled>Awaiting response…</button>`;
     } else {
-      actionBtn = `<button class="sponsor-action-btn sign" data-id="${s.id}">Sign contract</button>`;
+      actionBtn = `<button class="sponsor-action-btn sign" data-id="${s.id}">Propose contract</button>`;
     }
     return `<div class="sponsor-row ${locked ? "sponsor-locked" : ""}">
       <div class="sponsor-logo" style="background:${s.color}">${s.name[0]}</div>
       <div class="sponsor-meta">
-        <div class="sponsor-name">${escapeHtml(s.name)}${active ? ' <span class="live-badge">ACTIVE</span>' : ""}</div>
-        <div class="sponsor-tier">${s.tier} · ${locked ? `needs rep ${s.minRep}` : eligible ? `${fmtCash(s.daily)}/day` : ""}</div>
+        <div class="sponsor-name">${escapeHtml(s.name)} ${statusBadge}</div>
+        <div class="sponsor-tier">${s.tier} · ${locked ? `needs ${s.minRep} rep` : `${fmtCash(s.daily)}/day`}</div>
       </div>
       ${actionBtn}
     </div>`;
   }).join("");
+
   host.querySelectorAll(".sign").forEach(btn => btn.addEventListener("click", () => {
     const s = SPONSORS.find(x => x.id === btn.dataset.id);
     if (!s) return;
-    if (!state.activeSponsors.includes(s.id)) state.activeSponsors.push(s.id);
-    saveState(); renderSponsorsPanel();
-    toast({ title: "Sponsor signed", text: `${s.name} · ${fmtCash(s.daily)}/day starts tomorrow.`, kind: "success" });
+    openSponsorNegotiation(s);
   }));
   host.querySelectorAll(".terminate").forEach(btn => btn.addEventListener("click", () => {
-    const s = SPONSORS.find(x => x.id === btn.dataset.id);
-    if (!s || !confirm(`Terminate contract with ${s.name}?`)) return;
-    state.activeSponsors = state.activeSponsors.filter(id => id !== s.id);
+    const cid = btn.dataset.cid;
+    const contract = (state.sponsorContracts || []).find(c => c.id === cid);
+    if (!contract) return;
+    const s = getSponsor(contract.sponsorId);
+    if (!confirm(`Terminate contract with ${s?.name || "sponsor"} early? This may affect your reputation.`)) return;
+    state.sponsorContracts = state.sponsorContracts.filter(c => c.id !== cid);
+    state.stats.reputation = Math.max(0, state.stats.reputation - 3);
     saveState(); renderSponsorsPanel();
-    toast({ title: "Contract ended", text: `${s.name} is no longer your sponsor.`, kind: "warn" });
+    toast({ title: "Contract terminated", text: `${s?.name} contract ended. -3 reputation.`, kind: "warn" });
   }));
+}
+
+function openSponsorNegotiation(s) {
+  const durations = [
+    { days: 30, rate: s.daily, label: "30-day contract" },
+    { days: 60, rate: Math.round(s.daily * 1.08), label: "60-day contract (+8% rate)" },
+    { days: 90, rate: Math.round(s.daily * 1.15), label: "90-day contract (+15% rate)" },
+    { days: null, rate: Math.round(s.daily * 0.92), label: "Rolling (no end, -8% rate)" },
+  ];
+  $("#modal").dataset.articleId = "";
+  $("#modal-body").innerHTML = `<div class="modal-body">
+    <div class="byline" style="color:${s.color}">${s.tier.toUpperCase()} SPONSOR</div>
+    <h1 style="font-size:22px;margin-bottom:4px">${escapeHtml(s.name)}</h1>
+    <p style="color:var(--slate);font-size:14px;margin:0 0 18px">Base rate: ${fmtCash(s.daily)}/day · Minimum reputation: ${s.minRep}</p>
+    <p style="font-size:14px;margin:0 0 14px"><strong>Choose contract terms.</strong> Your proposal goes to their media desk — they'll respond within one game day.</p>
+    <div class="sponsor-duration-grid">
+      ${durations.map((d, i) => `<div class="sponsor-duration-tile" data-i="${i}">
+        <div class="sponsor-duration-label">${d.label}</div>
+        <div class="sponsor-duration-rate">${fmtCash(d.rate)}<span style="font-size:13px;font-family:inherit">/day</span></div>
+        ${d.days ? `<div style="font-size:11px;color:var(--slate);margin-top:4px">Total: ${fmtCash(d.rate * d.days)}</div>` : ""}
+      </div>`).join("")}
+    </div>
+    <div style="margin-top:20px;display:flex;gap:10px;" id="sponsor-neg-actions">
+      <button class="primary-btn" id="sponsor-submit" disabled>Submit Proposal</button>
+      <button class="reject-btn" data-close>Cancel</button>
+    </div>
+  </div>`;
+  $("#modal").classList.remove("hidden");
+
+  let chosenIdx = null;
+  $$("#modal .sponsor-duration-tile").forEach(tile => {
+    tile.addEventListener("click", () => {
+      $$("#modal .sponsor-duration-tile").forEach(t => t.classList.toggle("selected", t === tile));
+      chosenIdx = parseInt(tile.dataset.i);
+      $("#sponsor-submit").disabled = false;
+    });
+  });
+
+  $("#sponsor-submit").addEventListener("click", () => {
+    if (chosenIdx === null) return;
+    const chosen = durations[chosenIdx];
+    const pc = {
+      id: uid(), sponsorId: s.id,
+      duration: chosen.days, dailyRate: chosen.rate,
+      approvalDay: state.time.day + 1, status: "pending",
+    };
+    state.pendingContracts = state.pendingContracts || [];
+    state.pendingContracts.push(pc);
+    saveState();
+    $("#modal").classList.add("hidden");
+    renderSponsorsPanel();
+    toast({ title: `Proposal sent to ${s.name}`, text: "They'll review it and respond by tomorrow.", kind: "info", timeout: 5000 });
+  });
 }
 
 /* ==================================================================== */
@@ -997,9 +1245,17 @@ async function onPublish() {
   const result = $("#writer-result");
   result.classList.remove("hidden");
   result.innerHTML = `<div class="ai-reviewing">
+    <div class="ai-progress-wrap"><div class="ai-progress-bar"><div class="ai-progress-fill" id="pub-prog"></div></div></div>
     <span class="spinner"></span>
-    <p><strong>AI critic is reading your article…</strong><br>This takes 10–30 seconds. The review will be real.</p>
+    <p id="pub-msg"><strong>Scanning headline quality…</strong></p>
+    <p class="ai-progress-sub">AI critic reviewing. Takes 10–30 seconds — the assessment is real.</p>
   </div>`;
+  const pubProg = document.getElementById("pub-prog");
+  const pubMsg = document.getElementById("pub-msg");
+  if (pubProg) { requestAnimationFrame(() => { pubProg.style.transition = "width 28s linear"; pubProg.style.width = "90%"; }); }
+  const progressMsgs = ["Scanning headline quality…","Verifying factual claims…","Checking sourcing depth…","Assessing narrative structure…","Calculating reader engagement…","Analyzing tonal consistency…","Evaluating viral potential…","Generating critique…"];
+  let msgIdx = 0;
+  const msgInterval = setInterval(() => { msgIdx = (msgIdx + 1) % progressMsgs.length; if (pubMsg) pubMsg.innerHTML = `<strong>${progressMsgs[msgIdx]}</strong>`; }, 3000);
 
   // AI-only review — no heuristic baseline shown
   let review;
@@ -1007,11 +1263,13 @@ async function onPublish() {
     const r = await fetch("/api/review-ai", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title, body }) });
     review = await r.json();
   } catch (e) {
+    clearInterval(msgInterval);
     toast({ title: "Review failed", text: "AI unreachable. Try again.", kind: "warn" });
     btn.disabled = false;
     result.classList.add("hidden");
     return;
   }
+  clearInterval(msgInterval);
 
   // Apply marketing multiplier to estimated_views
   if (state.marketing.active && state.marketing.articlesLeft > 0) {
@@ -1582,9 +1840,9 @@ function renderPublicSite() {
   }
   const sorted = state.articles.slice().reverse();
   const lead = sorted[0], rest = sorted.slice(1, 6);
-  const activeSponsorIds = state.activeSponsors || [];
-  const activeSponsors = SPONSORS.filter(s => activeSponsorIds.includes(s.id));
-  const sponsoredAd = activeSponsors.length ? pick(activeSponsors) : null;
+  const activeContracts2 = getActiveSponsorContracts();
+  const activeSponsors2 = activeContracts2.map(c => getSponsor(c.sponsorId)).filter(Boolean);
+  const sponsoredAd = activeSponsors2.length ? pick(activeSponsors2) : null;
   const adCopy = sponsoredAd
     ? `<div class="site-ad"><div class="site-ad-title">${escapeHtml(sponsoredAd.name)}</div><div class="site-ad-tag">${escapeHtml(sponsoredAd.tier)} sponsor of ${escapeHtml(state.newsroom.name)}</div></div>`
     : `<div class="site-banner-ad">Ad space available — raise reputation to unlock sponsors</div>`;
@@ -1617,22 +1875,68 @@ function renderPublicSite() {
 /* ==================================================================== */
 
 function renderCompetitors() {
-  $("#competitor-cards").innerHTML = state.competitors.map(c => {
+  const host = $("#competitor-cards");
+  const allShares = [
+    { name: state.newsroom.name, share: state.stats.marketShare },
+    ...state.competitors.map(c => ({ name: c.name, share: c.share }))
+  ];
+  const totalShare = allShares.reduce((s, r) => s + r.share, 0);
+
+  host.innerHTML = state.competitors.map(c => {
     const h = state.competitorHeadlines.find(x => x.outlet === c.name);
-    return `<div class="comp-card" data-outlet="${escapeHtml(c.name)}">
-      <h3 class="comp-name">${c.logo} ${escapeHtml(c.name)}</h3>
-      <div class="comp-bio">${escapeHtml(c.bio)}</div>
-      <p class="comp-headline">${escapeHtml(h ? h.headline : "—")}</p>
-      ${h && h.blurb ? `<div class="comp-blurb">${escapeHtml(h.blurb)}</div>` : ""}
-      <div class="comp-cat">${escapeHtml(h ? h.category : "")}</div>
-      <div class="comp-meta">
-        <span>Share: <strong>${c.share.toFixed(1)}%</strong></span>
-        <span>${c.personality}</span>
-        <span style="color:var(--accent)">Click to read →</span>
+    const pct = ((c.share / totalShare) * 100).toFixed(1);
+    const playerPct = ((state.stats.marketShare / totalShare) * 100).toFixed(1);
+    const pctOwned = c.totalShares > 0 ? Math.round((c.playerShares / c.totalShares) * 100) : 0;
+    const statusTag = c.subjugated
+      ? `<span class="subjugated-badge" style="font-size:10px">ACQUIRED</span>`
+      : c.dynamic ? `<span class="skill-pill" style="background:#7d2eb9;color:#fff;font-size:9px">NEW ENTRANT</span>` : "";
+    const vsPlayer = c.share > state.stats.marketShare ? `<span style="color:var(--accent)">▲ ${(+pct - +playerPct).toFixed(1)}% ahead of you</span>` : `<span style="color:var(--green)">▼ ${(+playerPct - +pct).toFixed(1)}% behind you</span>`;
+    const smearActive = (state.activeSmearsAgainstUs || []).some(sm => sm.source === c.id);
+    return `<div class="comp-card-rich ${c.subjugated ? "comp-subjugated" : ""}" data-outlet="${escapeHtml(c.name)}">
+      <div class="comp-card-header">
+        <span class="comp-logo-big">${c.logo}</span>
+        <div style="flex:1">
+          <h3 class="comp-name">${escapeHtml(c.name)} ${statusTag}</h3>
+          <div class="comp-bio">${escapeHtml(c.bio)}</div>
+        </div>
+        ${smearActive ? `<span title="Running smear campaign against you" style="font-size:22px;cursor:default">⚔️</span>` : ""}
+      </div>
+      <div class="comp-headline-block">
+        <div class="comp-cat">${escapeHtml(h ? h.category : "no coverage yet")}</div>
+        <p class="comp-headline">${escapeHtml(h ? h.headline : "—")}</p>
+        ${h?.blurb ? `<div class="comp-blurb">${escapeHtml(h.blurb)}</div>` : ""}
+      </div>
+      <div class="comp-stats-row">
+        <div class="comp-stat"><div class="comp-stat-val">${pct}%</div><div class="comp-stat-lbl">Market share</div></div>
+        <div class="comp-stat"><div class="comp-stat-val">${fmtCash(c.sharePrice)}</div><div class="comp-stat-lbl">Share price</div></div>
+        <div class="comp-stat"><div class="comp-stat-val">${pctOwned}%</div><div class="comp-stat-lbl">You own</div></div>
+      </div>
+      <div class="comp-share-bar-wrap">
+        <div class="comp-share-bar-track">
+          <div class="comp-share-bar-fill" style="width:${pct}%"></div>
+        </div>
+        <div style="font-size:11px;color:var(--slate);margin-top:4px;display:flex;justify-content:space-between">
+          <span>${escapeHtml(c.personality)}</span>${vsPlayer}
+        </div>
+      </div>
+      <div class="comp-actions">
+        <button class="ghost-btn read-comp-btn" data-outlet="${escapeHtml(c.name)}">Read latest →</button>
+        ${!c.subjugated ? `<button class="ghost-btn buy-1-btn" data-id="${c.id}" style="font-size:11px">Buy 1 share (${fmtCash(c.sharePrice)})</button>` : ""}
       </div>
     </div>`;
   }).join("");
-  $$(".comp-card").forEach(c => c.addEventListener("click", () => openCompetitorArticle(c.dataset.outlet)));
+
+  $$(".read-comp-btn").forEach(b => b.addEventListener("click", e => { e.stopPropagation(); openCompetitorArticle(b.dataset.outlet); }));
+  $$(".buy-1-btn").forEach(b => b.addEventListener("click", e => {
+    e.stopPropagation();
+    const c = state.competitors.find(x => x.id === b.dataset.id);
+    if (!c) return;
+    if (state.stats.cash < c.sharePrice) { toast({title:"Not enough cash", text:`${fmtCash(c.sharePrice)} needed.`, kind:"warn"}); return; }
+    state.stats.cash -= c.sharePrice;
+    c.playerShares = Math.min(c.playerShares + 1, c.totalShares);
+    saveState(); renderStats(); renderCompetitors();
+    toast({ title: "Share bought", text: `${c.name}: ${c.playerShares}/${c.totalShares} shares.` });
+  }));
 }
 async function refreshCompetitorWire() {
   try {
@@ -1862,6 +2166,51 @@ const MARKETING_TIERS = [
   { id: "national",   name: "National",    cost: 18000, bonusPct: 250, articles: 15, subBonus: 3000, desc: "+250% views on next 15 articles, +3,000 subscribers" },
 ];
 
+function openLoanConfirmModal(lp) {
+  const dailyCost = Math.round(lp.amount * (lp.rate / 100));
+  const weekCost = dailyCost * 7;
+  $("#modal").dataset.articleId = "";
+  $("#modal-body").innerHTML = `<div class="modal-body loan-doc">
+    <div class="loan-doc-header">
+      <div class="loan-doc-stamp">APPROVED</div>
+      <h2 class="loan-doc-title">Loan Agreement</h2>
+      <p class="loan-doc-sub">NEWSROOM CAPITAL PARTNERS · Ref #${Math.random().toString(36).slice(2,8).toUpperCase()}</p>
+    </div>
+    <div class="loan-doc-body">
+      <div class="loan-doc-row"><span>Borrower</span><strong>${escapeHtml(state.newsroom.name)}</strong></div>
+      <div class="loan-doc-row"><span>Principal</span><strong style="color:var(--green);font-size:22px">${fmtCash(lp.amount)}</strong></div>
+      <div class="loan-doc-row"><span>Daily interest</span><strong style="color:var(--accent)">${lp.rate}% · ${fmtCash(dailyCost)}/day</strong></div>
+      <div class="loan-doc-row"><span>Estimated week cost</span><strong>${fmtCash(weekCost)}</strong></div>
+      <div class="loan-doc-row"><span>Repayment</span><strong>On demand — no fixed term</strong></div>
+    </div>
+    <div class="loan-doc-warning">⚠ Interest compounds daily. Failure to repay leads to bankruptcy proceedings.</div>
+    <div style="margin-top:20px;display:flex;gap:10px;">
+      <button class="primary-btn" id="loan-confirm-btn">✓ Accept &amp; Receive Funds</button>
+      <button class="reject-btn" data-close>Cancel</button>
+    </div>
+  </div>`;
+  $("#modal").classList.remove("hidden");
+  document.getElementById("loan-confirm-btn")?.addEventListener("click", () => {
+    const loan = { id: uid(), amount: lp.amount, remaining: lp.amount, rate: lp.rate, accruedDays: 0 };
+    state.loans.push(loan);
+    state.stats.cash += lp.amount;
+    saveState();
+    $("#modal").classList.add("hidden");
+    // Show deposit animation
+    showDepositAnimation(lp.amount);
+    renderStats(); renderFinancePanel();
+    toast({ title: `${fmtCash(lp.amount)} deposited`, text: `Loan active · ${lp.rate}%/day interest starts tonight.`, kind: "warn", timeout: 5000 });
+  });
+}
+
+function showDepositAnimation(amount) {
+  const el = document.createElement("div");
+  el.className = "deposit-flash";
+  el.innerHTML = `<div class="deposit-inner"><div class="deposit-amount">${fmtCash(amount)}</div><div class="deposit-label">DEPOSITED</div></div>`;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 2400);
+}
+
 function renderFinancePanel() {
   const host = $("#finance-panel");
   if (!host) return;
@@ -1972,16 +2321,11 @@ function renderFinancePanel() {
     }
   });
 
-  // Borrow buttons
+  // Borrow buttons → show loan document modal
   host.querySelectorAll(".take-loan").forEach(btn => btn.addEventListener("click", () => {
     const lp = LOAN_PRODUCTS.find(x => x.id === btn.dataset.loan);
     if (!lp) return;
-    if (!confirm(`Borrow ${fmtCash(lp.amount)} at ${lp.rate}% daily interest?`)) return;
-    const loan = { id: uid(), amount: lp.amount, remaining: lp.amount, rate: lp.rate, accruedDays: 0 };
-    state.loans.push(loan);
-    state.stats.cash += lp.amount;
-    saveState(); renderStats(); renderFinancePanel();
-    toast({ title: "Loan approved", text: `${fmtCash(lp.amount)} deposited. ${lp.rate}%/day interest.`, kind: "warn" });
+    openLoanConfirmModal(lp);
   }));
 
   // Marketing buttons
@@ -2191,30 +2535,279 @@ function setupModal() {
 function openSettings() {
   const hq = state.cities.find(c => c.id === state.newsroom.hqCityId);
   const ident = IDENTITIES.find(i => i.id === state.newsroom.identity);
-  $("#set-locked-info").innerHTML = `
-    <dl style="margin:0">
-      <dt>Player</dt><dd>${escapeHtml(state.player.name)}</dd>
-      <dt>Newsroom</dt><dd>${escapeHtml(state.newsroom.name)}</dd>
-      <dt>Identity</dt><dd>${escapeHtml(ident?.name || "")}</dd>
-      <dt>HQ</dt><dd>${escapeHtml(hq?.name || "")}</dd>
-      <dt>Founded</dt><dd>${new Date(state.newsroom.founded).toLocaleDateString()}</dd>
-    </dl>
-    <p style="font-size:11px;color:var(--slate);margin-top:10px">These choices are permanent.</p>`;
-  $("#set-density").value = state.settings.density;
-  $("#set-speed").value = state.settings.speed;
-  $("#set-speed-readout").textContent = state.settings.speed + "x";
+  const font = HEADLINE_FONTS.find(f => f.id === state.newsroom.fontId) || HEADLINE_FONTS[0];
+  const paper = PAPER_STYLES.find(p => p.id === state.newsroom.paperStyleId) || PAPER_STYLES[0];
+  const activeContracts = getActiveSponsorContracts();
+  const totalLoans = (state.loans || []).reduce((s, l) => s + l.remaining, 0);
+  const host = $("#settings-drawer-body");
+  if (host) {
+    host.innerHTML = `
+      <div class="setting-block">
+        <h3>Newsroom identity (permanent)</h3>
+        <div class="locked-info">
+          <dl style="margin:0">
+            <dt>Editor</dt><dd>${escapeHtml(state.player.name)}</dd>
+            <dt>Publication</dt><dd>${escapeHtml(state.newsroom.name)}</dd>
+            <dt>Tagline</dt><dd style="font-style:italic;color:var(--slate)">${escapeHtml(state.newsroom.motto)}</dd>
+            <dt>Identity</dt><dd>${escapeHtml(ident?.name || "—")}</dd>
+            <dt>HQ city</dt><dd>${escapeHtml(hq?.name || "—")}</dd>
+            <dt>Typography</dt><dd>${escapeHtml(font.name)}</dd>
+            <dt>Paper style</dt><dd>${escapeHtml(paper.name)}</dd>
+            <dt>Founded</dt><dd>${state.newsroom.foundedYear || new Date(state.newsroom.founded).getFullYear()}</dd>
+          </dl>
+        </div>
+      </div>
+      <div class="setting-block">
+        <h3>Live stats</h3>
+        <div class="settings-stats-grid">
+          <div class="settings-stat"><div class="settings-stat-val">${fmtNum(state.stats.reputation)}</div><div class="settings-stat-lbl">Reputation</div></div>
+          <div class="settings-stat"><div class="settings-stat-val">${fmtCash(state.stats.cash)}</div><div class="settings-stat-lbl">Cash</div></div>
+          <div class="settings-stat"><div class="settings-stat-val">${fmtNum(state.stats.subscribers)}</div><div class="settings-stat-lbl">Subscribers</div></div>
+          <div class="settings-stat"><div class="settings-stat-val">${state.stats.marketShare.toFixed(1)}%</div><div class="settings-stat-lbl">Market share</div></div>
+          <div class="settings-stat"><div class="settings-stat-val">${activeContracts.length}</div><div class="settings-stat-lbl">Sponsors</div></div>
+          <div class="settings-stat ${totalLoans > 0 ? "danger" : ""}"><div class="settings-stat-val">${totalLoans > 0 ? fmtCash(totalLoans) : "None"}</div><div class="settings-stat-lbl">Loans owed</div></div>
+        </div>
+      </div>
+      <div class="setting-block">
+        <h3>Layout density</h3>
+        <div class="slider-row">
+          <span class="slider-lo">Compact</span>
+          <input id="set-density" type="range" min="0" max="100" value="${state.settings.density || 50}" />
+          <span class="slider-hi">Spacious</span>
+        </div>
+      </div>
+      <div class="setting-block">
+        <h3>Save data</h3>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;">
+          <button id="set-export" class="ghost-btn">Export save</button>
+          <button id="set-import" class="ghost-btn">Import save</button>
+          <input id="set-import-file" type="file" accept=".json" style="display:none">
+        </div>
+        <div style="font-size:11px;color:var(--slate);margin-top:8px">Export creates a JSON backup. Import replaces your current save.</div>
+      </div>
+      <div class="setting-block">
+        <button id="set-reset" class="reject-btn">Reset entire game</button>
+      </div>`;
+    document.getElementById("set-density")?.addEventListener("input", e => { state.settings.density = +e.target.value; applyTheme(); saveState(); });
+    document.getElementById("set-export")?.addEventListener("click", () => {
+      const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+      const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+      a.download = `newsroom-save-day${state.time.day}.json`; a.click();
+      toast({ title: "Save exported", text: "JSON file downloaded.", kind: "success" });
+    });
+    document.getElementById("set-import")?.addEventListener("click", () => document.getElementById("set-import-file")?.click());
+    document.getElementById("set-import-file")?.addEventListener("change", e => {
+      const file = e.target.files?.[0]; if (!file) return;
+      const reader = new FileReader();
+      reader.onload = ev => {
+        try {
+          const data = JSON.parse(ev.target.result);
+          if (!data.version) throw new Error("Invalid save file");
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+          toast({ title: "Save imported", text: "Reloading…", kind: "success" });
+          setTimeout(() => location.reload(), 1200);
+        } catch { toast({ title: "Import failed", text: "Invalid save file.", kind: "warn" }); }
+      };
+      reader.readAsText(file);
+    });
+    document.getElementById("set-reset")?.addEventListener("click", () => {
+      if (!confirm("Reset everything? This permanently wipes your save.")) return;
+      localStorage.removeItem(STORAGE_KEY);
+      location.reload();
+    });
+  }
   $("#settings-drawer").classList.remove("hidden");
 }
+
 function setupSettings() {
   $("#open-settings").addEventListener("click", openSettings);
   $$("#settings-drawer [data-close-drawer]").forEach(el => el.addEventListener("click", () => $("#settings-drawer").classList.add("hidden")));
-  $("#set-density").addEventListener("input", e => { state.settings.density = +e.target.value; applyTheme(); saveState(); });
-  $("#set-speed").addEventListener("input", e => { state.settings.speed = +e.target.value; $("#set-speed-readout").textContent = state.settings.speed + "x"; saveState(); });
-  $("#set-reset").addEventListener("click", () => {
-    if (!confirm("Reset everything? This wipes your save.")) return;
-    localStorage.removeItem(STORAGE_KEY);
-    location.reload();
+}
+
+/* ==================================================================== */
+/*                         UNDERGROUND / SHADY                         */
+/* ==================================================================== */
+
+function renderUnderground() {
+  const host = document.querySelector("[data-view='underground']");
+  if (!host) return;
+  const sd = state.shadyDeals || { history: [], cooldowns: {}, exposures: [] };
+  const cooldowns = sd.cooldowns || {};
+  const exposures = sd.exposures || [];
+  const activeSmearsOnUs = state.activeSmearsAgainstUs || [];
+
+  // Active smears section
+  const smearSection = activeSmearsOnUs.length > 0
+    ? `<div class="shady-smear-alert">
+        <div class="shady-smear-head">⚔️ Active smear campaigns against you (${activeSmearsOnUs.length})</div>
+        ${activeSmearsOnUs.map(sm => `<div class="shady-smear-item">
+          <div class="shady-smear-headline">"${escapeHtml(sm.headline)}"</div>
+          <div class="shady-smear-meta">${escapeHtml(sm.source)} · ${sm.daysLeft} days remaining · -${sm.damage} rep/day</div>
+        </div>`).join("")}
+      </div>` : "";
+
+  // Past exposures
+  const exposureSection = exposures.length > 0
+    ? `<div class="shady-section-title">Past scandals</div>
+       <div class="shady-exposures">
+         ${exposures.slice().reverse().slice(0, 5).map(e => `<div class="shady-exposure-row">
+           <span class="shady-exposure-deal">${e.dealName}</span>
+           <span style="color:var(--accent)">-${e.repLost} rep · Day ${e.day}</span>
+         </div>`).join("")}
+       </div>` : "";
+
+  // Available deals
+  const dealsHtml = SHADY_DEALS.map(deal => {
+    const cooldownDay = cooldowns[deal.id] || 0;
+    const onCooldown = state.time.day < cooldownDay;
+    const locked = state.stats.reputation < (deal.minRep || 0);
+    const disabled = onCooldown || locked;
+    const catchPct = Math.round(deal.catchProb * 100);
+    return `<div class="shady-deal-card ${disabled ? "shady-disabled" : ""}">
+      <div class="shady-deal-header">
+        <span class="shady-deal-emoji">${deal.emoji}</span>
+        <div style="flex:1">
+          <div class="shady-deal-name">${escapeHtml(deal.name)}</div>
+          <div class="shady-deal-risk">Discovery risk: <strong>${catchPct}%</strong>${deal.minRep ? ` · Requires ${deal.minRep} rep` : ""}</div>
+        </div>
+        ${disabled
+          ? `<span class="shady-cooldown-badge">${onCooldown ? `Available day ${cooldownDay}` : "Locked"}</span>`
+          : `<button class="primary-btn shady-execute-btn" data-id="${deal.id}" style="font-size:12px;padding:6px 14px;">Execute</button>`
+        }
+      </div>
+      <div class="shady-deal-desc">${escapeHtml(deal.desc)}</div>
+      <div class="shady-deal-footer">
+        <span class="shady-reward">Reward: ${formatShadyReward(deal.reward)}</span>
+        <span class="shady-consequence">If caught: ${formatShadyCaught(deal.caughtEffect)}</span>
+      </div>
+    </div>`;
+  }).join("");
+
+  host.innerHTML = `
+    <h2 class="section-h">Underground</h2>
+    <p class="section-sub">Off-the-record arrangements. Most won't be discovered — but none are risk-free. Discovery is <strong>not</strong> guaranteed.</p>
+    ${smearSection}
+    <div class="shady-deals-grid">${dealsHtml}</div>
+    ${exposureSection}
+  `;
+
+  $$(".shady-execute-btn").forEach(btn => btn.addEventListener("click", () => confirmAndExecuteDeal(btn.dataset.id)));
+}
+
+function formatShadyReward(reward) {
+  if (!reward) return "—";
+  const parts = [];
+  if (reward.cash) parts.push(`+${fmtCash(reward.cash)}`);
+  if (reward.cost) parts.push(`(costs ${fmtCash(reward.cost)})`);
+  if (reward.nextArticleCredBonus) parts.push(`+${reward.nextArticleCredBonus} credibility on next article`);
+  if (reward.breakingBonus) parts.push(`${reward.breakingBonus} advance scoops`);
+  if (reward.competitorSpy) parts.push(`${reward.competitorSpy}-day competitor intelligence`);
+  return parts.join(", ") || "Special advantage";
+}
+
+function formatShadyCaught(effect) {
+  if (!effect) return "—";
+  const parts = [];
+  if (effect.rep) parts.push(`${effect.rep} reputation`);
+  if (effect.cash) parts.push(`${fmtCash(effect.cash)}`);
+  if (effect.smear) parts.push("competitor smear campaign");
+  return parts.join(", ");
+}
+
+function confirmAndExecuteDeal(dealId) {
+  const deal = SHADY_DEALS.find(d => d.id === dealId);
+  if (!deal) return;
+  $("#modal").dataset.articleId = "";
+  const catchPct = Math.round(deal.catchProb * 100);
+  const cost = deal.reward?.cost || 0;
+  const canAfford = cost === 0 || state.stats.cash >= cost;
+  $("#modal-body").innerHTML = `<div class="modal-body">
+    <div class="byline" style="color:#7d2eb9;font-weight:700">UNDERGROUND DEAL</div>
+    <h2 style="font-size:20px;margin-bottom:6px">${deal.emoji} ${escapeHtml(deal.name)}</h2>
+    <div class="shady-confirm-desc">${escapeHtml(deal.desc)}</div>
+    <div class="shady-confirm-stats">
+      <div class="shady-confirm-stat"><div style="font-family:'Oswald',sans-serif;font-size:24px;color:var(--green)">${formatShadyReward(deal.reward)}</div><div style="font-size:11px;color:var(--slate);text-transform:uppercase;letter-spacing:1px">Reward</div></div>
+      <div class="shady-confirm-stat"><div style="font-family:'Oswald',sans-serif;font-size:24px;color:var(--accent)">${catchPct}%</div><div style="font-size:11px;color:var(--slate);text-transform:uppercase;letter-spacing:1px">Discovery risk</div></div>
+      <div class="shady-confirm-stat"><div style="font-family:'Oswald',sans-serif;font-size:16px;color:var(--accent)">${formatShadyCaught(deal.caughtEffect)}</div><div style="font-size:11px;color:var(--slate);text-transform:uppercase;letter-spacing:1px">If exposed</div></div>
+    </div>
+    ${!canAfford ? `<div style="color:var(--accent);margin-top:10px;font-weight:700">Not enough cash (need ${fmtCash(cost)}).</div>` : ""}
+    <div style="margin-top:20px;display:flex;gap:10px;">
+      <button class="primary-btn" id="shady-go-btn" ${!canAfford ? "disabled" : ""} style="background:#7d2eb9">Proceed — I understand the risks</button>
+      <button class="reject-btn" data-close>Cancel</button>
+    </div>
+  </div>`;
+  $("#modal").classList.remove("hidden");
+  document.getElementById("shady-go-btn")?.addEventListener("click", () => {
+    $("#modal").classList.add("hidden");
+    executeShadyDeal(deal);
   });
+}
+
+async function executeShadyDeal(deal) {
+  const sd = state.shadyDeals = state.shadyDeals || { history: [], cooldowns: {}, exposures: [] };
+  const cost = deal.reward?.cost || 0;
+  if (cost > 0) state.stats.cash -= cost;
+
+  // Apply reward
+  if (deal.reward.cash) { state.stats.cash += deal.reward.cash; showDepositAnimation(deal.reward.cash); }
+  if (deal.reward.nextArticleCredBonus) sd.nextCredBonus = (sd.nextCredBonus || 0) + deal.reward.nextArticleCredBonus;
+  if (deal.reward.breakingBonus) { sd.activePoliticalDeal = { endDay: state.time.day + deal.reward.breakingBonus }; }
+  if (deal.reward.competitorSpy) { sd.spyActive = { endDay: state.time.day + deal.reward.competitorSpy }; }
+
+  sd.cooldowns[deal.id] = state.time.day + deal.cooldownDays;
+  sd.history.push({ dealId: deal.id, dealName: deal.name, day: state.time.day, caught: false });
+  saveState(); renderStats();
+
+  toast({ title: `${deal.emoji} ${deal.name}`, text: "Deal executed. Keep your mouth shut.", kind: "info", timeout: 5000 });
+
+  // Check if caught (async — might take a moment to "discover")
+  const delay = 2000 + Math.random() * 6000;
+  setTimeout(async () => {
+    if (Math.random() < deal.catchProb) {
+      await triggerSmearCampaign(deal);
+    }
+  }, delay);
+}
+
+async function triggerSmearCampaign(deal) {
+  const sd = state.shadyDeals = state.shadyDeals || { history: [], cooldowns: {}, exposures: [] };
+  const smearSource = pick(state.competitors.filter(c => !c.subjugated));
+  if (!smearSource) return;
+
+  // Add exposure to history
+  sd.exposures = sd.exposures || [];
+  const lastHistory = sd.history[sd.history.length - 1];
+  if (lastHistory) lastHistory.caught = true;
+
+  toast({ title: `🚨 SCANDAL BREAKING`, text: `${smearSource.name} is running a story about your operation. Brace for impact.`, kind: "warn", timeout: 7000 });
+
+  // Fetch AI smear headline
+  let headline = `${state.newsroom.name}: Questions mount over ${deal.caughtEffect.dealType}`;
+  let damage = deal.caughtEffect.rep ? Math.abs(deal.caughtEffect.rep) : 15;
+  try {
+    const r = await fetch("/api/smear-campaign", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ targetNewsroom: state.newsroom.name, smearingOutlet: smearSource.name, dealType: deal.caughtEffect.dealType, repLevel: state.stats.reputation }),
+    });
+    const data = await r.json();
+    if (data.headline) { headline = data.headline; damage = data.damage || damage; }
+  } catch {}
+
+  const smear = { id: uid(), source: smearSource.id, sourceName: smearSource.name, headline, damage, daysLeft: 3 };
+  state.activeSmearsAgainstUs = state.activeSmearsAgainstUs || [];
+  state.activeSmearsAgainstUs.push(smear);
+
+  const immediateRepDmg = deal.caughtEffect.rep || 0;
+  state.stats.reputation = Math.max(0, state.stats.reputation + immediateRepDmg);
+  if (deal.caughtEffect.cash) state.stats.cash += deal.caughtEffect.cash;
+
+  sd.exposures.push({ dealName: deal.name, repLost: Math.abs(immediateRepDmg) + damage * 3, day: state.time.day });
+
+  saveState(); renderStats();
+  toast({ title: `"${headline.slice(0, 60)}…"`, text: `${smearSource.name} just published it. -${Math.abs(immediateRepDmg)} rep immediately + ongoing damage.`, kind: "warn", timeout: 8000 });
+
+  if (document.querySelector(".view.active[data-view='competitors']")) renderCompetitors();
+  if (document.querySelector(".view.active[data-view='underground']")) renderUnderground();
 }
 
 /* ==================================================================== */

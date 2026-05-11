@@ -142,6 +142,7 @@
       <button class="nav-btn" data-view="competitors">Competitors</button>
       <button class="nav-btn" data-view="owner">Owner</button>
       <button class="nav-btn" data-view="finance">Finance</button>
+      <button class="nav-btn" data-view="underground" style="color:#7d2eb9">Underground</button>
       <button class="nav-btn" data-view="achievements">Trophies <span id="ach-badge" class="badge hidden">0</span></button>
     </nav>
   </div>
@@ -253,7 +254,7 @@
     <!-- Competitors -->
     <section class="view" data-view="competitors">
       <h2 class="section-h">The competition</h2>
-      <p class="section-sub">Click any rival to read their latest published article in full.</p>
+      <p class="section-sub">Head-to-head market share, share prices, and recent coverage from every rival. Buy shares to eventually take them over.</p>
       <div id="competitor-cards" class="competitor-cards"></div>
     </section>
 
@@ -266,6 +267,10 @@
     <!-- Finance -->
     <section class="view" data-view="finance">
       <div id="finance-panel"></div>
+    </section>
+
+    <!-- Underground -->
+    <section class="view" data-view="underground">
     </section>
 
     <!-- Achievements -->
@@ -292,34 +297,7 @@
   <aside class="drawer-panel">
     <button class="drawer-close" data-close-drawer>×</button>
     <h2 class="drawer-title">Settings</h2>
-
-    <div class="setting-block">
-      <h3>Newsroom (locked)</h3>
-      <div id="set-locked-info" class="locked-info"></div>
-    </div>
-
-    <div class="setting-block">
-      <h3>Layout density</h3>
-      <div class="slider-row">
-        <span class="slider-lo">Compact</span>
-        <input id="set-density" type="range" min="0" max="100" />
-        <span class="slider-hi">Spacious</span>
-      </div>
-    </div>
-
-    <div class="setting-block">
-      <h3>Game speed</h3>
-      <div class="slider-row">
-        <span class="slider-lo">Slow</span>
-        <input id="set-speed" type="range" min="1" max="10" />
-        <span class="slider-hi">Fast</span>
-      </div>
-      <div class="slider-readout" id="set-speed-readout">1x</div>
-    </div>
-
-    <div class="setting-block">
-      <button id="set-reset" class="reject-btn">Reset entire game</button>
-    </div>
+    <div id="settings-drawer-body"><!-- rendered by JS --></div>
   </aside>
 </div>
 
