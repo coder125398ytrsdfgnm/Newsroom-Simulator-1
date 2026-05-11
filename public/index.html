@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Newsroom Simulator</title>
+<link rel="stylesheet" href="/styles.css" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600;700&family=Source+Serif+4:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<!-- Onboarding overlay -->
+<div id="onboarding" class="onboarding">
+  <div class="onboarding-card">
+    <div class="onboarding-brand">
+      <div class="brand-bar"></div>
+      <h1>NEWSROOM</h1>
+      <p class="brand-sub">Simulator</p>
+    </div>
+    <p class="onboarding-lede">Found your newsroom. Hire reporters. Compete for the front page.</p>
+
+    <label>Your name
+      <input id="ob-player" type="text" placeholder="e.g. Alex Carter" maxlength="40" />
+    </label>
+    <label>Newsroom name
+      <input id="ob-newsroom" type="text" placeholder="e.g. The Daily Beacon" maxlength="40" />
+    </label>
+    <label>Logo emoji
+      <input id="ob-logo" type="text" placeholder="📰" maxlength="2" value="📰" />
+    </label>
+    <label>Newsroom motto (optional)
+      <input id="ob-motto" type="text" placeholder="All the news that fits." maxlength="60" />
+    </label>
+
+    <button id="ob-start" class="primary-btn">Open the doors</button>
+  </div>
+</div>
+
+<!-- Main app -->
+<div id="app" class="app hidden">
+  <header class="topbar">
+    <div class="topbar-left">
+      <span class="live-dot"></span>
+      <span class="live-label">LIVE</span>
+      <span class="ticker" id="ticker">Loading competitor wire…</span>
+    </div>
+    <div class="topbar-right">
+      <span id="ai-status" class="ai-badge">AI: …</span>
+    </div>
+  </header>
+
+  <div class="masthead">
+    <div class="masthead-inner">
+      <div class="masthead-brand">
+        <span class="masthead-logo" id="brand-logo">📰</span>
+        <div>
+          <h1 class="masthead-title" id="brand-name">THE DAILY</h1>
+          <p class="masthead-motto" id="brand-motto">All the news that fits.</p>
+        </div>
+      </div>
+      <div class="masthead-stats">
+        <div class="stat"><span class="stat-num" id="stat-articles">0</span><span class="stat-label">Articles</span></div>
+        <div class="stat"><span class="stat-num" id="stat-views">0</span><span class="stat-label">Total Views</span></div>
+        <div class="stat"><span class="stat-num" id="stat-rep">50</span><span class="stat-label">Reputation</span></div>
+        <div class="stat"><span class="stat-num" id="stat-cash">$5,000</span><span class="stat-label">Cash</span></div>
+        <div class="stat"><span class="stat-num" id="stat-reporters">0</span><span class="stat-label">Reporters</span></div>
+      </div>
+    </div>
+    <nav class="masthead-nav">
+      <button class="nav-btn active" data-view="dashboard">Dashboard</button>
+      <button class="nav-btn" data-view="write">Write Article</button>
+      <button class="nav-btn" data-view="reporters">Reporters</button>
+      <button class="nav-btn" data-view="approvals">Pending Approvals <span id="approvals-badge" class="badge hidden">0</span></button>
+      <button class="nav-btn" data-view="public">Public Site</button>
+      <button class="nav-btn" data-view="competitors">Competitors</button>
+    </nav>
+  </div>
+
+  <main class="content">
+
+    <!-- Dashboard -->
+    <section class="view active" data-view="dashboard">
+      <div class="section-grid">
+        <div class="card">
+          <h2 class="card-title">Latest from your newsroom</h2>
+          <div id="dash-recent" class="article-list"></div>
+        </div>
+        <div class="card">
+          <h2 class="card-title">Competitor wire</h2>
+          <div id="dash-competitors" class="wire-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Write -->
+    <section class="view" data-view="write">
+      <div class="writer">
+        <h2 class="section-h">Filing a story</h2>
+        <input id="writer-title" class="writer-title" type="text" placeholder="Headline" maxlength="160" />
+        <select id="writer-category" class="writer-category">
+          <option>Politics</option><option>Business</option><option>Tech</option>
+          <option>Sports</option><option>Culture</option><option>World</option>
+          <option>Local</option><option>Crime</option>
+        </select>
+        <textarea id="writer-body" class="writer-body" placeholder="Write your article here. Stronger leads, specific facts, and quotes will score better."></textarea>
+        <div class="writer-actions">
+          <span id="writer-wordcount" class="wordcount">0 words</span>
+          <button id="writer-publish" class="primary-btn">Publish &amp; Submit for Review</button>
+        </div>
+        <div id="writer-result" class="result-panel hidden"></div>
+      </div>
+    </section>
+
+    <!-- Reporters -->
+    <section class="view" data-view="reporters">
+      <div class="section-grid">
+        <div class="card">
+          <h2 class="card-title">Your staff</h2>
+          <div id="staff-list" class="staff-list"></div>
+        </div>
+        <div class="card">
+          <h2 class="card-title">Hire a reporter</h2>
+          <div id="hire-pool" class="hire-pool"></div>
+          <button id="refresh-pool" class="ghost-btn">Refresh candidates</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Approvals -->
+    <section class="view" data-view="approvals">
+      <h2 class="section-h">Stories awaiting your approval</h2>
+      <div id="approvals-list" class="approvals-list"></div>
+    </section>
+
+    <!-- Public Site -->
+    <section class="view" data-view="public">
+      <div class="public-frame">
+        <div class="public-chrome">
+          <span class="chrome-dot red"></span><span class="chrome-dot yellow"></span><span class="chrome-dot green"></span>
+          <span class="chrome-url" id="public-url">https://yournewsroom.example/</span>
+        </div>
+        <div class="public-site">
+          <div class="public-masthead">
+            <span class="public-logo" id="public-logo">📰</span>
+            <h1 class="public-title" id="public-title">THE DAILY</h1>
+            <p class="public-motto" id="public-motto">All the news that fits.</p>
+          </div>
+          <div id="public-articles" class="public-articles"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Competitors -->
+    <section class="view" data-view="competitors">
+      <h2 class="section-h">The competition</h2>
+      <div id="competitor-cards" class="competitor-cards"></div>
+    </section>
+
+  </main>
+</div>
+
+<!-- Article detail modal -->
+<div id="modal" class="modal hidden">
+  <div class="modal-backdrop" data-close></div>
+  <div class="modal-card">
+    <button class="modal-close" data-close>×</button>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>
