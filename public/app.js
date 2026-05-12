@@ -821,6 +821,12 @@ async function rollReporterPitch() {
     const recent = state.articles.slice(-3).map(a => a.title);
     const resp = await fetch("/api/reporter-pitch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reporterName: r.name, beat: r.beat, recentHistory: recent }) });
     const data = await resp.json();
+    if (!data || !data.pitch) {
+      // AI failed — drop the pitch silently rather than show placeholder text
+      state.pendingPitches = state.pendingPitches.filter(p => p.id !== pitchId);
+      saveState();
+      return;
+    }
     const idx = state.pendingPitches.findIndex(p => p.id === pitchId);
     if (idx === -1) return;
     state.pendingPitches[idx] = { id: pitchId, status: "ready", reporterId: r.id, reporterName: r.name, beat: r.beat, pitch: data.pitch, angle: data.angle, category: data.category };
@@ -1830,15 +1836,27 @@ async function assignStory(id, opts = {}) {
   try {
     const resp = await fetch("/api/reporter-article", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reporterName: r.name, beat, newsroom: state.newsroom.name, skill: r.skill, tip: opts.tip || null }) });
     const draft = await resp.json();
+    if (!draft || !draft.title || !draft.body) {
+      // AI failed — refund and remove the drafting card
+      state.stats.cash += r.salary;
+      state.pendingApprovals = state.pendingApprovals.filter(p => p.id !== draftingId);
+      saveState(); renderApprovals(); renderStats();
+      toast({ title: "Draft failed", text: `${r.name} couldn't file — assignment refunded.`, kind: "warn" });
+      return;
+    }
     const idx = state.pendingApprovals.findIndex(p => p.id === draftingId);
     if (idx !== -1) {
       state.pendingApprovals[idx] = { id: draftingId, status: "ready", reporterId: r.id, reporterName: r.name, title: draft.title, body: draft.body, category: draft.category || "Local", fromBureau: opts.fromBureau || null };
-      // Track bureau article counter
       if (opts.fromBureau) { const bureau = state.cities.find(c => c.id === opts.fromBureau); if (bureau) bureau.bureauArticles = (bureau.bureauArticles || 0) + 1; }
       saveState(); renderApprovals(); renderStats();
       toast({ title: "Draft filed", text: `${r.name}: ${draft.title.slice(0, 50)}…` });
     }
-  } catch (e) { toast({ title: "Filing failed", text: e.message, kind: "warn" }); }
+  } catch (e) {
+    state.stats.cash += r.salary;
+    state.pendingApprovals = state.pendingApprovals.filter(p => p.id !== draftingId);
+    saveState(); renderApprovals(); renderStats();
+    toast({ title: "Filing failed", text: "AI unreachable — assignment refunded.", kind: "warn" });
+  }
 }
 
 function renderApprovals() {
@@ -2492,9 +2510,12 @@ async function refreshCompetitorWire() {
   try {
     const resp = await fetch("/api/competitor-headlines", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ competitors: state.competitors.map(c => c.name) }) });
     const data = await resp.json();
-    state.competitorHeadlines = data.headlines || [];
-    saveState();
-    renderDashboard(); renderCompetitors();
+    if (Array.isArray(data.headlines) && data.headlines.length > 0) {
+      state.competitorHeadlines = data.headlines;
+      saveState();
+      renderDashboard(); renderCompetitors();
+    }
+    // If AI returned empty, keep the previously-cached headlines instead of showing nothing
   } catch { /* ignore */ }
 }
 async function openCompetitorArticle(outletName) {
@@ -2506,6 +2527,10 @@ async function openCompetitorArticle(outletName) {
   try {
     const r = await fetch("/api/competitor-article", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ outlet: outletName, personality: competitor.personality }) });
     const art = await r.json();
+    if (!art || !art.title || !art.body) {
+      $("#modal-body").innerHTML = `<div class="modal-body"><div class="byline">${escapeHtml(outletName)}</div><h1>Article unavailable</h1><p style="color:var(--slate)">The wire dropped this story. Try again in a moment.</p><div style="margin-top:14px"><button class="ghost-btn" data-close>Close</button></div></div>`;
+      return;
+    }
     competitor.latest = art;
     saveState();
     $("#modal-body").innerHTML = `<div class="modal-body">
@@ -2515,7 +2540,7 @@ async function openCompetitorArticle(outletName) {
       <div class="views-line">Read on ${escapeHtml(outletName)}</div>
     </div>`;
   } catch (e) {
-    $("#modal-body").innerHTML = `<div class="modal-body"><h1>Failed to load</h1><p>${escapeHtml(e.message)}</p></div>`;
+    $("#modal-body").innerHTML = `<div class="modal-body"><h1>Failed to load</h1><p>${escapeHtml(e.message)}</p><div style="margin-top:14px"><button class="ghost-btn" data-close>Close</button></div></div>`;
   }
 }
 
@@ -2621,6 +2646,12 @@ function setupBankruptcyHandlers() {
       const r = await fetch("/api/owner-bid", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ newsroom: state.newsroom.name, voluntary }) });
       const data = await r.json();
       const bidders = data.bidders || [];
+      if (bidders.length === 0) {
+        $("#auction-bidders").innerHTML = `<div style="color:var(--slate);padding:20px;text-align:center"><strong>No bids returned this round.</strong><br><span style="font-size:12px">The AI broker is offline. Click "Try again" below to re-solicit.</span></div>`;
+        $("#ba-auction").disabled = false;
+        $("#ba-auction").textContent = "Try again";
+        return;
+      }
       $("#auction-bidders").innerHTML = bidders.map((b, i) => `
         <div class="bidder-card" data-i="${i}">
           <h4 class="bidder-name">${escapeHtml(b.name)}</h4>
@@ -3200,124 +3231,229 @@ function setupSettings() {
 function renderUnderground() {
   const host = document.querySelector("[data-view='underground']");
   if (!host) return;
-  const sd = state.shadyDeals || { history: [], cooldowns: {}, exposures: [] };
-  const cooldowns = sd.cooldowns || {};
-  const exposures = sd.exposures || [];
-  const activeSmearsOnUs = state.activeSmearsAgainstUs || [];
 
-  // Active smears section
-  const smearSection = activeSmearsOnUs.length > 0
-    ? `<div class="shady-smear-alert">
-        <div class="shady-smear-head">⚔️ Active smear campaigns against you (${activeSmearsOnUs.length})</div>
-        ${activeSmearsOnUs.map(sm => `<div class="shady-smear-item">
-          <div class="shady-smear-headline">"${escapeHtml(sm.headline)}"</div>
-          <div class="shady-smear-meta">${escapeHtml(sm.source)} · ${sm.daysLeft} days remaining · -${sm.damage} rep/day</div>
-        </div>`).join("")}
-      </div>` : "";
+  // Defensive state init
+  state.shadyDeals = state.shadyDeals || { history: [], cooldowns: {}, exposures: [] };
+  state.shadyDeals.cooldowns = state.shadyDeals.cooldowns || {};
+  state.shadyDeals.exposures = state.shadyDeals.exposures || [];
+  state.shadyDeals.history = state.shadyDeals.history || [];
+  state.activeSmearsAgainstUs = state.activeSmearsAgainstUs || [];
 
-  // Past exposures
-  const exposureSection = exposures.length > 0
-    ? `<div class="shady-section-title">Past scandals</div>
-       <div class="shady-exposures">
-         ${exposures.slice().reverse().slice(0, 5).map(e => `<div class="shady-exposure-row">
-           <span class="shady-exposure-deal">${e.dealName}</span>
-           <span style="color:var(--accent)">-${e.repLost} rep · Day ${e.day}</span>
-         </div>`).join("")}
+  const sd = state.shadyDeals;
+  const cooldowns = sd.cooldowns;
+  const exposures = sd.exposures;
+  const activeSmearsOnUs = state.activeSmearsAgainstUs;
+  const day = state.time.day;
+
+  // Active ongoing operations (political tip stream, spy network)
+  const activeOps = [];
+  if (sd.activePoliticalDeal && day <= sd.activePoliticalDeal.endDay) {
+    activeOps.push({ icon:"🤝", title:"Political tip pipeline active", sub:`Tips flowing for ${sd.activePoliticalDeal.endDay - day + 1} more days` });
+  }
+  if (sd.spyActive && day <= sd.spyActive.endDay) {
+    activeOps.push({ icon:"🕵️", title:"Rival newsroom infiltrated", sub:`Intel feed open for ${sd.spyActive.endDay - day + 1} more days` });
+  }
+  if ((sd.nextCredBonus || 0) > 0) {
+    activeOps.push({ icon:"🎭", title:"Fabricated source primed", sub:`+${sd.nextCredBonus} credibility on your next article` });
+  }
+
+  const opsSection = activeOps.length > 0
+    ? `<div class="ug-ops-bar">
+        <div class="ug-ops-title">Ongoing operations</div>
+        <div class="ug-ops-grid">
+          ${activeOps.map(o => `<div class="ug-op">
+            <span class="ug-op-icon">${o.icon}</span>
+            <div><div class="ug-op-name">${escapeHtml(o.title)}</div><div class="ug-op-sub">${escapeHtml(o.sub)}</div></div>
+          </div>`).join("")}
+        </div>
        </div>` : "";
 
-  // Available deals
+  // Active smear campaigns against us
+  const smearSection = activeSmearsOnUs.length > 0
+    ? `<div class="ug-smear-alert">
+        <div class="ug-smear-head">⚔️ Active smear campaigns against you · ${activeSmearsOnUs.length}</div>
+        ${activeSmearsOnUs.map(sm => `<div class="ug-smear-row">
+          <div class="ug-smear-quote">"${escapeHtml(sm.headline)}"</div>
+          <div class="ug-smear-meta">${escapeHtml(sm.sourceName || sm.source)} · ${sm.daysLeft}d left · -${sm.damage} rep/day</div>
+        </div>`).join("")}
+       </div>` : "";
+
+  // Available deals (with proper enable/disable logic)
   const dealsHtml = SHADY_DEALS.map(deal => {
     const cooldownDay = cooldowns[deal.id] || 0;
-    const onCooldown = state.time.day < cooldownDay;
+    const onCooldown = day < cooldownDay;
     const locked = state.stats.reputation < (deal.minRep || 0);
-    const disabled = onCooldown || locked;
+    const cost = deal.reward?.cost || 0;
+    const canAfford = cost === 0 || state.stats.cash >= cost;
+    const disabled = onCooldown || locked || !canAfford;
     const catchPct = Math.round(deal.catchProb * 100);
-    return `<div class="shady-deal-card ${disabled ? "shady-disabled" : ""}">
-      <div class="shady-deal-header">
-        <span class="shady-deal-emoji">${deal.emoji}</span>
-        <div style="flex:1">
-          <div class="shady-deal-name">${escapeHtml(deal.name)}</div>
-          <div class="shady-deal-risk">Discovery risk: <strong>${catchPct}%</strong>${deal.minRep ? ` · Requires ${deal.minRep} rep` : ""}</div>
+    let badge = "";
+    if (onCooldown) badge = `<span class="ug-deal-status cool">Cools down day ${cooldownDay}</span>`;
+    else if (locked) badge = `<span class="ug-deal-status locked">Requires ${deal.minRep} rep</span>`;
+    else if (!canAfford) badge = `<span class="ug-deal-status broke">Need ${fmtCash(cost)}</span>`;
+    return `<div class="ug-deal ${disabled ? "ug-deal-disabled" : ""}" data-id="${deal.id}">
+      <div class="ug-deal-top">
+        <span class="ug-deal-emoji">${deal.emoji}</span>
+        <div class="ug-deal-headtext">
+          <div class="ug-deal-name">${escapeHtml(deal.name)}</div>
+          <div class="ug-deal-risk">Discovery risk <span class="ug-risk-pct ${catchPct >= 30 ? "high" : catchPct >= 20 ? "med" : "low"}">${catchPct}%</span>${deal.minRep ? ` · Min ${deal.minRep} rep` : ""}</div>
         </div>
-        ${disabled
-          ? `<span class="shady-cooldown-badge">${onCooldown ? `Available day ${cooldownDay}` : "Locked"}</span>`
-          : `<button class="primary-btn shady-execute-btn" data-id="${deal.id}" style="font-size:12px;padding:6px 14px;">Execute</button>`
-        }
+        ${disabled ? badge : `<button class="ug-execute-btn primary-btn" data-id="${deal.id}">Make the call →</button>`}
       </div>
-      <div class="shady-deal-desc">${escapeHtml(deal.desc)}</div>
-      <div class="shady-deal-footer">
-        <span class="shady-reward">Reward: ${formatShadyReward(deal.reward)}</span>
-        <span class="shady-consequence">If caught: ${formatShadyCaught(deal.caughtEffect)}</span>
+      <div class="ug-deal-body">${escapeHtml(deal.desc)}</div>
+      <div class="ug-deal-rewards">
+        <div class="ug-reward-tag">+ ${formatShadyReward(deal.reward)}</div>
+        <div class="ug-cost-tag">If caught: ${formatShadyCaught(deal.caughtEffect)}</div>
       </div>
     </div>`;
   }).join("");
 
+  // Past exposures with proper formatting
+  const exposureSection = exposures.length > 0
+    ? `<div class="ug-section-title">Your past scandals</div>
+       <div class="ug-exposures">
+         ${exposures.slice().reverse().slice(0, 8).map(e => `<div class="ug-exposure">
+           <span class="ug-exposure-name">${escapeHtml(e.dealName)}</span>
+           <span class="ug-exposure-cost">−${e.repLost} rep</span>
+           <span class="ug-exposure-day">Day ${e.day}</span>
+         </div>`).join("")}
+       </div>` : "";
+
+  // History of executed deals
+  const successCount = sd.history.filter(h => !h.caught).length;
+  const caughtCount = sd.history.filter(h => h.caught).length;
+
   host.innerHTML = `
-    <h2 class="section-h">Underground</h2>
-    <p class="section-sub">Off-the-record arrangements. Most won't be discovered — but none are risk-free. Discovery is <strong>not</strong> guaranteed.</p>
+    <div class="ug-banner">
+      <div class="ug-banner-bar"></div>
+      <div class="ug-banner-content">
+        <h2 class="ug-title">UNDERGROUND</h2>
+        <p class="ug-tag">Off-the-record arrangements. Nothing here is on paper. Most deals stay buried — but discovery <em>is possible</em>.</p>
+        <div class="ug-meter">
+          <span class="ug-meter-item"><strong>${sd.history.length}</strong> deals executed</span>
+          <span class="ug-meter-item"><strong>${successCount}</strong> clean</span>
+          <span class="ug-meter-item ug-meter-bad"><strong>${caughtCount}</strong> exposed</span>
+        </div>
+      </div>
+    </div>
+    ${opsSection}
     ${smearSection}
-    <div class="shady-deals-grid">${dealsHtml}</div>
+    <div class="ug-section-title">Available operations</div>
+    <div class="ug-deals-grid">${dealsHtml}</div>
     ${exposureSection}
   `;
 
-  $$(".shady-execute-btn").forEach(btn => btn.addEventListener("click", () => confirmAndExecuteDeal(btn.dataset.id)));
+  document.querySelectorAll(".ug-execute-btn").forEach(btn => btn.addEventListener("click", e => {
+    e.stopPropagation();
+    confirmAndExecuteDeal(btn.dataset.id);
+  }));
 }
 
 function formatShadyReward(reward) {
   if (!reward) return "—";
   const parts = [];
-  if (reward.cash) parts.push(`+${fmtCash(reward.cash)}`);
-  if (reward.cost) parts.push(`(costs ${fmtCash(reward.cost)})`);
+  if (reward.cash) parts.push(`${fmtCash(reward.cash)}`);
+  if (reward.cost) parts.push(`(net of ${fmtCash(reward.cost)} cost)`);
   if (reward.nextArticleCredBonus) parts.push(`+${reward.nextArticleCredBonus} credibility on next article`);
-  if (reward.breakingBonus) parts.push(`${reward.breakingBonus} advance scoops`);
-  if (reward.competitorSpy) parts.push(`${reward.competitorSpy}-day competitor intelligence`);
-  return parts.join(", ") || "Special advantage";
+  if (reward.breakingBonus) parts.push(`${reward.breakingBonus} days of advance political tips`);
+  if (reward.competitorSpy) parts.push(`${reward.competitorSpy} days of rival intel`);
+  return parts.join(" ") || "Operational advantage";
 }
 
 function formatShadyCaught(effect) {
   if (!effect) return "—";
   const parts = [];
-  if (effect.rep) parts.push(`${effect.rep} reputation`);
-  if (effect.cash) parts.push(`${fmtCash(effect.cash)}`);
-  if (effect.smear) parts.push("competitor smear campaign");
-  return parts.join(", ");
+  if (effect.rep) parts.push(`${effect.rep} rep`);
+  if (effect.cash) parts.push(`${fmtCash(effect.cash)} loss`);
+  if (effect.smear) parts.push("competitor smear");
+  return parts.join(" · ");
 }
 
-function confirmAndExecuteDeal(dealId) {
+async function confirmAndExecuteDeal(dealId) {
   const deal = SHADY_DEALS.find(d => d.id === dealId);
   if (!deal) return;
-  $("#modal").dataset.articleId = "";
-  const catchPct = Math.round(deal.catchProb * 100);
+  // Re-validate (defensive — user could have spam-clicked or been gated since render)
+  state.shadyDeals = state.shadyDeals || { history: [], cooldowns: {}, exposures: [] };
+  const cooldownDay = (state.shadyDeals.cooldowns || {})[deal.id] || 0;
+  if (state.time.day < cooldownDay) { toast({title:"Deal cooling down",text:`Available day ${cooldownDay}.`,kind:"warn"}); return; }
+  if (state.stats.reputation < (deal.minRep || 0)) { toast({title:"Locked",text:`Need ${deal.minRep} reputation.`,kind:"warn"}); return; }
   const cost = deal.reward?.cost || 0;
-  const canAfford = cost === 0 || state.stats.cash >= cost;
-  $("#modal-body").innerHTML = `<div class="modal-body">
-    <div class="byline" style="color:#7d2eb9;font-weight:700">UNDERGROUND DEAL</div>
-    <h2 style="font-size:20px;margin-bottom:6px">${deal.emoji} ${escapeHtml(deal.name)}</h2>
-    <div class="shady-confirm-desc">${escapeHtml(deal.desc)}</div>
-    <div class="shady-confirm-stats">
-      <div class="shady-confirm-stat"><div style="font-family:'Oswald',sans-serif;font-size:24px;color:var(--green)">${formatShadyReward(deal.reward)}</div><div style="font-size:11px;color:var(--slate);text-transform:uppercase;letter-spacing:1px">Reward</div></div>
-      <div class="shady-confirm-stat"><div style="font-family:'Oswald',sans-serif;font-size:24px;color:var(--accent)">${catchPct}%</div><div style="font-size:11px;color:var(--slate);text-transform:uppercase;letter-spacing:1px">Discovery risk</div></div>
-      <div class="shady-confirm-stat"><div style="font-family:'Oswald',sans-serif;font-size:16px;color:var(--accent)">${formatShadyCaught(deal.caughtEffect)}</div><div style="font-size:11px;color:var(--slate);text-transform:uppercase;letter-spacing:1px">If exposed</div></div>
+  if (cost > 0 && state.stats.cash < cost) { toast({title:"Not enough cash",text:`Need ${fmtCash(cost)}.`,kind:"warn"}); return; }
+
+  const catchPct = Math.round(deal.catchProb * 100);
+
+  // Show modal with loading state for AI-generated "rumor"
+  $("#modal").dataset.articleId = "";
+  $("#modal-body").innerHTML = `<div class="modal-body ug-confirm">
+    <div class="ug-confirm-label">UNDERGROUND OPERATION</div>
+    <h2 class="ug-confirm-title">${deal.emoji} ${escapeHtml(deal.name)}</h2>
+    <div class="ug-confirm-desc">${escapeHtml(deal.desc)}</div>
+    <div class="ug-rumor" id="ug-rumor">
+      <span class="spinner"></span> <em>Wire your contact… <span style="color:var(--slate)">composing the approach</span></em>
     </div>
-    ${!canAfford ? `<div style="color:var(--accent);margin-top:10px;font-weight:700">Not enough cash (need ${fmtCash(cost)}).</div>` : ""}
-    <div style="margin-top:20px;display:flex;gap:10px;">
-      <button class="primary-btn" id="shady-go-btn" ${!canAfford ? "disabled" : ""} style="background:#7d2eb9">Proceed — I understand the risks</button>
-      <button class="reject-btn" data-close>Cancel</button>
+    <div class="ug-confirm-stats">
+      <div class="ug-confirm-stat">
+        <div class="ug-confirm-val green">${formatShadyReward(deal.reward)}</div>
+        <div class="ug-confirm-lbl">Reward</div>
+      </div>
+      <div class="ug-confirm-stat">
+        <div class="ug-confirm-val accent">${catchPct}%</div>
+        <div class="ug-confirm-lbl">Discovery risk</div>
+      </div>
+      <div class="ug-confirm-stat">
+        <div class="ug-confirm-val accent">${formatShadyCaught(deal.caughtEffect)}</div>
+        <div class="ug-confirm-lbl">If exposed</div>
+      </div>
+    </div>
+    <div class="ug-confirm-actions">
+      <button class="primary-btn ug-go-btn" id="ug-confirm-go" disabled style="background:#7d2eb9;opacity:0.5">Generating…</button>
+      <button class="reject-btn" data-close>Walk away</button>
     </div>
   </div>`;
   $("#modal").classList.remove("hidden");
-  document.getElementById("shady-go-btn")?.addEventListener("click", () => {
-    $("#modal").classList.add("hidden");
-    executeShadyDeal(deal);
-  });
+
+  // Fetch AI-generated approach/rumor and enable the button
+  try {
+    const r = await fetch("/api/shady-rumor", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        dealName: deal.name,
+        dealDesc: deal.desc,
+        newsroom: state.newsroom.name,
+        repLevel: state.stats.reputation,
+        identity: state.newsroom.identity,
+      }),
+    });
+    const data = await r.json();
+    const rumorEl = document.getElementById("ug-rumor");
+    if (rumorEl && data && data.approach) {
+      rumorEl.innerHTML = `<span class="ug-rumor-tag">YOUR FIXER</span> "${escapeHtml(data.approach)}"`;
+    } else if (rumorEl) {
+      rumorEl.innerHTML = `<span class="ug-rumor-tag">YOUR FIXER</span> <em>"You sure? Doors close fast on this one."</em>`;
+    }
+  } catch {
+    const rumorEl = document.getElementById("ug-rumor");
+    if (rumorEl) rumorEl.innerHTML = `<span class="ug-rumor-tag">YOUR FIXER</span> <em>"You sure?"</em>`;
+  }
+  const goBtn = document.getElementById("ug-confirm-go");
+  if (goBtn) {
+    goBtn.disabled = false;
+    goBtn.style.opacity = "1";
+    goBtn.textContent = "Go through with it";
+    goBtn.addEventListener("click", () => {
+      $("#modal").classList.add("hidden");
+      executeShadyDeal(deal);
+    });
+  }
 }
 
 async function executeShadyDeal(deal) {
-  const sd = state.shadyDeals = state.shadyDeals || { history: [], cooldowns: {}, exposures: [] };
+  state.shadyDeals = state.shadyDeals || { history: [], cooldowns: {}, exposures: [] };
+  state.shadyDeals.cooldowns = state.shadyDeals.cooldowns || {};
+  const sd = state.shadyDeals;
   const cost = deal.reward?.cost || 0;
   if (cost > 0) state.stats.cash -= cost;
 
-  // Apply reward
   if (deal.reward.cash) { state.stats.cash += deal.reward.cash; showDepositAnimation(deal.reward.cash); }
   if (deal.reward.nextArticleCredBonus) sd.nextCredBonus = (sd.nextCredBonus || 0) + deal.reward.nextArticleCredBonus;
   if (deal.reward.breakingBonus) { sd.activePoliticalDeal = { endDay: state.time.day + deal.reward.breakingBonus }; }
@@ -3327,44 +3463,49 @@ async function executeShadyDeal(deal) {
   sd.history.push({ dealId: deal.id, dealName: deal.name, day: state.time.day, caught: false });
   saveState(); renderStats();
 
-  toast({ title: `${deal.emoji} ${deal.name}`, text: "Deal executed. Keep your mouth shut.", kind: "info", timeout: 5000 });
+  toast({ title: `${deal.emoji} ${deal.name}`, text: "Deal done. Wait for it to land.", kind: "info", timeout: 4500 });
+  // Re-render so the user sees cooldown and ops bar
+  if (document.querySelector(".view.active[data-view='underground']")) renderUnderground();
 
-  // Check if caught (async — might take a moment to "discover")
-  const delay = 2000 + Math.random() * 6000;
-  setTimeout(async () => {
+  // Catch check (delayed for tension)
+  const delay = 2500 + Math.random() * 7000;
+  setTimeout(() => {
     if (Math.random() < deal.catchProb) {
-      await triggerSmearCampaign(deal);
+      triggerSmearCampaign(deal);
     }
   }, delay);
 }
 
 async function triggerSmearCampaign(deal) {
-  const sd = state.shadyDeals = state.shadyDeals || { history: [], cooldowns: {}, exposures: [] };
+  state.shadyDeals = state.shadyDeals || { history: [], cooldowns: {}, exposures: [] };
+  const sd = state.shadyDeals;
   const smearSource = pick(state.competitors.filter(c => !c.subjugated));
   if (!smearSource) return;
 
-  // Add exposure to history
   sd.exposures = sd.exposures || [];
-  const lastHistory = sd.history[sd.history.length - 1];
+  const lastHistory = (sd.history || [])[sd.history.length - 1];
   if (lastHistory) lastHistory.caught = true;
 
-  toast({ title: `🚨 SCANDAL BREAKING`, text: `${smearSource.name} is running a story about your operation. Brace for impact.`, kind: "warn", timeout: 7000 });
+  toast({ title: `🚨 SCANDAL BREAKING`, text: `${smearSource.name} is running a story about you.`, kind: "warn", timeout: 7000 });
 
-  // Fetch AI smear headline
-  let headline = `${state.newsroom.name}: Questions mount over ${deal.caughtEffect.dealType}`;
+  // AI smear — no fallback text shown; if AI fails, we still apply rep damage but skip the headline drama
+  let headline = null;
   let damage = deal.caughtEffect.rep ? Math.abs(deal.caughtEffect.rep) : 15;
+  let lede = null;
   try {
     const r = await fetch("/api/smear-campaign", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ targetNewsroom: state.newsroom.name, smearingOutlet: smearSource.name, dealType: deal.caughtEffect.dealType, repLevel: state.stats.reputation }),
     });
     const data = await r.json();
-    if (data.headline) { headline = data.headline; damage = data.damage || damage; }
+    if (data && data.headline) { headline = data.headline; damage = data.damage || damage; lede = data.lede; }
   } catch {}
 
-  const smear = { id: uid(), source: smearSource.id, sourceName: smearSource.name, headline, damage, daysLeft: 3 };
-  state.activeSmearsAgainstUs = state.activeSmearsAgainstUs || [];
-  state.activeSmearsAgainstUs.push(smear);
+  if (headline) {
+    const smear = { id: uid(), source: smearSource.id, sourceName: smearSource.name, headline, lede, damage, daysLeft: 3 };
+    state.activeSmearsAgainstUs = state.activeSmearsAgainstUs || [];
+    state.activeSmearsAgainstUs.push(smear);
+  }
 
   const immediateRepDmg = deal.caughtEffect.rep || 0;
   state.stats.reputation = Math.max(0, state.stats.reputation + immediateRepDmg);
@@ -3372,14 +3513,22 @@ async function triggerSmearCampaign(deal) {
 
   sd.exposures.push({ dealName: deal.name, repLost: Math.abs(immediateRepDmg) + damage * 3, day: state.time.day });
 
-  addInbox({
-    type: "scandal", from: smearSource.name, urgent: true,
-    subject: `🚨 SCANDAL: ${headline.slice(0, 70)}${headline.length > 70 ? "…" : ""}`,
-    body: `${smearSource.name} just published an exposé about you. Immediate damage: -${Math.abs(immediateRepDmg)} reputation. Ongoing damage: ~${damage} rep over the next 3 days.`,
-  });
-  saveState(); renderStats();
-  toast({ title: `"${headline.slice(0, 60)}…"`, text: `${smearSource.name} just published it. Check inbox.`, kind: "warn", timeout: 8000 });
+  if (headline) {
+    addInbox({
+      type: "scandal", from: smearSource.name, urgent: true,
+      subject: `🚨 ${headline.slice(0, 80)}${headline.length > 80 ? "…" : ""}`,
+      body: `${lede || (smearSource.name + " has published an exposé about your operation.")}\n\nImmediate impact: ${Math.abs(immediateRepDmg)} reputation lost. Ongoing damage: ~${damage} rep over the next 3 days.`,
+    });
+    toast({ title: `"${headline.slice(0, 60)}${headline.length > 60 ? "…" : ""}"`, text: `${smearSource.name} published it. Check inbox.`, kind: "warn", timeout: 8000 });
+  } else {
+    addInbox({
+      type: "scandal", from: smearSource.name, urgent: true,
+      subject: `🚨 Scandal hits ${state.newsroom.name}`,
+      body: `${smearSource.name} ran a damaging story. Your reputation took an immediate hit and will keep bleeding for a few days.`,
+    });
+  }
 
+  saveState(); renderStats();
   if (document.querySelector(".view.active[data-view='competitors']")) renderCompetitors();
   if (document.querySelector(".view.active[data-view='underground']")) renderUnderground();
 }
@@ -3556,10 +3705,11 @@ function maybeRollCrisis() {
   toast({ title: `${crisis.icon} CRISIS: ${crisis.title}`, text: "Open your inbox to make the call.", kind: "warn", timeout: 6500 });
 }
 
-function showCrisisModal(crisisId) {
+async function showCrisisModal(crisisId) {
   const crisis = CRISIS_EVENTS.find(c => c.id === crisisId);
   if (!crisis) return;
   const body = $("#crisis-modal-body");
+  // Show structure immediately with a loading state for the AI-generated body
   body.innerHTML = `
     <div class="crisis-head">
       <span class="crisis-icon">${crisis.icon}</span>
@@ -3568,7 +3718,7 @@ function showCrisisModal(crisisId) {
         <h2 class="crisis-title">${escapeHtml(crisis.title)}</h2>
       </div>
     </div>
-    <p class="crisis-body">${escapeHtml(crisis.body)}</p>
+    <p class="crisis-body" id="crisis-body-text"><span class="spinner"></span> <em style="color:var(--slate)">Briefing being drafted…</em></p>
     <div class="crisis-choices">
       ${crisis.choices.map((c, i) => {
         const tags = [];
@@ -3586,6 +3736,31 @@ function showCrisisModal(crisisId) {
   body.querySelectorAll(".crisis-choice-btn").forEach(btn => btn.addEventListener("click", () => {
     resolveCrisis(crisis, parseInt(btn.dataset.i));
   }));
+
+  // Fetch AI narrative
+  try {
+    const r = await fetch("/api/crisis-narrative", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        crisisType: crisis.id, crisisTitle: crisis.title,
+        newsroom: state.newsroom.name, day: state.time.day,
+        reputation: state.stats.reputation, identity: state.newsroom.identity,
+        politicalLeaning: state.newsroom.politicalLeaning || "center",
+      }),
+    });
+    const data = await r.json();
+    const bodyEl = document.getElementById("crisis-body-text");
+    if (bodyEl) {
+      if (data && data.body) {
+        bodyEl.innerHTML = escapeHtml(data.body) + (data.antagonist ? `<div class="crisis-antagonist">— from ${escapeHtml(data.antagonist)}</div>` : "");
+      } else {
+        bodyEl.textContent = crisis.body; // fall back to the static body only if AI completely fails
+      }
+    }
+  } catch {
+    const bodyEl = document.getElementById("crisis-body-text");
+    if (bodyEl) bodyEl.textContent = crisis.body;
+  }
 }
 
 function resolveCrisis(crisis, choiceIdx) {
