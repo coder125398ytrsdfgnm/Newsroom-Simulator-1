@@ -334,6 +334,51 @@ function getActiveSponsorContracts() {
 }
 function getSponsor(id) { return SPONSORS.find(s => s.id === id); }
 
+/* ==================================================================== */
+/*                         CLIENT STORY CATALOG                         */
+/* ==================================================================== */
+
+const STORY_CATALOG = [
+  { id:"p01", cat:"Politics",  beat:"City Hall",    title:"Mayor proposes sweeping zoning overhaul",               hooks:["affordable housing","developer lobbying","neighborhood opposition","5-year rollout"] },
+  { id:"p02", cat:"Politics",  beat:"Politics",     title:"Senator faces ethics inquiry over consulting payments",  hooks:["six-figure fees","state contracts","denial from spokesperson","prior probe 2019"] },
+  { id:"p03", cat:"Politics",  beat:"City Hall",    title:"Council deadlocks on surveillance camera expansion",     hooks:["ACLU opposition","facial recognition","police chief support","pilot zone planned"] },
+  { id:"p04", cat:"Politics",  beat:"Politics",     title:"Third candidate enters crowded mayoral race",            hooks:["independent run","campaign finance","polling within margin","debate scheduled"] },
+  { id:"p05", cat:"Politics",  beat:"Politics",     title:"Whistleblower memo alleges contract steering at DOT",    hooks:["procurement officer fired","favored vendor list","FBI requests records"] },
+  { id:"p06", cat:"Politics",  beat:"Politics",     title:"Governor signs sweeping public records reform",          hooks:["72-hour response mandate","fee caps","transparency advocates","agency backlog fears"] },
+  { id:"b01", cat:"Business",  beat:"Business",     title:"Regional bank reports surprise quarterly loss",          hooks:["real estate writedowns","11% stock drop","CEO defends outlook"] },
+  { id:"b02", cat:"Business",  beat:"Finance",      title:"Crypto lender files for bankruptcy protection",          hooks:["withdrawal freeze","$2B in liabilities","regulators investigating"] },
+  { id:"b03", cat:"Business",  beat:"Business",     title:"Manufacturing plant closure: 800 jobs at risk",          hooks:["relocation to lower-cost region","60-day notice","union negotiates severance"] },
+  { id:"b04", cat:"Business",  beat:"Business",     title:"Coffee chain overhauls tipping policy after staff vote", hooks:["base wage increase","tip pool consolidation","customer pushback"] },
+  { id:"b05", cat:"Business",  beat:"Finance",      title:"Pension fund discloses $1.2B exposure to failed firm",  hooks:["emergency board meeting","consultants under scrutiny","retiree groups alarmed"] },
+  { id:"b06", cat:"Business",  beat:"Business",     title:"Federal antitrust suit blocks $25B grocery merger",     hooks:["FTC chair statement","union supports block","share price tumbles"] },
+  { id:"t01", cat:"Tech",      beat:"Tech",         title:"City pilots AI traffic signal system downtown",         hooks:["18% commute reduction","privacy concerns","six-month trial","regional vendor"] },
+  { id:"t02", cat:"Tech",      beat:"Tech",         title:"Researchers claim battery density breakthrough",        hooks:["solid-state cells","peer review pending","automaker partnership rumored"] },
+  { id:"t03", cat:"Tech",      beat:"Tech",         title:"Social platform rolls back content moderation rules",   hooks:["civil rights protest","advertisers reconsidering","CEO: free expression"] },
+  { id:"t04", cat:"Tech",      beat:"Tech",         title:"Data breach exposes 4.2 million customer records",     hooks:["payment info compromised","company delayed disclosure","class action filed"] },
+  { id:"t05", cat:"Tech",      beat:"Tech",         title:"AI chip startup acquired in $1.2B deal",               hooks:["earnout structure","founder retains 40%","antitrust review expected"] },
+  { id:"t06", cat:"Tech",      beat:"Tech",         title:"Court ruling expands gig worker protections",           hooks:["employee classification","appeals expected","wage and benefit implications"] },
+  { id:"h01", cat:"Health",    beat:"Health",       title:"Hospital merger raises access concerns in rural counties",hooks:["two systems combining","critical access hospital status","state review triggered"] },
+  { id:"h02", cat:"Health",    beat:"Health",       title:"New drug shows 40% reduction in treatment-resistant depression",hooks:["phase 3 trial results","FDA fast-track designation","insurance coverage unknown"] },
+  { id:"h03", cat:"Health",    beat:"Health",       title:"Nursing shortage forces hospitals to cancel elective procedures",hooks:["travel nurse cost surge","union contract expiring","rural hospitals hardest hit"] },
+  { id:"c01", cat:"Crime",     beat:"Crime",        title:"Former city official charged in bribery scheme",        hooks:["federal indictment","construction contracts","cooperating witness named"] },
+  { id:"c02", cat:"Crime",     beat:"Crime",        title:"Organized retail theft ring dismantled after 14-month sting",hooks:["11 arrested","losses estimated $4M","multi-state operation"] },
+  { id:"c03", cat:"Crime",     beat:"Crime",        title:"Cold case reopened using DNA genealogy database",       hooks:["1987 unsolved homicide","familial DNA match","victim's family speaks"] },
+  { id:"cl01",cat:"Climate",   beat:"Climate",      title:"Wildfire season longest on record; officials warn of next year",hooks:["prevention funding gap","climate attribution study","insurance market pullout"] },
+  { id:"cl02",cat:"Climate",   beat:"Climate",      title:"City unveils $400M climate resilience bond measure",    hooks:["flood barriers","urban tree canopy","ballot language dispute","timeline questions"] },
+  { id:"cl03",cat:"Climate",   beat:"Climate",      title:"Utility company under fire over methane leak disclosure delay",hooks:["six-month gap before public notice","EPA complaint","shareholder lawsuit possible"] },
+  { id:"s01", cat:"Sports",    beat:"Sports",       title:"Star quarterback holds out as training camp opens",     hooks:["contract demands","front office silence","locker room reaction","fan backlash"] },
+  { id:"s02", cat:"Sports",    beat:"Sports",       title:"Youth sports participation hits 20-year low",           hooks:["cost barriers","travel team culture","school budget cuts","access gap data"] },
+  { id:"w01", cat:"World",     beat:"World",        title:"Ceasefire talks collapse; aid corridors remain open",   hooks:["mediator statement","civilian toll","diaspora community reacts locally"] },
+  { id:"w02", cat:"World",     beat:"World",        title:"Trade dispute escalates as tariffs double overnight",   hooks:["supply chain disruption","local manufacturer impact","diplomatic back-channels"] },
+  { id:"cu01",cat:"Culture",   beat:"Arts",         title:"Controversial public mural sparks city council debate", hooks:["artist statement","petition with 14,000 signatures","heritage board opinion"] },
+  { id:"cu02",cat:"Culture",   beat:"Arts",         title:"Beloved local bookstore closes after 40 years",         hooks:["commercial rent surge","loyal customer tributes","final reading event"] },
+  { id:"lo01",cat:"Local",     beat:"City Hall",    title:"Food truck ordinance draws both praise and protests",   hooks:["brick-and-mortar opposition","workers' income data","licensing fees debated"] },
+  { id:"lo02",cat:"Local",     beat:"Education",    title:"School board votes to cut arts programs amid budget shortfall",hooks:["teachers union response","parent coalition forms","foundation pledges offset"] },
+  { id:"lo03",cat:"Local",     beat:"Education",    title:"University expels students over leaked exam answers",   hooks:["AI cheating alleged","academic integrity office statement","student due-process claims"] },
+  { id:"in01",cat:"Investigations",beat:"Investigations",title:"Documents reveal city overpaid contractor by $8M over 5 years",hooks:["no-bid extension pattern","comptroller letter buried","city official's prior relationship"] },
+  { id:"in02",cat:"Investigations",beat:"Investigations",title:"Foster care agency repeatedly cleared despite abuse complaints", hooks:["internal records obtained","state regulator conflict","advocacy group had flagged it"] },
+];
+
 const ACHIEVEMENTS = [
   { id: "first_article", title: "First Byline",   icon: "✍️", desc: "Publish your first article.",          test: s => s.articles.length >= 1 },
   { id: "ten_articles",  title: "Cub Reporter",   icon: "📝", desc: "Publish 10 articles.",                  test: s => s.articles.length >= 10 },
@@ -367,6 +412,7 @@ function defaultState() {
       logoId: "star",
       accent: "#cc0000",
       identity: "broadsheet",
+      politicalLeaning: "center",
       hqCityId: "metroville",
       founded: Date.now(),
       fontId: "oswald",
@@ -376,7 +422,7 @@ function defaultState() {
     },
     player: { name: "You" },
     stats: { cash: 5000, reputation: 50, totalViews: 0, marketShare: 5, subscribers: 0 },
-    settings: { density: 50, speed: 3 },
+    settings: { density: 50, speed: 3, paused: false },
     time: { day: 1, hour: 9 },
     reporters: [],
     pendingApprovals: [],
@@ -443,7 +489,7 @@ function loadState() {
     }
     return {
       ...def, ...parsed,
-      newsroom: { ...def.newsroom, ...(parsed.newsroom || {}) },
+      newsroom: { ...def.newsroom, ...(parsed.newsroom || {}), politicalLeaning: (parsed.newsroom?.politicalLeaning) || "center" },
       stats: { ...def.stats, ...(parsed.stats || {}) },
       settings: { ...def.settings, ...(parsed.settings || {}) },
       time: { ...def.time, ...(parsed.time || {}) },
@@ -533,7 +579,14 @@ function toast({ title, text, kind = "info", timeout = 4000 }) {
 /*                            ONBOARDING                                */
 /* ==================================================================== */
 
-const obState = { step: 1, logoId: null, accent: null, identity: null, cityId: null, fontId: "oswald", paperStyleId: "classic", year: 2026 };
+const POLITICAL_LEANINGS = [
+  { id: "left",         label: "Left",         desc: "Progressive economics, social justice, climate urgency. Strong labor beat." },
+  { id: "center-left",  label: "Center-Left",  desc: "Reform-minded. Pragmatic liberalism. Broadest advertiser appeal on the left." },
+  { id: "center",       label: "Center",       desc: "Nonpartisan. Balanced sourcing. Appeals to the widest audience." },
+  { id: "center-right", label: "Center-Right", desc: "Pro-business, fiscal conservatism. Enterprise sponsors favor you." },
+  { id: "right",        label: "Right",        desc: "Traditional values, national security, market freedom. Loyal base." },
+];
+const obState = { step: 1, logoId: null, accent: null, identity: null, cityId: null, fontId: "oswald", paperStyleId: "classic", year: 2026, politicalLeaning: "center" };
 
 function showOnboardingIfNeeded() {
   if (state.onboarded) { $("#onboarding").classList.add("hidden"); $("#app").classList.remove("hidden"); return; }
@@ -542,6 +595,7 @@ function showOnboardingIfNeeded() {
   renderLogoGrid();
   renderColorGrid();
   renderIdentityGrid();
+  renderLeaningGrid();
   renderCityGrid();
   renderFontGrid();
   renderPaperGrid();
@@ -619,6 +673,18 @@ function renderPaperGrid() {
     $$("#ob-paper .identity-tile").forEach(x => x.classList.toggle("selected", x === t));
   }));
 }
+function renderLeaningGrid() {
+  const host = $("#ob-leaning"); if (!host) return;
+  host.innerHTML = POLITICAL_LEANINGS.map(l => `
+    <div class="identity-tile ${l.id === obState.politicalLeaning ? "selected" : ""}" data-id="${l.id}">
+      <h4>${escapeHtml(l.label)}</h4>
+      <p>${escapeHtml(l.desc)}</p>
+    </div>`).join("");
+  host.querySelectorAll(".identity-tile").forEach(t => t.addEventListener("click", () => {
+    obState.politicalLeaning = t.dataset.id;
+    host.querySelectorAll(".identity-tile").forEach(x => x.classList.toggle("selected", x === t));
+  }));
+}
 function renderSloganPresets() {
   const host = $("#ob-slogan-presets"); if (!host) return;
   host.innerHTML = `<div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--slate);margin:6px 0 4px;">Or pick one</div>` +
@@ -676,6 +742,7 @@ function finishOnboarding() {
   state.newsroom.logoId = obState.logoId;
   state.newsroom.accent = obState.accent;
   state.newsroom.identity = obState.identity;
+  state.newsroom.politicalLeaning = obState.politicalLeaning || "center";
   state.newsroom.hqCityId = obState.cityId;
   state.newsroom.fontId = obState.fontId || "oswald";
   state.newsroom.paperStyleId = obState.paperStyleId || "classic";
@@ -729,13 +796,18 @@ function handleHourly() {
   state.competitors.forEach(c => {
     if (!c.subjugated) c.share = Math.max(0.5, c.share + (Math.random() - 0.5) * 0.3);
   });
-  // Occasionally a reporter pitches you a story
-  if (state.reporters.length > 0 && state.pendingPitches.length < 3 && Math.random() < 0.18) {
+  // Pitch only when cash > 0, max 1 pending, ~once per 2-3 game days (4% per 6-hour tick)
+  const hasCash = (state.stats.cash || 0) > 0;
+  if (hasCash && state.reporters.length > 0 && state.pendingPitches.length < 1 && Math.random() < 0.04) {
     rollReporterPitch();
   }
-  // Owner sends a message if satisfaction is noteworthy
-  if (state.owner && Math.random() < 0.08) {
+  // Owner sends a message occasionally
+  if (state.owner && Math.random() < 0.06) {
     rollShareholderMessage();
+  }
+  // Occasionally generate an AI owner or tip inbox message
+  if (Math.random() < 0.015) {
+    maybeGenerateAIInboxMessage();
   }
 }
 
@@ -870,16 +942,42 @@ function handleDaily() {
   // --- TV station revenue ---
   if (state.tv.founded && state.tv.shows.length) {
     let rev = 0, totalViewers = 0;
+    state.tv.totalEpisodes = (state.tv.totalEpisodes || 0) + state.tv.shows.length;
     state.tv.shows.forEach(sh => {
-      const viewers = Math.round(sh.rating * 4000 + randInt(-5000, 5000));
-      totalViewers += Math.max(0, viewers);
-      rev += Math.max(0, viewers) * 0.03;
-      sh.rating = Math.max(5, Math.min(99, sh.rating + (Math.random() - 0.5) * 4));
+      const slotDef = TV_SLOTS.find(s => s.id === sh.slot) || { mult: 0.7 };
+      const fmtDef = TV_FORMATS.find(f => f.id === sh.format) || { repMult: 1 };
+      const baseViewers = Math.round(sh.rating * 5000 + randInt(-4000, 4000));
+      const viewers = Math.max(0, Math.round(baseViewers * slotDef.mult));
+      totalViewers += viewers;
+      const showRev = viewers * 0.035;
+      rev += showRev;
+      sh.lastViewers = viewers;
+      sh.lastRevenue = showRev;
+      sh.episodeCount = (sh.episodeCount || 0) + 1;
+      // Rep effect from high-rated shows (news/investigative)
+      if (sh.rating >= 70 && fmtDef.repMult >= 1.2 && Math.random() < 0.3) {
+        state.stats.reputation = Math.min(100, state.stats.reputation + 1);
+      }
+      // Natural rating drift
+      const drift = (Math.random() - 0.48) * 3;
+      sh.rating = Math.max(5, Math.min(99, sh.rating + drift));
+      sh.trend = drift > 0.5 ? "rising" : drift < -0.5 ? "falling" : "steady";
     });
     state.stats.cash += rev;
     state.revToday.tv = rev;
-    if (rev > 0) toast({ title: "TV ratings day", text: `${fmtNum(totalViewers)} viewers · ${fmtCash(rev)} earned`, kind: "success" });
+    if (rev > 0) toast({ title: "📺 TV revenue", text: `${fmtNum(totalViewers)} viewers · ${fmtCash(rev)} earned`, kind: "success" });
   }
+
+  // --- Competitor share dividends ---
+  let dividendTotal = 0;
+  state.competitors.forEach(c => {
+    if ((c.playerShares || 0) >= 10) {
+      const pctOwned = c.playerShares / c.totalShares;
+      const dividend = Math.round(c.sharePrice * c.playerShares * 0.005); // 0.5% daily
+      if (dividend > 0) { state.stats.cash += dividend; dividendTotal += dividend; }
+    }
+  });
+  if (dividendTotal > 0) toast({ title: "Dividend income", text: `${fmtCash(dividendTotal)} from share holdings.`, kind: "success" });
 
   // Daily digest toast
   const totalRev = subRev + sponsorRev + state.revToday.tv;
@@ -1078,7 +1176,9 @@ function renderBrand() {
   $("#brand-motto").textContent = state.newsroom.motto;
   const identity = IDENTITIES.find(i => i.id === state.newsroom.identity);
   const yr = state.newsroom.foundedYear || new Date(state.newsroom.founded).getFullYear();
-  $("#brand-identity").textContent = identity ? `${identity.name} · Est. ${yr}` : `Est. ${yr}`;
+  const lean = POLITICAL_LEANINGS.find(l => l.id === state.newsroom.politicalLeaning);
+  const leanTag = lean && lean.id !== "center" ? ` · ${lean.label}` : "";
+  $("#brand-identity").textContent = identity ? `${identity.name}${leanTag} · Est. ${yr}` : `Est. ${yr}`;
   $("#public-logo").innerHTML = logoSvg(state.newsroom.logoId);
   $("#public-title").textContent = state.newsroom.name.toUpperCase();
   $("#public-motto").textContent = state.newsroom.motto;
@@ -1402,6 +1502,57 @@ function setupWriter() {
     count.textContent = `${w} word${w === 1 ? "" : "s"}`;
   });
   $("#writer-publish").addEventListener("click", onPublish);
+  setupStoryCatalog();
+}
+
+let catalogFilter = "All";
+function setupStoryCatalog() {
+  const cats = ["All", ...new Set(STORY_CATALOG.map(s => s.cat))];
+  const filterHost = $("#catalog-filters");
+  if (!filterHost) return;
+  filterHost.innerHTML = cats.map(c => `<button class="catalog-filter-btn ${c === catalogFilter ? "active" : ""}" data-cat="${c}">${c}</button>`).join("");
+  filterHost.querySelectorAll(".catalog-filter-btn").forEach(b => b.addEventListener("click", () => {
+    catalogFilter = b.dataset.cat;
+    filterHost.querySelectorAll(".catalog-filter-btn").forEach(x => x.classList.toggle("active", x === b));
+    renderStoryCatalog();
+  }));
+  renderStoryCatalog();
+  $("#writer-seed-clear")?.addEventListener("click", () => {
+    $("#writer-seed-bar")?.classList.add("hidden");
+    $("#writer-title").dataset.seeded = "";
+  });
+}
+
+function renderStoryCatalog() {
+  const list = $("#catalog-list"); if (!list) return;
+  const filtered = catalogFilter === "All" ? STORY_CATALOG : STORY_CATALOG.filter(s => s.cat === catalogFilter);
+  const lean = state.newsroom.politicalLeaning;
+  list.innerHTML = filtered.map(s => {
+    // Political stories get a leaning indicator if the outlet has a leaning
+    const isPol = s.cat === "Politics";
+    const leanBadge = isPol && lean && lean !== "center"
+      ? `<span class="catalog-lean-badge">${lean}</span>` : "";
+    return `<div class="catalog-item" data-id="${s.id}">
+      <div class="catalog-item-cat">${s.cat} · ${s.beat}${leanBadge}</div>
+      <div class="catalog-item-title">${escapeHtml(s.title)}</div>
+      <div class="catalog-item-hooks">${s.hooks.slice(0,3).map(h => `<span class="hook-chip">${escapeHtml(h)}</span>`).join("")}</div>
+    </div>`;
+  }).join("") || `<div class="catalog-empty">No stories in this category yet.</div>`;
+  list.querySelectorAll(".catalog-item").forEach(el => el.addEventListener("click", () => {
+    const s = STORY_CATALOG.find(x => x.id === el.dataset.id);
+    if (!s) return;
+    const seedBar = $("#writer-seed-bar");
+    if (seedBar) {
+      seedBar.classList.remove("hidden");
+      $("#writer-seed-title").textContent = s.title;
+      $("#writer-seed-hooks").textContent = "Angles: " + s.hooks.join(" · ");
+    }
+    // Pre-fill title if empty
+    const titleEl = $("#writer-title");
+    if (!titleEl.value.trim()) titleEl.value = s.title;
+    titleEl.focus();
+    toast({ title: "Story seed loaded", text: `Use these hooks as your starting angle.`, timeout: 2500 });
+  }));
 }
 
 async function onPublish() {
@@ -1806,15 +1957,44 @@ function buyBureau(id) {
 /*                            TV STUDIO                                 */
 /* ==================================================================== */
 
+const TV_SLOTS = [
+  { id:"morning",   label:"Morning",    hours:"6–9AM",  mult:0.6, desc:"Early risers. Loyal, older demographic." },
+  { id:"midday",    label:"Midday",     hours:"12–2PM", mult:0.55, desc:"Lunch crowd. News-heavy audience." },
+  { id:"primetime", label:"Primetime",  hours:"8–10PM", mult:1.0, desc:"Largest audience. Highest competition." },
+  { id:"latenight", label:"Late Night", hours:"11PM–1AM",mult:0.7, desc:"Younger demographic. Viral clip potential." },
+  { id:"weekend",   label:"Weekend",    hours:"Sat–Sun",mult:0.8, desc:"Relaxed pacing. Longer formats shine." },
+];
+
+const TV_FORMATS = [
+  { id:"news",        label:"News",           desc:"Hard news coverage. Best for rep boost.",      repMult:1.3 },
+  { id:"talk",        label:"Talk Show",       desc:"Interviews and personality. Great for views.", repMult:0.9 },
+  { id:"debate",      label:"Debate",          desc:"Controversial. High risk, high reward.",       repMult:1.0 },
+  { id:"documentary", label:"Documentary",     desc:"Deep dives. Slow build, loyal audience.",     repMult:1.2 },
+  { id:"investigations",label:"Investigations",desc:"Ties into your print investigations.",        repMult:1.4 },
+  { id:"sports",      label:"Sports Desk",     desc:"Live sports commentary. Volatile ratings.",   repMult:0.85 },
+  { id:"live_event",  label:"Live Event",      desc:"Breaking news/specials. Audience spikes.",    repMult:1.1 },
+];
+
+const TV_SHOW_EVENTS = [
+  { id:"celeb_guest",  weight:3, label:"Celebrity guest appearance", ratingDelta:+12, repDelta:+2,  costDelta:0 },
+  { id:"controversy",  weight:2, label:"On-air controversy",         ratingDelta:+8,  repDelta:-5,  costDelta:0 },
+  { id:"tech_failure", weight:2, label:"Technical difficulties live", ratingDelta:-6, repDelta:-2,  costDelta:0 },
+  { id:"breaking_hit", weight:2, label:"Breaking news captures viewers",ratingDelta:+15,repDelta:+4, costDelta:0 },
+  { id:"host_gaffe",   weight:2, label:"Host makes insensitive remark",ratingDelta:-9, repDelta:-6, costDelta:0 },
+  { id:"exclusive",    weight:2, label:"Exclusive interview lands",   ratingDelta:+18, repDelta:+5, costDelta:-2000 },
+  { id:"sponsor_pull", weight:1, label:"Sponsor pulls ad mid-episode",ratingDelta:-3,  repDelta:0,  costDelta:-1500 },
+  { id:"award_nod",    weight:1, label:"Industry award nomination",   ratingDelta:+6,  repDelta:+8, costDelta:0 },
+];
+
 function renderStudio() {
   const panel = $("#studio-panel");
   if (!state.tv.founded) {
     panel.innerHTML = `
       <div class="studio-onboarding">
         <h2 class="section-h">Found a TV station</h2>
-        <p class="section-sub">$25,000 upfront. Unlocks TV shows, hosts, and broadcast revenue.</p>
+        <p class="section-sub">$25,000 upfront. Unlocks TV shows, hosts, multiple time slots, and broadcast revenue.</p>
         <h3 class="step-h">Station name</h3>
-        <input id="tv-name" type="text" placeholder="e.g. ${state.newsroom.name} Broadcast" maxlength="40" />
+        <input id="tv-name" type="text" placeholder="e.g. ${escapeHtml(state.newsroom.name)} Broadcast" maxlength="40" />
         <h3 class="step-h">Channel logo</h3>
         <div id="tv-logos" class="logo-grid" style="grid-template-columns:repeat(4,1fr);"></div>
         <h3 class="step-h">Channel color</h3>
@@ -1834,60 +2014,100 @@ function renderStudio() {
       if (state.stats.cash < 25000) { toast({title:"Not enough cash", text:"$25,000 needed.", kind:"warn"}); return; }
       const name = $("#tv-name").value.trim() || `${state.newsroom.name} Broadcast`;
       state.stats.cash -= 25000;
-      state.tv = { founded: true, name, logoId: chosenLogo, accent: chosenColor, shows: [] };
+      state.tv = { founded: true, name, logoId: chosenLogo, accent: chosenColor, shows: [], totalEpisodes: 0, networkEvents: [] };
       saveState(); renderStats(); renderStudio();
-      toast({ title: "On the air", text: `${name} is broadcasting.`, kind: "success" });
+      toast({ title: "📺 On the air", text: `${name} is broadcasting.`, kind: "success" });
       checkAchievements();
     });
     return;
   }
 
-  // Studio dashboard
-  const totalRating = state.tv.shows.reduce((s, sh) => s + sh.rating, 0);
-  const avgRating = state.tv.shows.length ? Math.round(totalRating / state.tv.shows.length) : 0;
+  // Ensure tv fields exist (migration)
+  state.tv.shows = state.tv.shows || [];
+  state.tv.totalEpisodes = state.tv.totalEpisodes || 0;
+  state.tv.networkEvents = state.tv.networkEvents || [];
+
+  const totalViewers = state.tv.shows.reduce((s, sh) => s + (sh.lastViewers || 0), 0);
+  const avgRating = state.tv.shows.length ? Math.round(state.tv.shows.reduce((s, sh) => s + sh.rating, 0) / state.tv.shows.length) : 0;
+  const totalRev = state.tv.shows.reduce((s, sh) => s + (sh.lastRevenue || 0), 0);
+  const usedSlots = new Set(state.tv.shows.map(sh => sh.slot));
+
+  // Schedule grid
+  const scheduleRows = TV_SLOTS.map(sl => {
+    const show = state.tv.shows.find(sh => sh.slot === sl.id);
+    if (show) {
+      const fmt = TV_FORMATS.find(f => f.id === show.format) || { label: show.format };
+      const trend = show.trend === "rising" ? "↗" : show.trend === "falling" ? "↘" : "→";
+      const trendClass = show.trend === "rising" ? "trend-rising" : show.trend === "falling" ? "trend-falling" : "";
+      return `<div class="tv-schedule-row occupied">
+        <div class="tv-slot-label"><strong>${sl.label}</strong><span class="tv-slot-hours">${sl.hours}</span></div>
+        <div class="tv-show-info">
+          <div class="tv-show-name">${escapeHtml(show.title)}</div>
+          <div class="tv-show-meta">${fmt.label} · Host: ${escapeHtml(show.host)}</div>
+        </div>
+        <div class="tv-show-stats">
+          <span class="tv-rating-badge ${show.rating >= 70 ? "hot" : show.rating >= 45 ? "mid" : "cold"}">${Math.round(show.rating)}</span>
+          <span class="tv-trend ${trendClass}">${trend}</span>
+        </div>
+        <div class="tv-show-actions">
+          <button class="ghost-btn tv-invest" data-id="${show.id}">Invest $3k</button>
+          <button class="ghost-btn tv-event" data-id="${show.id}">Book Event</button>
+          <button class="reject-btn tv-cancel" data-id="${show.id}">✕</button>
+        </div>
+      </div>`;
+    }
+    return `<div class="tv-schedule-row empty">
+      <div class="tv-slot-label"><strong>${sl.label}</strong><span class="tv-slot-hours">${sl.hours}</span><span class="tv-slot-desc">${sl.desc}</span></div>
+      <div style="flex:1;color:var(--slate);font-size:13px">— empty slot —</div>
+      <button class="primary-btn tv-add-show" data-slot="${sl.id}" style="font-size:12px;white-space:nowrap">+ Launch here ($3.5k)</button>
+    </div>`;
+  }).join("");
+
+  // Recent events log
+  const recentEvents = (state.tv.networkEvents || []).slice().reverse().slice(0, 4);
+  const eventsHtml = recentEvents.length ? `
+    <div class="tv-events-log">
+      <h3 class="tv-section-title">Recent network events</h3>
+      ${recentEvents.map(ev => `<div class="tv-event-row">
+        <span class="tv-event-day">Day ${ev.day}</span>
+        <span class="tv-event-show">${escapeHtml(ev.showTitle)}</span>
+        <span class="tv-event-label">${escapeHtml(ev.label)}</span>
+        <span class="tv-event-delta ${ev.ratingDelta >= 0 ? "pos" : "neg"}">${ev.ratingDelta >= 0 ? "+" : ""}${ev.ratingDelta} rating</span>
+      </div>`).join("")}
+    </div>` : "";
+
   panel.innerHTML = `
     <div class="studio-hero">
       <div class="studio-logo-box">${tvLogoSvg(state.tv.logoId)}</div>
-      <div>
-        <h2>${escapeHtml(state.tv.name)}</h2>
-        <p>Broadcasting daily. Add shows, hire hosts, watch the ratings come in.</p>
-        <div class="studio-stats">
+      <div style="flex:1">
+        <h2 style="margin:0 0 4px">${escapeHtml(state.tv.name)}</h2>
+        <div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:8px">
           <div class="stat"><span class="stat-num">${state.tv.shows.length}</span><span class="stat-label">Shows</span></div>
           <div class="stat"><span class="stat-num">${avgRating}</span><span class="stat-label">Avg rating</span></div>
+          <div class="stat"><span class="stat-num">${fmtNum(totalViewers)}</span><span class="stat-label">Daily viewers</span></div>
+          <div class="stat"><span class="stat-num">${fmtCash(totalRev)}</span><span class="stat-label">Yesterday's revenue</span></div>
+          <div class="stat"><span class="stat-num">${state.tv.totalEpisodes || 0}</span><span class="stat-label">Episodes aired</span></div>
         </div>
       </div>
     </div>
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
-      <h2 class="section-h">Programming</h2>
-      <button id="add-show" class="primary-btn">+ New show ($3,500)</button>
-    </div>
-    <div id="shows-grid" class="shows-grid"></div>`;
-  $("#add-show").addEventListener("click", showNewShowDialog);
-  const grid = $("#shows-grid");
-  if (state.tv.shows.length === 0) grid.innerHTML = `<div class="public-empty">No shows on the air. Click <strong>+ New show</strong> to launch.</div>`;
-  else grid.innerHTML = state.tv.shows.map(sh => {
-    const hist = sh.ratingHistory || [];
-    const sparkline = buildSparkline(hist);
-    return `<div class="show-card">
-      <div class="show-slot">${escapeHtml(sh.slot)} · ${escapeHtml(sh.format)}</div>
-      <div class="show-title">${escapeHtml(sh.title)}</div>
-      <div class="show-host">Host: <strong>${escapeHtml(sh.host)}</strong></div>
-      <div class="show-ratings">
-        <div class="show-rating">${Math.round(sh.rating)}</div>
-        <div class="show-trend trend-${sh.trend}">${sh.trend === "rising" ? "↗" : sh.trend === "falling" ? "↘" : "→"} ${sh.trend}</div>
-      </div>
-      ${hist.length > 1 ? `<div class="show-graph">${sparkline}</div>` : ""}
-      ${sh.verdict ? `<div class="comp-meta" style="font-style:italic;font-family:'Source Serif 4',serif;font-size:13px;">"${escapeHtml(sh.verdict)}"</div>` : ""}
-      <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap;">
-        <button class="ghost-btn promote-show" data-id="${sh.id}">Promote ($1k)</button>
-        <button class="ghost-btn invest-show" data-id="${sh.id}">Invest ($3k)</button>
-        <button class="reject-btn cancel-show" data-id="${sh.id}">Cancel</button>
+    <h3 class="tv-section-title">Schedule</h3>
+    <div class="tv-schedule">${scheduleRows}</div>
+    ${eventsHtml}
+    <div class="tv-format-guide">
+      <h3 class="tv-section-title">Format guide</h3>
+      <div class="tv-format-grid">
+        ${TV_FORMATS.map(f => `<div class="tv-format-tile">
+          <div class="tv-format-name">${f.label}</div>
+          <div class="tv-format-desc">${f.desc}</div>
+          <div class="tv-format-rep">Rep ×${f.repMult}</div>
+        </div>`).join("")}
       </div>
     </div>`;
-  }).join("");
-  $$(".promote-show").forEach(b => b.addEventListener("click", () => promoteShow(b.dataset.id)));
-  $$(".invest-show").forEach(b => b.addEventListener("click", () => investShow(b.dataset.id)));
-  $$(".cancel-show").forEach(b => b.addEventListener("click", () => cancelShow(b.dataset.id)));
+
+  $$(".tv-add-show").forEach(b => b.addEventListener("click", () => showNewShowDialog(b.dataset.slot)));
+  $$(".tv-invest").forEach(b => b.addEventListener("click", () => investShow(b.dataset.id)));
+  $$(".tv-event").forEach(b => b.addEventListener("click", () => bookShowEvent(b.dataset.id)));
+  $$(".tv-cancel").forEach(b => b.addEventListener("click", () => cancelShow(b.dataset.id)));
 }
 
 function buildSparkline(history) {
@@ -1911,79 +2131,105 @@ function buildSparkline(history) {
   </svg>`;
 }
 
-function showNewShowDialog() {
+function showNewShowDialog(preferredSlot) {
   if (state.stats.cash < 3500) { toast({title:"Not enough cash", text:"$3,500 to launch a show.", kind:"warn"}); return; }
-  const slots = ["Morning","Midday","Primetime","Late Night","Weekend"];
-  const formats = ["News","Talk","Debate","Interview","Investigations","Documentary","Live Event","Sports Desk"];
-  const reporterOpts = state.reporters.map(r => `<option value="${escapeHtml(r.name)}">${escapeHtml(r.name)} (${escapeHtml(r.beat)})</option>`).join("");
-  const externalName = `${pick(FIRST_NAMES)} ${pick(LAST_NAMES)}`;
-  const defaultTitle = `${pick(["The","On","Inside","Late Night","Breaking"])} ${pick(["Hour","Edition","Report","Brief","Beat","Pulse","Wire"])}`;
-  const modalBody = `<div class="modal-body">
-    <h2 style="font-family:'Oswald',sans-serif;letter-spacing:2px;text-transform:uppercase;">Launch a New Show</h2>
-    <p style="color:var(--slate);margin-bottom:18px;">$3,500 upfront. AI will rate it after launch.</p>
+  const usedSlots = new Set(state.tv.shows.map(sh => sh.slot));
+  const availableSlots = TV_SLOTS.filter(sl => !usedSlots.has(sl.id));
+  if (availableSlots.length === 0) { toast({title:"All slots filled", text:"Cancel an existing show to open a slot.", kind:"warn"}); return; }
+  const reporterOpts = state.reporters.map(r => `<option value="${escapeHtml(r.name)}">${escapeHtml(r.name)} (${escapeHtml(r.beat)}, skill ${r.skill})</option>`).join("");
+  const externalHosts = [`${pick(FIRST_NAMES)} ${pick(LAST_NAMES)}`, `${pick(FIRST_NAMES)} ${pick(LAST_NAMES)}`];
+  const defaultTitle = `${pick(["The","On","Inside","Late","Breaking","Prime"])} ${pick(["Hour","Edition","Report","Brief","Beat","Pulse","360","Wire","Desk"])}`;
+  const pref = preferredSlot || availableSlots[0].id;
+  $("#modal-body").innerHTML = `<div class="modal-body">
+    <h2 style="font-family:'Oswald',sans-serif;letter-spacing:2px;text-transform:uppercase;margin-bottom:4px">Launch a New Show</h2>
+    <p style="color:var(--slate);margin-bottom:18px;font-size:13px">$3,500 upfront. AI reviews it after launch and sets initial rating.</p>
     <label class="step-h">Show Title</label>
-    <input id="ns-title" type="text" value="${defaultTitle}" maxlength="60" style="display:block;width:100%;padding:10px 12px;font-size:15px;border:1px solid var(--rule);border-radius:2px;font-family:inherit;margin-bottom:14px;"/>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
+    <input id="ns-title" type="text" value="${defaultTitle}" maxlength="60" style="display:block;width:100%;padding:10px 12px;font-size:15px;border:1px solid var(--rule);border-radius:2px;font-family:inherit;margin-bottom:14px"/>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
       <div>
         <label class="step-h">Time Slot</label>
-        <select id="ns-slot" style="width:100%;padding:8px 10px;border:1px solid var(--rule);border-radius:2px;font-family:inherit;">
-          ${slots.map(s => `<option ${s==="Primetime"?"selected":""}>${s}</option>`).join("")}
+        <select id="ns-slot" style="width:100%;padding:8px 10px;border:1px solid var(--rule);border-radius:2px;font-family:inherit">
+          ${availableSlots.map(sl => `<option value="${sl.id}" ${sl.id === pref ? "selected" : ""}>${sl.label} (${sl.hours})</option>`).join("")}
         </select>
       </div>
       <div>
         <label class="step-h">Format</label>
-        <select id="ns-format" style="width:100%;padding:8px 10px;border:1px solid var(--rule);border-radius:2px;font-family:inherit;">
-          ${formats.map(f => `<option>${f}</option>`).join("")}
+        <select id="ns-format" style="width:100%;padding:8px 10px;border:1px solid var(--rule);border-radius:2px;font-family:inherit">
+          ${TV_FORMATS.map(f => `<option value="${f.id}">${f.label}</option>`).join("")}
         </select>
       </div>
     </div>
     <label class="step-h">Host</label>
-    <select id="ns-host" style="width:100%;padding:8px 10px;border:1px solid var(--rule);border-radius:2px;font-family:inherit;margin-bottom:18px;">
-      <option value="${externalName}">Hire external: ${externalName}</option>
+    <select id="ns-host" style="width:100%;padding:8px 10px;border:1px solid var(--rule);border-radius:2px;font-family:inherit;margin-bottom:18px">
+      ${externalHosts.map(n => `<option value="${escapeHtml(n)}">External hire: ${escapeHtml(n)}</option>`).join("")}
       ${reporterOpts}
     </select>
-    <div style="display:flex;gap:10px;">
-      <button id="ns-launch" class="primary-btn">Launch show ($3,500)</button>
+    <div style="display:flex;gap:10px">
+      <button id="ns-launch" class="primary-btn">Launch ($3,500)</button>
       <button class="reject-btn" data-close>Cancel</button>
     </div>
   </div>`;
-  $("#modal-body").innerHTML = modalBody;
   $("#modal").classList.remove("hidden");
   $("#ns-launch").addEventListener("click", () => {
-    const title = $("#ns-title").value.trim() || defaultTitle;
-    const slot = $("#ns-slot").value;
-    const format = $("#ns-format").value;
+    const title = ($("#ns-title").value || "").trim() || defaultTitle;
+    const slotId = $("#ns-slot").value;
+    const formatId = $("#ns-format").value;
     const host = $("#ns-host").value;
     state.stats.cash -= 3500;
-    const show = { id: uid(), title, slot, format, host, rating: randInt(35, 60), trend: pick(["rising","steady","falling"]), verdict: "", ratingHistory: [] };
+    const fmt = TV_FORMATS.find(f => f.id === formatId) || TV_FORMATS[0];
+    const show = {
+      id: uid(), title, slot: slotId, format: formatId, host,
+      rating: randInt(30, 55), trend: "steady", verdict: "",
+      ratingHistory: [], lastViewers: 0, lastRevenue: 0,
+      episodeCount: 0, seasonNumber: 1, repMult: fmt.repMult || 1,
+    };
     state.tv.shows.push(show);
     saveState(); renderStats();
     $("#modal").classList.add("hidden");
     renderStudio();
-    toast({ title: "Show launched", text: `${title} (${slot}) with ${host}.`, kind: "success" });
-    fetch("/api/show-review", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ showTitle: title, hostName: host, format, viewership: "new launch" }) })
+    toast({ title: "📺 Show launched", text: `${title} airing at ${(TV_SLOTS.find(s => s.id === slotId) || {}).label || slotId} with ${host}.`, kind: "success" });
+    fetch("/api/show-review", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ showTitle: title, hostName: host, format: fmt.label, viewership: "new launch" }) })
       .then(r => r.json()).then(j => {
         if (j && typeof j.rating === "number") {
-          show.rating = j.rating; show.verdict = j.verdict; show.trend = j.trend || "steady";
+          show.rating = j.rating; show.verdict = j.verdict || ""; show.trend = j.trend || "steady";
           show.ratingHistory.push(Math.round(j.rating));
           saveState(); renderStudio(); checkAchievements();
         }
       }).catch(() => {});
   });
 }
-function promoteShow(id) {
-  if (state.stats.cash < 1000) { toast({title:"Not enough cash", text:"Promotion costs $1,000.", kind:"warn"}); return; }
-  const sh = state.tv.shows.find(x => x.id === id);
+
+function bookShowEvent(showId) {
+  const sh = state.tv.shows.find(x => x.id === showId);
   if (!sh) return;
-  state.stats.cash -= 1000;
-  sh.rating = Math.min(99, sh.rating + randInt(3, 9));
-  sh.trend = "rising";
+  // Weighted random event
+  const totalWeight = TV_SHOW_EVENTS.reduce((s, e) => s + e.weight, 0);
+  let r = Math.random() * totalWeight;
+  let ev = TV_SHOW_EVENTS[0];
+  for (const e of TV_SHOW_EVENTS) { r -= e.weight; if (r <= 0) { ev = e; break; } }
+
+  const cost = 500 + Math.abs(ev.costDelta || 0);
+  if (state.stats.cash < cost) { toast({title:"Not enough cash", text:`Need ${fmtCash(cost)}.`, kind:"warn"}); return; }
+
+  state.stats.cash -= cost;
+  sh.rating = Math.max(5, Math.min(99, sh.rating + ev.ratingDelta));
+  sh.trend = ev.ratingDelta >= 5 ? "rising" : ev.ratingDelta <= -5 ? "falling" : sh.trend;
+  if (!sh.ratingHistory) sh.ratingHistory = [];
+  sh.ratingHistory.push(Math.round(sh.rating));
+  state.stats.reputation = Math.max(0, Math.min(100, state.stats.reputation + (ev.repDelta || 0)));
+
+  state.tv.networkEvents = state.tv.networkEvents || [];
+  state.tv.networkEvents.push({ day: state.time.day, showTitle: sh.title, label: ev.label, ratingDelta: ev.ratingDelta });
+  if (state.tv.networkEvents.length > 20) state.tv.networkEvents.shift();
+
   saveState(); renderStats(); renderStudio();
-  toast({ title: "Promotion run", text: `${sh.title} now at ${Math.round(sh.rating)} rating.`, kind: "success" });
-  checkAchievements();
+  const kind = ev.ratingDelta >= 0 ? "success" : "warn";
+  toast({ title: `📺 ${ev.label}`, text: `${sh.title}: ${ev.ratingDelta >= 0 ? "+" : ""}${ev.ratingDelta} rating. Cost: ${fmtCash(cost)}.`, kind, timeout: 5000 });
+  addInbox({ type: "system", from: `${state.tv.name}`, subject: `Network event: ${ev.label}`, body: `${sh.title} — ${ev.label}. Rating ${ev.ratingDelta >= 0 ? "+" : ""}${ev.ratingDelta} → now ${Math.round(sh.rating)}.${ev.repDelta ? ` Rep ${ev.repDelta >= 0 ? "+" : ""}${ev.repDelta}.` : ""}` });
 }
+
 function investShow(id) {
-  if (state.stats.cash < 3000) { toast({title:"Not enough cash", text:"Investing costs $3,000.", kind:"warn"}); return; }
+  if (state.stats.cash < 3000) { toast({title:"Not enough cash", text:"Investment costs $3,000.", kind:"warn"}); return; }
   const sh = state.tv.shows.find(x => x.id === id);
   if (!sh) return;
   state.stats.cash -= 3000;
@@ -1992,15 +2238,27 @@ function investShow(id) {
   if (!sh.ratingHistory) sh.ratingHistory = [];
   sh.ratingHistory.push(Math.round(sh.rating));
   saveState(); renderStats(); renderStudio();
-  toast({ title: "Production investment", text: `${sh.title} surges to ${Math.round(sh.rating)} rating.`, kind: "success" });
+  toast({ title: "Production investment", text: `${sh.title} → ${Math.round(sh.rating)} rating.`, kind: "success" });
   checkAchievements();
 }
+
 function cancelShow(id) {
   const sh = state.tv.shows.find(x => x.id === id);
-  if (!sh || !confirm(`Cancel ${sh.title}?`)) return;
-  state.tv.shows = state.tv.shows.filter(x => x.id !== id);
-  saveState(); renderStudio();
-  toast({ title: "Cancelled", text: `${sh.title} pulled from the schedule.`, kind: "warn" });
+  if (!sh) return;
+  $("#modal-body").innerHTML = `<div class="modal-body">
+    <h2>Cancel "${escapeHtml(sh.title)}"?</h2>
+    <p style="color:var(--slate)">This will remove the show from the schedule. The slot becomes available again.</p>
+    <div style="display:flex;gap:10px;margin-top:18px">
+      <button id="confirm-cancel-show" class="reject-btn">Yes, cancel</button>
+      <button class="ghost-btn" data-close>Keep it</button>
+    </div>
+  </div>`;
+  $("#modal").classList.remove("hidden");
+  document.getElementById("confirm-cancel-show").addEventListener("click", () => {
+    state.tv.shows = state.tv.shows.filter(x => x.id !== id);
+    saveState(); $("#modal").classList.add("hidden"); renderStudio();
+    toast({ title: "Show cancelled", text: `${sh.title} pulled from the schedule.`, kind: "warn" });
+  });
 }
 
 /* ==================================================================== */
@@ -2097,23 +2355,139 @@ function renderCompetitors() {
       </div>
       <div class="comp-actions">
         <button class="ghost-btn read-comp-btn" data-outlet="${escapeHtml(c.name)}">Read latest →</button>
-        ${!c.subjugated ? `<button class="ghost-btn buy-1-btn" data-id="${c.id}" style="font-size:11px">Buy 1 share (${fmtCash(c.sharePrice)})</button>` : ""}
+        ${!c.subjugated
+          ? `<button class="ghost-btn buy-shares-btn" data-id="${c.id}" style="font-size:11px">Trade shares</button>`
+          : `<span class="skill-pill" style="background:var(--green);color:#fff;font-size:10px">Acquired — ${pctOwned}% owned</span>`
+        }
       </div>
     </div>`;
   }).join("");
 
   $$(".read-comp-btn").forEach(b => b.addEventListener("click", e => { e.stopPropagation(); openCompetitorArticle(b.dataset.outlet); }));
-  $$(".buy-1-btn").forEach(b => b.addEventListener("click", e => {
+  $$(".buy-shares-btn").forEach(b => b.addEventListener("click", e => {
     e.stopPropagation();
     const c = state.competitors.find(x => x.id === b.dataset.id);
-    if (!c) return;
-    if (state.stats.cash < c.sharePrice) { toast({title:"Not enough cash", text:`${fmtCash(c.sharePrice)} needed.`, kind:"warn"}); return; }
-    state.stats.cash -= c.sharePrice;
-    c.playerShares = Math.min(c.playerShares + 1, c.totalShares);
-    saveState(); renderStats(); renderCompetitors();
-    toast({ title: "Share bought", text: `${c.name}: ${c.playerShares}/${c.totalShares} shares.` });
+    if (c) openStockModal(c);
   }));
 }
+function openStockModal(comp) {
+  const pctOwned = comp.totalShares > 0 ? (comp.playerShares / comp.totalShares * 100).toFixed(1) : 0;
+  const dividendRate = comp.playerShares >= 10 ? fmtCash(Math.round(comp.sharePrice * comp.playerShares * 0.005)) + "/day" : "Need 10+ shares for dividends";
+  const hist = (comp.stockHistory || []).slice(-12);
+  const spark = hist.length > 1 ? buildSparkline(hist) : "";
+  const quantities = [1, 5, 10, 25];
+  const sellerRefusalThreshold = 50; // seller refuses above this % owned
+  const sellerWary = +pctOwned > 30;
+
+  $("#modal-body").innerHTML = `<div class="modal-body stock-modal">
+    <div class="stock-header">
+      <span class="stock-logo">${comp.logo}</span>
+      <div>
+        <h2 class="stock-name">${escapeHtml(comp.name)}</h2>
+        <div class="stock-meta">${escapeHtml(comp.personality)} · ${comp.share.toFixed(1)}% market share</div>
+      </div>
+      <div class="stock-price-box">
+        <div class="stock-price-big">${fmtCash(comp.sharePrice)}</div>
+        <div class="stock-price-label">per share</div>
+      </div>
+    </div>
+    ${spark ? `<div class="stock-sparkline-wrap">${spark}</div>` : ""}
+    <div class="stock-stats-row">
+      <div class="stock-stat"><div class="stock-stat-val">${comp.playerShares}</div><div class="stock-stat-lbl">Shares owned</div></div>
+      <div class="stock-stat"><div class="stock-stat-val">${pctOwned}%</div><div class="stock-stat-lbl">Of total</div></div>
+      <div class="stock-stat"><div class="stock-stat-val">${fmtCash(comp.sharePrice * comp.playerShares)}</div><div class="stock-stat-lbl">Portfolio value</div></div>
+      <div class="stock-stat"><div class="stock-stat-val">${dividendRate}</div><div class="stock-stat-lbl">Dividend</div></div>
+    </div>
+    ${sellerWary ? `<div class="stock-seller-warn">⚠ You own ${pctOwned}% — sellers are getting nervous. Some orders may be refused.</div>` : ""}
+    <div class="stock-actions">
+      <div>
+        <div class="stock-action-title">Buy shares</div>
+        <div class="stock-qty-grid">
+          ${quantities.map(q => {
+            const cost = comp.sharePrice * q;
+            const canAfford = state.stats.cash >= cost;
+            const wouldOwn = (comp.playerShares + q) / comp.totalShares * 100;
+            const refused = wouldOwn > sellerRefusalThreshold;
+            return `<button class="stock-qty-btn ${canAfford && !refused ? "" : "disabled"}" data-qty="${q}" data-action="buy"
+              title="${refused ? "Seller refuses — ownership cap reached" : !canAfford ? "Not enough cash" : "Buy " + q + " shares"}">
+              Buy ${q}<br><span style="font-size:11px">${fmtCash(cost)}</span>
+              ${refused ? `<br><span style="font-size:9px;color:var(--accent)">refused</span>` : ""}
+            </button>`;
+          }).join("")}
+        </div>
+      </div>
+      ${comp.playerShares > 0 ? `<div>
+        <div class="stock-action-title">Sell shares</div>
+        <div class="stock-qty-grid">
+          ${quantities.filter(q => q <= comp.playerShares).map(q => {
+            const proceeds = comp.sharePrice * q;
+            return `<button class="stock-qty-btn sell" data-qty="${q}" data-action="sell">
+              Sell ${q}<br><span style="font-size:11px">+${fmtCash(proceeds)}</span>
+            </button>`;
+          }).join("")}
+        </div>
+      </div>` : ""}
+    </div>
+    ${comp.playerShares >= 51 && !comp.subjugated ? `<div class="stock-takeover-wrap">
+      <div style="font-size:13px;color:var(--green);font-weight:700;margin-bottom:8px">You own majority control!</div>
+      <button id="do-takeover" class="primary-btn" style="background:var(--green)">Execute takeover (${fmtCash(comp.sharePrice * (comp.totalShares - comp.playerShares))})</button>
+    </div>` : ""}
+    <div style="margin-top:18px"><button class="ghost-btn" data-close>Close</button></div>
+  </div>`;
+  $("#modal").classList.remove("hidden");
+
+  document.querySelectorAll(".stock-qty-btn:not(.disabled)").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const qty = parseInt(btn.dataset.qty);
+      const action = btn.dataset.action;
+      if (action === "buy") {
+        const cost = comp.sharePrice * qty;
+        if (state.stats.cash < cost) { toast({title:"Not enough cash",text:`Need ${fmtCash(cost)}.`,kind:"warn"}); return; }
+        const wouldOwn = (comp.playerShares + qty) / comp.totalShares * 100;
+        if (wouldOwn > sellerRefusalThreshold) { toast({title:"Order refused",text:"The seller's broker won't let you buy more at this ownership level.",kind:"warn"}); return; }
+        // Occasional market refusal (natural resistance above 30%)
+        if (+pctOwned > 30 && Math.random() < 0.25) { toast({title:"Order rejected",text:`A large holder declined to sell at this price. Try again later.`,kind:"warn"}); return; }
+        state.stats.cash -= cost;
+        comp.playerShares = Math.min(comp.totalShares, comp.playerShares + qty);
+        comp.stockHistory = comp.stockHistory || [];
+        comp.stockHistory.push(comp.sharePrice);
+        if (comp.stockHistory.length > 30) comp.stockHistory.shift();
+        // Buying pressure raises price slightly
+        comp.sharePrice = Math.round(comp.sharePrice * (1 + qty * 0.002));
+        saveState(); renderStats();
+        toast({ title: "Order filled", text: `${qty} shares of ${comp.name}. You now own ${comp.playerShares}.`, kind:"success" });
+        openStockModal(state.competitors.find(x => x.id === comp.id) || comp);
+      } else if (action === "sell") {
+        const proceeds = comp.sharePrice * qty;
+        comp.playerShares = Math.max(0, comp.playerShares - qty);
+        state.stats.cash += proceeds;
+        comp.sharePrice = Math.round(comp.sharePrice * (1 - qty * 0.002));
+        comp.stockHistory = comp.stockHistory || [];
+        comp.stockHistory.push(comp.sharePrice);
+        if (comp.stockHistory.length > 30) comp.stockHistory.shift();
+        saveState(); renderStats();
+        toast({ title: "Shares sold", text: `+${fmtCash(proceeds)}. ${comp.playerShares} shares remaining.`, kind:"success" });
+        openStockModal(state.competitors.find(x => x.id === comp.id) || comp);
+      }
+    });
+  });
+
+  document.getElementById("do-takeover")?.addEventListener("click", () => {
+    const cost = comp.sharePrice * (comp.totalShares - comp.playerShares);
+    if (state.stats.cash < cost) { toast({title:"Not enough cash",text:`Need ${fmtCash(cost)}.`,kind:"warn"}); return; }
+    state.stats.cash -= cost;
+    comp.playerShares = comp.totalShares;
+    comp.subjugated = true;
+    comp.sharePrice = Math.round(comp.sharePrice * 1.3);
+    saveState(); renderStats();
+    $("#modal").classList.add("hidden");
+    renderCompetitors();
+    toast({ title: `🏛 ${comp.name} acquired!`, text: "Full takeover complete. Their market share flows to you.", kind: "success", timeout: 7000 });
+    state.stats.marketShare = Math.min(80, state.stats.marketShare + Math.round(comp.share / 2));
+    checkAchievements();
+  });
+}
+
 async function refreshCompetitorWire() {
   try {
     const resp = await fetch("/api/competitor-headlines", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ competitors: state.competitors.map(c => c.name) }) });
@@ -2702,10 +3076,13 @@ function openArticleModal(id) {
   renderPollForArticle(id, $("#modal-body"));
 }
 function setupModal() {
-  $$("#modal [data-close]").forEach(el => el.addEventListener("click", () => {
-    $("#modal").classList.add("hidden");
-    $("#modal").dataset.articleId = "";
-  }));
+  // Event delegation: catches data-close on any dynamically-injected content
+  document.getElementById("modal").addEventListener("click", e => {
+    if (e.target.closest("[data-close]")) {
+      document.getElementById("modal").classList.add("hidden");
+      document.getElementById("modal").dataset.articleId = "";
+    }
+  });
 }
 
 function openSettings() {
@@ -3011,6 +3388,29 @@ async function triggerSmearCampaign(deal) {
 /*                                INBOX                                 */
 /* ==================================================================== */
 
+async function maybeGenerateAIInboxMessage() {
+  if (!state.onboarded) return;
+  try {
+    const r = await fetch("/api/inbox-scenario", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        newsroom: state.newsroom.name,
+        day: state.time.day,
+        reputation: state.stats.reputation,
+        cash: Math.round(state.stats.cash),
+        identity: state.newsroom.identity,
+        politicalLeaning: state.newsroom.politicalLeaning || "center",
+        hasOwner: !!state.owner,
+        articles: state.articles.length,
+      }),
+    });
+    const data = await r.json();
+    if (data && data.subject && data.body) {
+      addInbox({ type: data.type || "system", from: data.from || "Industry", subject: data.subject, body: data.body, urgent: !!data.urgent });
+    }
+  } catch { /* silent */ }
+}
+
 function addInbox({ type = "system", subject, body, from, urgent = false, action = null }) {
   state.inbox = state.inbox || [];
   const item = {
@@ -3034,45 +3434,65 @@ function renderInboxBadge() {
 }
 
 let inboxFilter = "all";
+let inboxExpanded = null; // id of expanded item
+
+const INBOX_TYPE_ICONS = { owner:"👔", sponsor:"💼", crisis:"🚨", award:"🏆", scandal:"⚔️", system:"📋", tip:"💡" };
+
 function renderInbox() {
   const list = $("#inbox-list"); if (!list) return;
-  const items = (state.inbox || []).filter(i => {
+  const all = state.inbox || [];
+  const items = all.filter(i => {
     if (inboxFilter === "all") return true;
     if (inboxFilter === "unread") return !i.read;
     return i.type === inboxFilter;
   });
   const countPill = $("#inbox-count-pill");
   if (countPill) {
-    const unread = (state.inbox || []).filter(i => !i.read).length;
+    const unread = all.filter(i => !i.read).length;
     countPill.textContent = unread > 0 ? `${unread} unread` : "all caught up";
   }
   if (items.length === 0) {
-    list.innerHTML = `<div class="inbox-empty">No messages${inboxFilter === "all" ? " yet" : ` in ${inboxFilter}`}. Things will arrive as the days go by.</div>`;
+    list.innerHTML = `<div class="inbox-empty">No messages${inboxFilter === "all" ? " yet" : ` in ${inboxFilter}`}.</div>`;
     return;
   }
-  list.innerHTML = items.map(i => `
-    <div class="inbox-item type-${escapeHtml(i.type)} ${i.read ? "" : "unread"} ${i.urgent ? "urgent" : ""}" data-id="${i.id}">
-      <div class="inbox-item-from">${escapeHtml(i.from)} · ${escapeHtml(i.type)}</div>
-      <div class="inbox-item-subject">${escapeHtml(i.subject)}</div>
-      <div class="inbox-item-body">${escapeHtml(i.body)}</div>
-      <div class="inbox-item-day">Day ${i.day}</div>
-      ${i.action ? `<span class="inbox-item-action" data-action="${i.id}">${escapeHtml(i.action.label)} →</span>` : ""}
-    </div>`).join("");
-  list.querySelectorAll(".inbox-item").forEach(el => el.addEventListener("click", e => {
-    if (e.target.classList.contains("inbox-item-action")) return;
-    const item = (state.inbox || []).find(x => x.id === el.dataset.id);
-    if (!item) return;
-    item.read = true;
-    saveState();
-    renderInbox();
-    renderInboxBadge();
-  }));
-  list.querySelectorAll(".inbox-item-action").forEach(el => el.addEventListener("click", () => {
-    const item = (state.inbox || []).find(x => x.id === el.dataset.action);
+  list.innerHTML = items.map((item, idx) => {
+    const icon = INBOX_TYPE_ICONS[item.type] || "📨";
+    const isOpen = inboxExpanded === item.id;
+    return `<div class="inbox-card type-${escapeHtml(item.type)} ${item.read ? "" : "unread"} ${item.urgent ? "urgent" : ""} ${isOpen ? "expanded" : ""}"
+        data-id="${item.id}" style="animation-delay:${idx * 40}ms">
+      <div class="inbox-card-header">
+        <span class="inbox-type-icon">${icon}</span>
+        <div class="inbox-card-meta">
+          <div class="inbox-card-from">${escapeHtml(item.from)}</div>
+          <div class="inbox-card-subject">${escapeHtml(item.subject)}</div>
+        </div>
+        <div class="inbox-card-right">
+          <span class="inbox-card-day">Day ${item.day}</span>
+          ${item.urgent ? `<span class="inbox-urgent-dot"></span>` : ""}
+        </div>
+      </div>
+      ${isOpen ? `<div class="inbox-card-body">
+        <div class="inbox-card-text">${escapeHtml(item.body)}</div>
+        ${item.action ? `<button class="inbox-action-btn" data-action="${item.id}">${escapeHtml(item.action.label)} →</button>` : ""}
+      </div>` : ""}
+    </div>`;
+  }).join("");
+
+  list.querySelectorAll(".inbox-card").forEach(el => {
+    el.addEventListener("click", e => {
+      if (e.target.classList.contains("inbox-action-btn")) return;
+      const id = el.dataset.id;
+      inboxExpanded = inboxExpanded === id ? null : id;
+      const item = all.find(x => x.id === id);
+      if (item && !item.read) { item.read = true; saveState(); renderInboxBadge(); }
+      renderInbox();
+    });
+  });
+  list.querySelectorAll(".inbox-action-btn").forEach(el => el.addEventListener("click", e => {
+    e.stopPropagation();
+    const item = all.find(x => x.id === el.dataset.action);
     if (!item || !item.action) return;
-    item.read = true;
-    saveState();
-    // Built-in action handlers by name
+    item.read = true; saveState();
     if (item.action.handler === "openCrisis") { $("#inbox-drawer").classList.add("hidden"); showCrisisModal(item.action.crisisId); }
     else if (item.action.handler === "navigate") { $("#inbox-drawer").classList.add("hidden"); document.querySelector(`.nav-btn[data-view='${item.action.view}']`)?.click(); }
     renderInbox(); renderInboxBadge();
@@ -3080,18 +3500,31 @@ function renderInbox() {
 }
 
 function openInbox() {
+  inboxExpanded = null;
   renderInbox();
-  $("#inbox-drawer").classList.remove("hidden");
+  const drawer = $("#inbox-drawer");
+  drawer.classList.remove("hidden");
+  drawer.classList.remove("drawer-closing");
+}
+
+function closeInbox() {
+  const drawer = $("#inbox-drawer");
+  drawer.classList.add("drawer-closing");
+  setTimeout(() => { drawer.classList.add("hidden"); drawer.classList.remove("drawer-closing"); }, 300);
 }
 
 function setupInbox() {
-  $("#open-inbox")?.addEventListener("click", openInbox);
-  $$("#inbox-drawer [data-close-inbox]").forEach(el => el.addEventListener("click", () => $("#inbox-drawer").classList.add("hidden")));
-  $$(".inbox-tab").forEach(t => t.addEventListener("click", () => {
+  document.getElementById("open-inbox")?.addEventListener("click", openInbox);
+  document.querySelectorAll("#inbox-drawer [data-close-inbox]").forEach(el => el.addEventListener("click", closeInbox));
+  document.querySelectorAll(".inbox-tab").forEach(t => t.addEventListener("click", () => {
     inboxFilter = t.dataset.filter;
-    $$(".inbox-tab").forEach(x => x.classList.toggle("active", x === t));
+    document.querySelectorAll(".inbox-tab").forEach(x => x.classList.toggle("active", x === t));
+    inboxExpanded = null;
     renderInbox();
   }));
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && !document.getElementById("inbox-drawer")?.classList.contains("hidden")) closeInbox();
+  });
 }
 
 /* ==================================================================== */

@@ -432,6 +432,42 @@ Rules: Make the headline specific to the scandal. Use loaded language. The lede 
   });
 });
 
+app.post("/api/inbox-scenario", async (req, res) => {
+  const { newsroom, day, reputation, cash, identity, politicalLeaning, hasOwner, articles } = req.body || {};
+  const types = ["owner_tip","industry_memo","reader_letter","advertiser_note","tipster","press_club","regulator"];
+  const type = pick(types);
+  const lean = politicalLeaning || "center";
+
+  const contextLine = `Newsroom "${newsroom || "The Beacon"}", day ${day || 1}, rep ${reputation || 50}/100, cash $${cash || 0}, identity ${identity || "broadsheet"}, ${articles || 0} articles published, ${hasOwner ? "has an owner" : "independent"}, political leaning: ${lean}.`;
+
+  const typePrompts = {
+    owner_tip: `You are the owner of a newspaper. Write a short, pointed message to the editor-in-chief. Be specific about one business or editorial concern. Tone: ${reputation > 60 ? "cautiously pleased but still demanding" : "disappointed and impatient"}.`,
+    industry_memo: `You are a journalism industry association. Write a brief industry alert or memo relevant to a ${identity || "broadsheet"} publication. Could be about a new law, a tech trend, a market shift, or a competitor move.`,
+    reader_letter: `You are a reader writing a letter to the editor of "${newsroom || "The Beacon"}". Write something specific, personal, and either complimentary or critical. Include a local angle if possible.`,
+    advertiser_note: `You are a potential advertiser (a local or regional business) reaching out to a news outlet with ${reputation || 50}/100 reputation. Express interest, set conditions, or raise concerns about editorial content.`,
+    tipster: `You are an anonymous source reaching out to a reporter at "${newsroom || "The Beacon"}". You have information about something potentially newsworthy. Be cryptic but specific enough to be intriguing.`,
+    press_club: `You are the local Press Club. Write a brief note to the editor — could be an invitation to speak, an award nomination, a journalism fellowship, or a press freedom concern.`,
+    regulator: `You are a media regulator or government office. Write a brief, formal but pointed message to a news outlet. Could be about a complaint received, a licensing matter, or a public interest inquiry.`,
+  };
+
+  const prompt = `${typePrompts[type] || typePrompts.tipster}
+Context: ${contextLine}
+
+Return ONLY JSON:
+{"type":"${type}","from":"Sender name/organization (1-4 words)","subject":"Subject line (max 12 words)","body":"Message body (2-4 sentences, specific and interesting)","urgent":${Math.random() < 0.2}}`;
+
+  const ai = await aiJson(prompt, { timeoutMs: 22000, seed: Date.now() });
+  if (ai && ai.subject && ai.body) return res.json(ai);
+
+  // Fallback
+  const fallbacks = [
+    { type:"industry_memo", from:"Press Association", subject:"Circulation data shows regional outlets gaining", body:"Our latest industry survey shows regional newsrooms up 4% in engaged readership year-over-year, while national titles continue a slow decline. Editorial quality and local relevance remain the strongest predictors of subscriber retention." },
+    { type:"reader_letter", from:"A reader", subject:"First time writing in, but I had to", body:`I've been reading ${newsroom || "your outlet"} for the past few weeks. The coverage depth is genuinely better than I expected. Keep going — local news matters more than people admit.` },
+    { type:"tipster", from:"Anonymous", subject:"Something you should look into", body:"I can't say who I am, but there's a pattern worth investigating at the planning department. Same contractor keeps winning bids. Nobody's asked why yet. If you want to dig, I know where to start." },
+  ];
+  res.json(pick(fallbacks));
+});
+
 app.get("/api/health", (_req, res) => res.json({ ok: true, aiProvider: "pollinations.ai (free)", model: MODEL, catalogSize: STORY_CATALOG.length }));
 
 const PORT = process.env.PORT || 3000;
