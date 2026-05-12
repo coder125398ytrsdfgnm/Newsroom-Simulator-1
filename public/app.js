@@ -421,7 +421,7 @@ function defaultState() {
       slogan2: "",
     },
     player: { name: "You" },
-    stats: { cash: 5000, reputation: 50, totalViews: 0, marketShare: 5, subscribers: 0 },
+    stats: { cash: 10000, reputation: 50, totalViews: 0, marketShare: 5, subscribers: 0 },
     settings: { density: 50, speed: 3, paused: false },
     time: { day: 1, hour: 9 },
     reporters: [],
@@ -1431,12 +1431,13 @@ function renderSponsorsPanel() {
     if (!s) return;
     openSponsorNegotiation(s);
   }));
-  host.querySelectorAll(".terminate").forEach(btn => btn.addEventListener("click", () => {
+  host.querySelectorAll(".terminate").forEach(btn => btn.addEventListener("click", async () => {
     const cid = btn.dataset.cid;
     const contract = (state.sponsorContracts || []).find(c => c.id === cid);
     if (!contract) return;
     const s = getSponsor(contract.sponsorId);
-    if (!confirm(`Terminate contract with ${s?.name || "sponsor"} early? This may affect your reputation.`)) return;
+    const ok = await confirmModal(`Terminate ${s?.name || "sponsor"} contract?`, "Ending early costs 3 reputation points and may sour the relationship.", "Terminate", "Keep");
+    if (!ok) return;
     state.sponsorContracts = state.sponsorContracts.filter(c => c.id !== cid);
     state.stats.reputation = Math.max(0, state.stats.reputation - 3);
     saveState(); renderSponsorsPanel();
@@ -1798,7 +1799,7 @@ function renderReporters() {
         </div>
       </div>
       <div class="staff-actions">
-        <button class="primary-btn hire-btn" data-id="${c.id}">Hire (${fmtCash(c.salary * 5)})</button>
+        <button class="primary-btn hire-btn" data-id="${c.id}">Hire (${fmtCash(c.salary * 3)})</button>
       </div>
     </div>`).join("");
   $$(".hire-btn").forEach(b => b.addEventListener("click", () => hireReporter(b.dataset.id)));
@@ -1807,7 +1808,7 @@ function renderReporters() {
 function hireReporter(id) {
   const c = state.candidatePool.find(x => x.id === id);
   if (!c) return;
-  const signOn = c.salary * 5;
+  const signOn = c.salary * 3;
   if (state.stats.cash < signOn) { toast({title:"Not enough cash", text: `Need ${fmtCash(signOn)} to hire.`, kind:"warn"}); return; }
   state.stats.cash -= signOn;
   state.reporters.push(c);
@@ -1817,9 +1818,11 @@ function hireReporter(id) {
   toast({ title: "Hired", text: `${c.name} joins the ${c.beat} beat.`, kind: "success" });
   checkAchievements();
 }
-function fireReporter(id) {
+async function fireReporter(id) {
   const r = state.reporters.find(x => x.id === id);
-  if (!r || !confirm(`Fire ${r.name}?`)) return;
+  if (!r) return;
+  const ok = await confirmModal(`Fire ${r.name}?`, `${r.name} covers the ${r.beat} beat at $${r.salary}/mo. This cannot be undone.`, "Fire them", "Keep");
+  if (!ok) return;
   state.reporters = state.reporters.filter(x => x.id !== id);
   saveState(); renderStats(); renderReporters();
   toast({ title: "Let go", text: `${r.name} cleared their desk.`, kind: "warn" });
@@ -1828,7 +1831,7 @@ async function assignStory(id, opts = {}) {
   const r = state.reporters.find(x => x.id === id);
   if (!r) return;
   if (state.stats.cash < r.salary) { toast({title:"Not enough cash", text:`Assignment costs ${fmtCash(r.salary)}.`, kind:"warn"}); return; }
-  const beat = opts.tip ? (opts.beat || r.beat) : (prompt(`Topic for ${r.name} (blank = ${r.beat}):`, "") ?? r.beat) || r.beat;
+  const beat = opts.tip ? (opts.beat || r.beat) : (await promptModal(`Assign ${r.name}`, `Pick a beat (default: ${r.beat})`, r.beat, BEATS)) || r.beat;
   state.stats.cash -= r.salary;
   const draftingId = uid();
   state.pendingApprovals.push({ id: draftingId, status: "drafting", reporterId: r.id, reporterName: r.name, beat, tip: opts.tip });
@@ -2559,8 +2562,9 @@ function renderOwnerPanel() {
         <button id="voluntary-auction-btn" class="primary-btn">Put paper up for voluntary auction</button>
       </div>
     </div>`;
-    $("#voluntary-auction-btn").addEventListener("click", () => {
-      if (!confirm("Put yourself up for sale? You'll receive bids from investors with demands.")) return;
+    $("#voluntary-auction-btn").addEventListener("click", async () => {
+      const ok = await confirmModal("Put paper up for auction?", "Investors will bid to acquire your newsroom. The winning bidder will have editorial demands.", "Start auction", "Cancel");
+      if (!ok) return;
       openAuction(true);
     });
     return;
@@ -2585,17 +2589,19 @@ function renderOwnerPanel() {
       <button id="voluntary-auction-btn" class="ghost-btn">Re-auction</button>
     </div>
   </div>`;
-  $("#buyback-btn").addEventListener("click", () => {
+  $("#buyback-btn").addEventListener("click", async () => {
     const cost = o.bid * 1.5;
     if (state.stats.cash < cost) { toast({title:"Not enough cash", text:`Need ${fmtCash(cost)} to buy back.`, kind:"warn"}); return; }
-    if (!confirm(`Pay ${fmtCash(cost)} to buy back independence?`)) return;
+    const ok = await confirmModal("Buy back independence?", `This costs ${fmtCash(cost)} and severs all ties with your current owner.`, "Pay & break free", "Cancel");
+    if (!ok) return;
     state.stats.cash -= cost;
     state.owner = null;
     saveState(); renderStats(); renderOwnerPanel();
     toast({ title: "Independent again", text: "The newsroom is yours alone.", kind: "success" });
   });
-  $("#voluntary-auction-btn").addEventListener("click", () => {
-    if (!confirm("Sell to a new owner? Bids will replace your current owner.")) return;
+  $("#voluntary-auction-btn").addEventListener("click", async () => {
+    const ok = await confirmModal("Re-auction the newsroom?", "New bids will replace your current owner. The highest bidder takes control with their own demands.", "Start auction", "Cancel");
+    if (!ok) return;
     openAuction(true);
   });
 }
@@ -2631,8 +2637,9 @@ function triggerBankruptcy() {
 }
 
 function setupBankruptcyHandlers() {
-  $("#ba-shutdown").addEventListener("click", () => {
-    if (!confirm("Shut down for good? This resets your save.")) return;
+  $("#ba-shutdown").addEventListener("click", async () => {
+    const ok = await confirmModal("Shut down permanently?", "This will delete your entire save file. There is no going back.", "Shut it down", "Cancel");
+    if (!ok) return;
     localStorage.removeItem(STORAGE_KEY);
     location.reload();
   });
@@ -2889,11 +2896,12 @@ function renderFinancePanel() {
   // Loan repay buttons
   host.querySelectorAll(".repay-btn, [data-loan]").forEach(btn => {
     if (!btn.classList.contains("take-loan")) {
-      btn.addEventListener("click", () => {
+      btn.addEventListener("click", async () => {
         const loan = state.loans.find(l => l.id === btn.dataset.loan);
         if (!loan) return;
         if (state.stats.cash < loan.remaining) { toast({title:"Not enough cash", text:`Need ${fmtCash(loan.remaining)} to repay.`, kind:"warn"}); return; }
-        if (!confirm(`Repay ${fmtCash(loan.remaining)}?`)) return;
+        const ok = await confirmModal("Repay loan?", `Pay ${fmtCash(loan.remaining)} to fully clear this debt. Your cash will be reduced immediately.`, "Repay now", "Cancel");
+        if (!ok) return;
         state.stats.cash -= loan.remaining;
         state.loans = state.loans.filter(l => l.id !== loan.id);
         saveState(); renderStats(); renderFinancePanel();
@@ -2910,12 +2918,13 @@ function renderFinancePanel() {
   }));
 
   // Marketing buttons
-  host.querySelectorAll(".run-marketing").forEach(btn => btn.addEventListener("click", () => {
+  host.querySelectorAll(".run-marketing").forEach(btn => btn.addEventListener("click", async () => {
     if (state.marketing.active) { toast({title:"Campaign running", text:"Wait for current campaign to finish.", kind:"warn"}); return; }
     const mt = MARKETING_TIERS.find(x => x.id === btn.dataset.tier);
     if (!mt) return;
     if (state.stats.cash < mt.cost) { toast({title:"Not enough cash", text:`Need ${fmtCash(mt.cost)}.`, kind:"warn"}); return; }
-    if (!confirm(`Run ${mt.name} campaign for ${fmtCash(mt.cost)}?`)) return;
+    const ok = await confirmModal(`Launch ${mt.name}?`, `Costs ${fmtCash(mt.cost)} and boosts view counts for your next ${mt.articles} articles by ${mt.bonusPct}%. Adds ${fmtNum(mt.subBonus)} subscribers.`, "Launch campaign", "Cancel");
+    if (!ok) return;
     state.stats.cash -= mt.cost;
     state.stats.subscribers = (state.stats.subscribers || 0) + mt.subBonus;
     state.marketing = { active: true, tier: mt.name, bonusPct: mt.bonusPct, articlesLeft: mt.articles, startArticles: mt.articles, subBonus: mt.subBonus };
@@ -2948,12 +2957,13 @@ function renderFinancePanel() {
     toast({ title: "Sold 1 share", text: `+${fmtCash(c.sharePrice)} · ${c.playerShares} shares left`, kind: "success" });
   }));
 
-  host.querySelectorAll(".takeover-btn").forEach(btn => btn.addEventListener("click", () => {
+  host.querySelectorAll(".takeover-btn").forEach(btn => btn.addEventListener("click", async () => {
     const c = state.competitors.find(x => x.id === btn.dataset.id);
     if (!c) return;
     const cost = c.sharePrice * 10;
-    if (!confirm(`Finalize takeover of ${c.name}? Costs ${fmtCash(cost)} in acquisition fees.`)) return;
     if (state.stats.cash < cost) { toast({title:"Not enough cash", text:`Need ${fmtCash(cost)} in acquisition fees.`, kind:"warn"}); return; }
+    const ok = await confirmModal(`Acquire ${c.name}?`, `Finalize the takeover for ${fmtCash(cost)} in acquisition fees. They'll operate under your editorial direction.`, "Acquire", "Cancel");
+    if (!ok) return;
     state.stats.cash -= cost;
     c.subjugated = true;
     c.share = Math.max(c.share - 5, 1);
@@ -3113,6 +3123,59 @@ function setupModal() {
       document.getElementById("modal").classList.add("hidden");
       document.getElementById("modal").dataset.articleId = "";
     }
+  });
+}
+
+function confirmModal(title, body, yesLabel = "Confirm", noLabel = "Cancel") {
+  return new Promise(resolve => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal";
+    backdrop.style.cssText = "z-index:200;display:flex;align-items:center;justify-content:center;position:fixed;inset:0";
+    backdrop.innerHTML = `
+      <div class="modal-backdrop" style="position:absolute;inset:0;background:rgba(0,0,0,0.55)"></div>
+      <div class="modal-card" style="position:relative;max-width:420px;width:90%;background:#fff;padding:28px;border-radius:4px;box-shadow:0 8px 40px rgba(0,0,0,0.18)">
+        <h2 style="font-family:'Oswald',sans-serif;letter-spacing:1.5px;text-transform:uppercase;font-size:19px;margin:0 0 10px">${escapeHtml(title)}</h2>
+        <p style="color:var(--slate);margin:0 0 22px;font-size:14px;line-height:1.55">${escapeHtml(body)}</p>
+        <div style="display:flex;gap:10px;justify-content:flex-end">
+          <button class="reject-btn cm-no" style="cursor:pointer">${escapeHtml(noLabel)}</button>
+          <button class="primary-btn cm-yes" style="cursor:pointer">${escapeHtml(yesLabel)}</button>
+        </div>
+      </div>`;
+    document.body.appendChild(backdrop);
+    const done = ok => { backdrop.remove(); resolve(ok); };
+    backdrop.querySelector(".cm-yes").addEventListener("click", () => done(true));
+    backdrop.querySelector(".cm-no").addEventListener("click", () => done(false));
+    backdrop.querySelector(".modal-backdrop").addEventListener("click", () => done(false));
+  });
+}
+
+function promptModal(title, hint, defaultVal = "", items = null) {
+  return new Promise(resolve => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal";
+    backdrop.style.cssText = "z-index:200;display:flex;align-items:center;justify-content:center;position:fixed;inset:0";
+    const inputHtml = items && items.length
+      ? `<select class="pm-in" style="width:100%;padding:10px 12px;font-size:15px;border:1px solid var(--rule);border-radius:2px;font-family:inherit;box-sizing:border-box">${items.map(i => `<option value="${escapeHtml(i)}"${i === defaultVal ? " selected" : ""}>${escapeHtml(i)}</option>`).join("")}</select>`
+      : `<input class="pm-in" type="text" value="${escapeHtml(defaultVal)}" placeholder="${escapeHtml(hint || "")}" style="width:100%;padding:10px 12px;font-size:15px;border:1px solid var(--rule);border-radius:2px;font-family:inherit;box-sizing:border-box" />`;
+    backdrop.innerHTML = `
+      <div class="modal-backdrop" style="position:absolute;inset:0;background:rgba(0,0,0,0.55)"></div>
+      <div class="modal-card" style="position:relative;max-width:420px;width:90%;background:#fff;padding:28px;border-radius:4px;box-shadow:0 8px 40px rgba(0,0,0,0.18)">
+        <h2 style="font-family:'Oswald',sans-serif;letter-spacing:1.5px;text-transform:uppercase;font-size:19px;margin:0 0 8px">${escapeHtml(title)}</h2>
+        ${hint ? `<p style="color:var(--slate);margin:0 0 12px;font-size:13px">${escapeHtml(hint)}</p>` : ""}
+        ${inputHtml}
+        <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px">
+          <button class="reject-btn pm-cancel" style="cursor:pointer">Cancel</button>
+          <button class="primary-btn pm-ok" style="cursor:pointer">OK</button>
+        </div>
+      </div>`;
+    document.body.appendChild(backdrop);
+    const inp = backdrop.querySelector(".pm-in");
+    if (inp && !items) { try { inp.select(); } catch(e) {} }
+    const done = val => { backdrop.remove(); resolve(val); };
+    backdrop.querySelector(".pm-ok").addEventListener("click", () => done(inp ? (inp.value.trim() || defaultVal) : null));
+    backdrop.querySelector(".pm-cancel").addEventListener("click", () => done(null));
+    backdrop.querySelector(".modal-backdrop").addEventListener("click", () => done(null));
+    if (inp && !items) inp.addEventListener("keydown", e => { if (e.key === "Enter") done(inp.value.trim() || defaultVal); });
   });
 }
 
