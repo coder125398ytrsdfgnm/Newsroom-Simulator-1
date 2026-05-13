@@ -1228,9 +1228,10 @@ async function administer(testId){
       });
       continue;
     }
-    // Written (sa/es): batch students in groups of 6 (essays) or 10 (short answer)
-    // to keep each response well under output truncation cap.
-    const groupSize=q.type==="es"?6:10;
+    // Written (sa/es): batch students in groups of 4 (essays) or 8 (short answer)
+    // to keep each response safely under output truncation cap. Per-student fallback
+    // inside classWrittenAnswers handles any missing entries.
+    const groupSize=q.type==="es"?4:8;
     const all=[];
     for(let g=0;g<cls.students.length;g+=groupSize){
       const grp=cls.students.slice(g,g+groupSize);
@@ -1267,17 +1268,36 @@ Question: ${q.prompt}${q.answer?`\n(Model answer for reference - do NOT copy: ${
 Students:
 ${items}
 
-Return ONLY a JSON array of exactly ${students.length} answer strings, in order. No keys, no preamble.`;
+Return ONLY a JSON array of ${students.length} answer strings, in order. Example: ["answer1","answer2",...]. No object keys. No preamble.`;
   const txt=await aiText(prompt,{retries:3,timeout:45000});
-  if(!txt||!isCompleteJSON(txt))return students.map(()=>null);
-  const m=txt.match(/\[[\s\S]*\]/);if(!m)return students.map(()=>null);
-  let arr;
-  try{arr=JSON.parse(m[0]);}
-  catch(e){
-    try{arr=JSON.parse(m[0].replace(/,\s*\]/g,"]"));}catch(_){return students.map(()=>null);}
+  // Tolerant extraction - handles truncation and trailing prose.
+  const arr=extractJSONArray(txt)||[];
+  if(window.console&&!arr.length)console.warn("[AI] class answers parse failed; raw:",txt?.slice(0,300));
+  // For any missing entries, fall back to a per-student call (small, won't truncate).
+  const out=[];
+  for(let i=0;i<students.length;i++){
+    const v=arr[i];
+    if(typeof v==="string" && v.trim()){
+      out.push(v.slice(0,400));
+    }else{
+      const fb=await singleWrittenAnswer(students[i],q);
+      out.push(fb||null);
+    }
   }
-  if(!Array.isArray(arr))return students.map(()=>null);
-  return students.map((_,i)=>typeof arr[i]==="string"?arr[i].slice(0,400):null);
+  return out;
+}
+
+async function singleWrittenAnswer(s,q){
+  const ability=(s.ability*.7+s.effort*.2+s.mood*.1)/100;
+  const correctness=ability<.3?"wrong":ability<.55?"partial":ability<.8?"mostly_right":"correct";
+  const writeTier=s.writing<35?"weak (drop apostrophes, misspellings)":s.writing<70?"ok (one tiny slip)":"clean (no advanced vocab though)";
+  const len=q.type==="sa"?"1 short sentence":"2-3 short sentences";
+  const prompt=`Write ONE school student's exam answer. Voice: ${s.voiceKey}. Writing: ${writeTier}. Target correctness: ${correctness} (wrong=actually wrong; partial=right idea with a mistake; mostly_right=small slip; correct=clear and right). ${len}.
+
+Question: ${q.prompt}${q.answer?`\n(Model: ${q.answer})`:""}
+
+Reply with ONLY the answer text. No quotes. No preamble.`;
+  return await aiLine(prompt,400,{retries:2,timeout:22000});
 }
 
 // Student attempts a question. Realism is the goal: skill drives correctness, voice drives style.
@@ -1519,59 +1539,48 @@ function spawnStudentContact(student){
   return c;
 }
 
-// Build an AI prompt for a message in the contact's voice.
-async function generateMessage(contact,kind,extra){
-  const student=contact.studentId!=null?findStudent(contact.studentId):null;
-  const voiceList=contact.kind==="parent"?PARENT_VOICES:STUDENT_VOICES;
-  const v=voiceList.find(x=>x.key===contact.voiceKey)||voiceList[0];
-  let intent="";
-  if(kind==="intro")intent=`Introduce yourself politely as ${student?student.first+"'s "+contact.kind:"a contact"} and mention one small thing about how ${student?student.first:"the kid"} is doing or feeling at school. Don't ask for anything specific yet.`;
-  else if(kind==="concern")intent=`Express a brief concern about ${student.first}'s performance or behaviour in ${state.subject||"class"}. Be specific but short.`;
-  else if(kind==="praise")intent=`Thank the teacher because ${student.first} came home happy about something at school.`;
-  else if(kind==="request")intent=`Politely request that the teacher pay a little more attention to ${student.first} this week - they need encouragement.`;
-  else if(kind==="complaint")intent=`Complain (politely or pointedly, in voice) about a recent grade ${student.first} received and ask if it can be reviewed.`;
-  else if(kind==="help")intent=`Ask the teacher for extra help with ${state.subject||"the subject"} - mention one specific topic they're struggling with.`;
-  else if(kind==="thanks")intent=`Briefly thank the teacher for something kind they did recently.`;
-  else if(kind==="absence")intent=`Inform the teacher that ${student.first} will be absent for one or two days for a family reason. Keep it brief.`;
-  else if(kind==="followup")intent=extra?.context?`Send a SHORT follow-up about: ${extra.context}.`:`Send a short follow-up to your last message.`;
-  const target="Ms. "+state.name;
-  const prompt=`Write a short email/message FROM ${contact.name} (${contact.relation}) TO ${target}. Voice: ${v.style}. Goal: ${intent}\nRules:\n- Sound like a real person, not perfect prose. Subtle imperfections fitting the voice.\n- Length: 2 to 4 sentences MAX. No long paragraphs.\n- Do NOT include "Subject:" line.\n- Do NOT use markdown.\n- Sign off in a way that matches the voice (or no signoff if voice is terse).\nReply with ONLY the message body.`;
-  try{
-    const r=await fetch("https://text.pollinations.ai/"+encodeURIComponent(prompt));
-    let txt=(await r.text()).trim().replace(/^["']|["']$/g,"");
-    // sanitize markdown artifacts
-    txt=txt.replace(/^#+\s*/gm,"").replace(/\*\*/g,"");
-    return txt.slice(0,700);
-  }catch(e){
-    return contact.kind==="parent"?
-      `Hi - just checking in about ${student?student.first:"my kid"}. Could you let me know how things are going? Thanks.`:
-      `hey miss, can we talk about the last test? thx`;
-  }
-}
-async function generateSubject(contact,body){
-  const prompt=`Write a SHORT email subject line (max 6 words, lowercase common for casual voices, capitalised for formal) for this message:\n${body.slice(0,300)}\nReply with ONLY the subject line, no quotes.`;
-  try{
-    const r=await fetch("https://text.pollinations.ai/"+encodeURIComponent(prompt));
-    return (await r.text()).trim().replace(/^["']|["']$/g,"").slice(0,60)||"(no subject)";
-  }catch(e){return "(no subject)";}
-}
 
-// Queue an inbound message. Optionally attach a mission.
+// Queue an inbound message. ONE AI call returns both subject and body.
 async function queueMessage(contact,kind,opts={}){
-  const ov=showBusy(`${contact.name} is writing...`);
-  const body=await generateMessage(contact,kind,opts);
-  const subject=await generateSubject(contact,body);
-  ov.close();
+  const data=await generateMessagePair(contact,kind,opts);
+  if(!data||!data.body)return;       // no placeholder
   const msg={id:"m"+Date.now()+Math.floor(Math.random()*1000),
-    contactId:contact.id,fromMe:false,subject,body,
+    contactId:contact.id,fromMe:false,
+    subject:(data.subject||"").slice(0,60),
+    body:data.body,
     week:state.week,day:DAYS[state.dayIdx],read:false,replyTo:opts.replyTo||null};
   state.messages.push(msg);
   contact.msgCount++;
-  // attach a mission for some kinds
   const missionKind=kind==="request"?"give_card":kind==="help"?"reply":kind==="concern"?"raise_avg":kind==="complaint"?"reply":null;
   if(missionKind)spawnMission(contact,missionKind,msg);
   buildNav();
   toast(`New message: ${contact.name}`);
+}
+
+async function generateMessagePair(contact,kind,opts={}){
+  const student=contact.studentId!=null?findStudent(contact.studentId):null;
+  const voiceList=contact.kind==="parent"?PARENT_VOICES:STUDENT_VOICES;
+  const v=voiceList.find(x=>x.key===contact.voiceKey)||voiceList[0];
+  let intent="";
+  if(kind==="intro")intent=`Introduce yourself politely as ${student?student.first+"'s "+contact.kind:"a contact"} and mention one small thing about how ${student?student.first:"the kid"} is doing.`;
+  else if(kind==="concern")intent=`Express a brief concern about ${student?.first||"the student"}'s performance or behaviour. Specific but short.`;
+  else if(kind==="praise")intent=`Thank the teacher because ${student?.first||"the student"} came home happy.`;
+  else if(kind==="request")intent=`Politely request more attention for ${student?.first||"the student"} this week.`;
+  else if(kind==="complaint")intent=`Complain (politely or pointedly, in voice) about a recent grade and ask if it can be reviewed.`;
+  else if(kind==="help")intent=`Ask the teacher for extra help with one specific topic.`;
+  else if(kind==="thanks")intent=`Briefly thank the teacher for something kind they did recently.`;
+  else if(kind==="absence")intent=`Inform the teacher of a 1-2 day absence for a family reason.`;
+  else intent=`Send a short follow-up.`;
+  const prompt=`Write ONE email/message FROM ${contact.name} (${contact.relation}) TO Ms. ${state.name}. Voice: ${v.style}. Goal: ${intent}
+Rules:
+- Sound like a real person. Subtle imperfections fitting the voice.
+- Length: 2 to 4 sentences MAX.
+- No markdown.
+
+Return ONLY a compact JSON object: {"subject":"<short subject line, max 6 words>","body":"<the message body>"}`;
+  const data=await aiJSON(prompt,{retries:2,timeout:35000});
+  if(!data||typeof data.body!=="string")return null;
+  return {subject:typeof data.subject==="string"?data.subject:"",body:data.body.slice(0,700)};
 }
 
 // ============================================================
