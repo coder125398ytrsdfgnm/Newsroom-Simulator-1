@@ -344,12 +344,13 @@ const VERSION="0.6";
 const SAVE_KEY="chalkdust:save";
 
 // ============ AI helpers (single point for the no-placeholder rule) ============
-// Pollinations is flaky: anonymous IPs queue at 1 in-flight (429) AND the upstream
-// proxies return 502/503/504 frequently. Strategy:
-//   - All calls go through one serial queue (avoid 429)
-//   - Use POST endpoint with messages array (more reliable for long prompts)
-//   - On 5xx/network failure: aggressive backoff + cycle through model fallbacks
-const AI_MODELS=["openai","openai-fast","mistral","llama"];
+// Lessons learned the hard way:
+//   - Anonymous Pollinations queues 1 in-flight per IP -> serial queue
+//   - Their POST endpoint doesn't handle browser CORS preflight -> GET only
+//   - Of their listed models, ONLY `openai` is reliable from anonymous traffic
+//   - Long responses get truncated at the model's output token limit -> keep calls small
+//   - Cloudflare in front of them occasionally returns 5xx -> retry with backoff
+const AI_MODEL="openai";
 let _aiChain=Promise.resolve();
 function aiEnqueue(task){
   const run=_aiChain.then(task,task);
@@ -357,51 +358,50 @@ function aiEnqueue(task){
   return run;
 }
 async function _aiOnce(prompt,opts={}){
-  // GET-only. Pollinations' POST endpoint doesn't handle browser CORS preflight,
-  // so POST works in node/curl but fails silently in the browser. GET is reliable.
-  const model=opts.model||"openai";
   const url="https://text.pollinations.ai/"+encodeURIComponent(prompt)+
-    "?model="+encodeURIComponent(model)+"&seed="+Math.floor(Math.random()*1e6)+
+    "?model="+AI_MODEL+"&seed="+Math.floor(Math.random()*1e6)+
     (opts.jsonMode?"&json=true":"");
   const ctrl=new AbortController();
-  const to=setTimeout(()=>ctrl.abort(),opts.timeout||60000);
+  const to=setTimeout(()=>ctrl.abort(),opts.timeout||45000);
   let resp;
-  try{
-    resp=await fetch(url,{signal:ctrl.signal});
-  }finally{clearTimeout(to);}
+  try{resp=await fetch(url,{signal:ctrl.signal});}
+  finally{clearTimeout(to);}
   const txt=await resp.text();
   if(!resp.ok){
     const err=new Error("ai_http_"+resp.status);
     err.status=resp.status;err.body=txt.slice(0,200);
     throw err;
   }
-  if(/Queue full/i.test(txt) || (/^\s*\{[^{]*"error"\s*:/i.test(txt))){
+  if(/^\s*\{[^{]*"error"\s*:/i.test(txt) || /Queue full/i.test(txt)){
     const err=new Error("ai_queue");err.status=429;err.body=txt.slice(0,200);throw err;
   }
   return txt.trim().replace(/^```(?:json)?\s*/i,"").replace(/```$/,"").trim()||null;
 }
 async function aiText(prompt,opts={}){
-  const tries=opts.retries??5;
+  const tries=opts.retries??3;
   return aiEnqueue(async ()=>{
     let lastErr=null;
     for(let i=0;i<=tries;i++){
-      const model=AI_MODELS[i%AI_MODELS.length];
       try{
-        const t=await _aiOnce(prompt,{...opts,model});
+        const t=await _aiOnce(prompt,opts);
         if(t)return t;
-        // null response - treat as retryable
-        await new Promise(r=>setTimeout(r,800+i*500));
+        await new Promise(r=>setTimeout(r,700+i*500));
       }catch(e){
         lastErr=e;
         const code=e.status||0;
-        // 429: queue full, longest wait. 5xx: upstream flap. 0/abort: network.
-        const wait=code===429?3500+i*1500:code>=500?2200+i*1200:1200+i*900;
+        const wait=code===429?3000+i*1200:code>=500?1800+i*1000:1000+i*700;
         await new Promise(r=>setTimeout(r,wait));
       }
     }
     if(window.console)console.warn("[AI] gave up:",lastErr?.status,lastErr?.message,lastErr?.body);
     return null;
   });
+}
+// Truncation guard: any response whose final non-space char isn't ] or } is incomplete.
+function isCompleteJSON(s){
+  if(!s)return false;
+  const c=s.replace(/\s+$/,"").slice(-1);
+  return c==="]"||c==="}";
 }
 async function aiJSON(prompt,opts={}){
   const t=await aiText(prompt+"\n\nReply with ONLY valid JSON. No prose. No markdown fences.",{...opts,jsonMode:true});
@@ -444,18 +444,19 @@ let selectedRole="tutor";
 
 // Build a student from AI roster data (no defaults - if data missing, skip).
 function makeStudent(id,data){
-  if(!data||!data.first||!data.last||!data.personality||!data.voiceKey||!data.story)return null;
+  // Story is optional at creation - filled in on demand by weekly ticks / interactions.
+  if(!data||!data.first||!data.last||!data.personality||!data.voiceKey)return null;
   return {
     id,
     name:data.first+" "+data.last,
     first:data.first,last:data.last,
-    ability:25+Math.random()*60,    // hidden academic skill (mechanic, not user-facing)
-    writing:rollWriting(),           // hidden writing skill
+    ability:25+Math.random()*60,
+    writing:rollWriting(),
     mood:45+Math.random()*30,
     effort:40+Math.random()*40,
     personality:data.personality,
     voiceKey:data.voiceKey,
-    story:data.story,                // current life/school story - drives card reasons
+    story:data.story||null,
     storyUpdatedWeek:1,
     grades:[],
     cards:[],
@@ -465,130 +466,120 @@ function makeStudent(id,data){
 }
 
 // Ask the AI for a class roster. Parallel batches for speed + reliability.
-// One combined boot-time call: roster + teachers in a single response.
-// Stories are NOT requested here - they fill in lazily in the background while you play.
-async function generateBootBundle(rosterSize,teacherCount,excludeSubject,onProgress){
-  const voices=STUDENT_VOICES.map(v=>v.key).join("|");
+// Compact array format to keep responses well under any truncation limit.
+// One batch of 10 students fits in ~400 chars - safely under output token caps.
+async function generateStudentBatch(n){
   const pers=PERSONALITIES.join("|");
-  const subjects=["Mathematics","English","Science","History","Geography","Art","Music","P.E.","Drama","Computer Science"].filter(s=>s!==excludeSubject);
-  const prompt=`Generate fictional data for a struggling US public school. Return a JSON object exactly like:
-{
- "students":[ ${rosterSize} objects: {"first":"<first name>","last":"<surname>","personality":"<one of: ${pers}>","voiceKey":"<one of: ${voices}>"} ],
- "teachers":[ ${teacherCount} objects: {"name":"<honorific Surname e.g. 'Mr. Hollis', 'Dr. Reeves'>","subject":"<unique subject from: ${subjects.join("|")}>","strict":<0.1-0.9>,"style":"<short phrase e.g. 'soft-spoken but firm'>"} ]
-}
-Rules:
+  const voices=STUDENT_VOICES.map(v=>v.key).join("|");
+  const prompt=`Make ${n} fictional school students. Return ONLY a JSON array of compact arrays: [["FirstName","LastName","personality","voiceKey"], ...].
+- personality is one of: ${pers}
+- voiceKey is one of: ${voices}
+- ${n} entries exactly.
 - Diverse cultural names (white, Black, Hispanic, Asian, Middle Eastern, South Asian).
-- Each teacher subject must be unique.
-- Vary personalities and voices realistically.
-- Return ONLY the JSON object.`;
-  onProgress?.(.2);
-  const data=await aiJSON(prompt,{retries:5,timeout:90000});
-  onProgress?.(1);
-  if(!data||!Array.isArray(data.students)||!Array.isArray(data.teachers))return null;
-  return {
-    students:data.students.filter(d=>d&&d.first&&d.last&&d.personality&&d.voiceKey),
-    teachers:data.teachers.filter(t=>t&&t.name&&t.subject)
-  };
+- No prose, no markdown.`;
+  const txt=await aiText(prompt,{retries:3,jsonMode:true,timeout:35000});
+  if(!txt||!isCompleteJSON(txt))return [];
+  const m=txt.match(/\[[\s\S]*\]/);if(!m)return [];
+  let arr;try{arr=JSON.parse(m[0]);}catch(e){return [];}
+  if(!Array.isArray(arr))return [];
+  return arr.filter(x=>Array.isArray(x)&&x.length>=4).map(x=>({
+    first:String(x[0]||"").trim(),last:String(x[1]||"").trim(),
+    personality:String(x[2]||"").trim(),voiceKey:String(x[3]||"").trim()
+  })).filter(d=>d.first&&d.last&&d.personality&&d.voiceKey);
 }
-async function topUpStudents(needed){
-  if(needed<=0)return [];
-  const prompt=`Generate ${needed} more fictional school students. Each: {"first","last","personality":"<one of: ${PERSONALITIES.join("|")}>","voiceKey":"<one of: ${STUDENT_VOICES.map(v=>v.key).join("|")}>"}. Diverse cultural names. JSON array only.`;
-  const d=await aiJSON(prompt,{retries:3});
-  return Array.isArray(d)?d.filter(s=>s&&s.first&&s.last):[];
+async function generateTeacherBatch(count,excludeSubject){
+  const subjects=["Mathematics","English","Science","History","Geography","Art","Music","P.E.","Drama","Computer Science"].filter(s=>s!==excludeSubject);
+  const prompt=`Make ${count} school teachers. Return ONLY a JSON array of compact arrays: [["Mr./Ms./Dr. Surname","subject",strict_0_to_1,"short style phrase"], ...].
+- subject is one of: ${subjects.join("|")} (each used at most once).
+- ${count} entries exactly.
+- Varied cultural surnames.
+- No prose.`;
+  const txt=await aiText(prompt,{retries:3,jsonMode:true,timeout:25000});
+  if(!txt||!isCompleteJSON(txt))return [];
+  const m=txt.match(/\[[\s\S]*\]/);if(!m)return [];
+  let arr;try{arr=JSON.parse(m[0]);}catch(e){return [];}
+  if(!Array.isArray(arr))return [];
+  return arr.filter(x=>Array.isArray(x)&&x.length>=4).map(x=>({
+    name:String(x[0]||"").trim(),subject:String(x[1]||"").trim(),
+    strict:Math.max(0.1,Math.min(0.9,parseFloat(x[2])||0.5)),
+    style:String(x[3]||"").trim()
+  })).filter(t=>t.name&&t.subject);
 }
 
 async function newCareer(role,name,subject,className){
   const ov=showBusy("Starting the school year...");
   ov.setProgress(2);
-  ov.update("Building the school");
-  ov.sub("Roster + faculty in one batch");
   const totalStudents=role==="tutor"?22:60;
+  // Split into batches of 10 - safely under any output truncation.
+  const batchSize=10;
+  const studentBatches=Math.ceil(totalStudents/batchSize);
   const teacherCount=7;
-  let bundle=await generateBootBundle(totalStudents,teacherCount,subject,p=>ov.setProgress(5+p*70));
-  if(!bundle||!bundle.students.length){
-    // one more try
-    bundle=await generateBootBundle(totalStudents,teacherCount,subject,p=>ov.setProgress(5+p*70));
-  }
-  if(!bundle||!bundle.students.length){
-    ov.close();
-    alert("AI is having a rough patch loading the school. Please try again in a minute.");
-    return false;
-  }
-  // top-up if undersized
-  if(bundle.students.length<Math.floor(totalStudents*.6)){
-    ov.update("Topping up the roster");
-    const extra=await topUpStudents(totalStudents-bundle.students.length);
-    bundle.students=bundle.students.concat(extra);
+  // Total work units: studentBatches + 1 (teachers)
+  const total=studentBatches+1;
+  let done=0;
+  const tick=(label,sub)=>{
+    ov.update(label);ov.sub(sub||"");
+    ov.setProgress(Math.round((done/total)*100));
+  };
+  tick(`Building roster (1/${total})`,"Class list, first names, voices");
+  const studentsData=[];
+  for(let b=0;b<studentBatches;b++){
+    const n=Math.min(batchSize,totalStudents-b*batchSize);
+    let arr=await generateStudentBatch(n);
+    // one retry on empty
+    if(!arr.length)arr=await generateStudentBatch(n);
+    studentsData.push(...arr);
+    done++;
+    tick(`Building roster (${Math.min(done+1,total)}/${total})`,`${studentsData.length} students so far`);
   }
   // dedupe by full name
   const seen=new Set();
-  bundle.students=bundle.students.filter(s=>{const k=(s.first+" "+s.last).toLowerCase();if(seen.has(k))return false;seen.add(k);return true;});
-
-  ov.setProgress(80);ov.update("Seating the classes");ov.sub("");
+  const uniqueStudents=studentsData.filter(s=>{const k=(s.first+" "+s.last).toLowerCase();if(seen.has(k))return false;seen.add(k);return true;});
+  if(!uniqueStudents.length){
+    ov.close();alert("AI is having a rough patch. Wait a minute, then try New Career again.");return false;
+  }
+  tick(`Hiring faculty (${total}/${total})`,"");
+  let teachers=await generateTeacherBatch(teacherCount,subject);
+  if(!teachers.length)teachers=await generateTeacherBatch(teacherCount,subject);
+  done++;
+  if(!teachers.length){
+    ov.close();alert("Faculty couldn't load. Try New Career again in a moment.");return false;
+  }
+  // Seat into classes
   const classes=[];
   let idx=0;
   if(role==="tutor"){
-    const studs=bundle.students.slice(0,22).map((d,i)=>makeStudent(idx++*97+i,d)).filter(Boolean);
+    const studs=uniqueStudents.slice(0,22).map((d,i)=>makeStudent(idx++*97+i,d)).filter(Boolean);
     classes.push({name:className||"7A",students:studs});
   }else{
     const classNames=["7A","8B","9A"];
     for(let i=0;i<3;i++){
-      const slice=bundle.students.slice(i*20,i*20+20);
+      const slice=uniqueStudents.slice(i*20,i*20+20);
       const studs=slice.map((d,j)=>makeStudent(idx++*97+j,d)).filter(Boolean);
       if(studs.length)classes.push({name:classNames[i],students:studs});
     }
   }
-  if(!classes.length){ov.close();alert("Roster generation failed. Please try again.");return false;}
-
+  if(!classes.length){ov.close();alert("Couldn't seat classes. Try again.");return false;}
   state={
     role,name,subject:role==="subject"?subject:null,
     formClass:role==="tutor"?className:null,
     year:1,quarter:1,week:1,dayIdx:0,
     rep:10,rank:"Probationary",
-    classes,
-    activeClassIdx:0,
+    classes,activeClassIdx:0,
     tests:[],
     draftTest:{title:"Unit 1 Quiz",questions:[],scale:"percent",weight:1.0},
     quarterAverages:[null,null,null,null],
-    contacts:[],
-    messages:[],
-    missions:[],
-    selectedContact:null,
-    lastMsgWeek:0,
-    activity:[],
-    npcTeachers:bundle.teachers,
-    pendingReplies:[]
+    contacts:[],messages:[],missions:[],
+    selectedContact:null,lastMsgWeek:0,
+    activity:[],npcTeachers:teachers,pendingReplies:[]
   };
-  ov.setProgress(95);ov.update("Reaching out to the first parents");
-  await seedContacts();
   ov.setProgress(100);
-  await new Promise(r=>setTimeout(r,150));
+  await seedContacts();   // no AI here - just spawns two parent records
   ov.close();
-  // kick off background story filler - non-blocking
-  fillStoriesInBackground();
   return true;
 }
 
-// ============ Background story filler =====================================
-// Stories make cards/replies feel grounded but are EXPENSIVE to generate.
-// We fill them lazily after boot, one at a time, in the background.
-let _storyFilling=false;
-async function fillStoriesInBackground(){
-  if(_storyFilling)return;_storyFilling=true;
-  try{
-    while(state){
-      const target=state.classes.flatMap(c=>c.students).find(s=>!s.story);
-      if(!target)break;
-      const v=STUDENT_VOICES.find(v=>v.key===target.voiceKey);
-      const line=await aiLine(`Write ONE grounded sentence (12-22 words) about what a school student named ${target.first} ${target.last} is currently going through. Personality: ${target.personality}. Style hint: ${v?v.style:""}. Plain prose, no quotes.`,260);
-      if(line){target.story=line;target.storyUpdatedWeek=state?.week||1;}
-      // light pacing - the queue already serializes, but breathe between calls
-      await new Promise(r=>setTimeout(r,150));
-    }
-  }finally{_storyFilling=false;}
-}
-
-// Seed two parent contacts (by storyless? doesn't matter - pick first two).
+// Seed two parent contacts (pick first two students; stories may be empty - fine).
 async function seedContacts(){
   const pool=state.classes.flatMap(c=>c.students);
   // Stories may not be loaded yet at this point; pick first two students.
