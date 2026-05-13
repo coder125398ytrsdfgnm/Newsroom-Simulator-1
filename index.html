@@ -246,9 +246,10 @@
   <h1>CHALKDUST</h1>
   <div class="sub">A teacher's life at Rust Hollow Public School #14</div>
   <button class="primary" onclick="openSetup()">New Career</button>
-  <button onclick="alert('Save/Load coming later.')">Continue</button>
-  <button onclick="alert('Pick a role at the start. Form Tutors guide one class through the year. Subject Teachers teach a subject to several classes and run tests. Cards always need a reason. Tests are built by dragging blocks, taken by students, then graded by you.')">How to Play</button>
-  <button onclick="alert('Chalkdust v0.2 - bones')">Credits</button>
+  <button id="continueBtn" onclick="continueGame()">Continue</button>
+  <button onclick="showHowToPlay()">How to Play</button>
+  <button onclick="showCredits()">Credits</button>
+  <div style="opacity:.45;font-size:.8em;margin-top:1em" id="menuVersion"></div>
 </div>
 
 <div id="setup">
@@ -337,26 +338,40 @@
 // STATE
 // ============================================================
 const DAYS=["Mon","Tue","Wed","Thu","Fri"];
+const VERSION="0.6";
+const SAVE_KEY="chalkdust:save";
 
 // ============ AI helpers (single point for the no-placeholder rule) ============
+// Pollinations supports a `model` query. 'openai' is the fastest acceptable option.
 async function aiText(prompt,opts={}){
-  try{
-    const r=await fetch("https://text.pollinations.ai/"+encodeURIComponent(prompt));
-    if(!r.ok)return null;
-    let t=(await r.text()).trim();
-    t=t.replace(/^```(?:json)?\s*/i,"").replace(/```$/,"").trim();
-    return t||null;
-  }catch(e){return null;}
+  const tries=opts.retries??2;
+  for(let i=0;i<=tries;i++){
+    try{
+      const url="https://text.pollinations.ai/"+encodeURIComponent(prompt)+"?model=openai&seed="+(Math.floor(Math.random()*1e6));
+      const ctrl=new AbortController();
+      const to=setTimeout(()=>ctrl.abort(),opts.timeout||25000);
+      const r=await fetch(url,{signal:ctrl.signal});
+      clearTimeout(to);
+      if(!r.ok){if(i===tries)return null;continue;}
+      let t=(await r.text()).trim();
+      t=t.replace(/^```(?:json)?\s*/i,"").replace(/```$/,"").trim();
+      if(t)return t;
+    }catch(e){if(i===tries)return null;}
+  }
+  return null;
 }
-async function aiJSON(prompt){
-  const t=await aiText(prompt+"\n\nReply with ONLY valid JSON. No prose. No markdown fences.");
+async function aiJSON(prompt,opts={}){
+  const t=await aiText(prompt+"\n\nReply with ONLY valid JSON. No prose. No markdown fences.",opts);
   if(!t)return null;
   const m=t.match(/[\[{][\s\S]*[\]}]/);
   if(!m)return null;
-  try{return JSON.parse(m[0]);}catch(e){return null;}
+  try{return JSON.parse(m[0]);}catch(e){
+    // try to repair trailing commas
+    try{return JSON.parse(m[0].replace(/,\s*([}\]])/g,"$1"));}catch(_){return null;}
+  }
 }
-async function aiLine(prompt,maxLen=200){
-  const t=await aiText(prompt);
+async function aiLine(prompt,maxLen=200,opts={}){
+  const t=await aiText(prompt,opts);
   if(!t)return null;
   return t.replace(/^["']|["']$/g,"").replace(/\s+/g," ").slice(0,maxLen);
 }
@@ -408,14 +423,34 @@ function makeStudent(id,data){
   };
 }
 
-// Ask the AI for a class roster. Returns array of student data, or null on failure.
-async function generateStudentRoster(size){
-  const voices=STUDENT_VOICES.map(v=>v.key);
-  const pers=PERSONALITIES;
-  const prompt=`Generate ${size} fictional school students for a struggling public school in a small US town (varied cultural backgrounds). For each: {"first":"<first name>","last":"<surname>","personality":"<one of ${pers.join("|")}>","voiceKey":"<one of ${voices.join("|")}>","story":"<one sentence about what this student is currently going through at school or at home - specific and grounded, not generic. 12-22 words.>"}. The stories should be varied (some neutral, some struggling, some thriving), and feel like real teens. Reply as a JSON array.`;
-  const data=await aiJSON(prompt);
-  if(!Array.isArray(data))return null;
-  return data.filter(d=>d&&d.first&&d.last&&d.story);
+// Ask the AI for a class roster. Parallel batches for speed + reliability.
+async function generateStudentRosterBatch(n,seedHint){
+  const voices=STUDENT_VOICES.map(v=>v.key).join("|");
+  const pers=PERSONALITIES.join("|");
+  const prompt=`Generate ${n} fictional school students for a struggling US public school (varied cultural names: white, Black, Hispanic, Asian, Middle Eastern). ${seedHint}\nFor each student return: {"first":"<first name>","last":"<surname>","personality":"<one of: ${pers}>","voiceKey":"<one of: ${voices}>","story":"<ONE sentence (12-22 words) about what this student is going through right now - specific, grounded, varied: some neutral, some struggling, some thriving>"}\nReply as a JSON array of exactly ${n} objects.`;
+  const data=await aiJSON(prompt,{retries:2,timeout:30000});
+  if(!Array.isArray(data))return [];
+  return data.filter(d=>d&&d.first&&d.last&&d.personality&&d.voiceKey&&d.story);
+}
+async function generateStudentRoster(size,onProgress){
+  const batchSize=6;
+  const batches=Math.ceil(size/batchSize);
+  const hints=["Mix of 7th and 8th graders.","Include shy kids and class clowns.","Some bright students who hide it.","Include kids dealing with family stuff."];
+  let done=0;
+  const promises=[];
+  for(let b=0;b<batches;b++){
+    const n=Math.min(batchSize,size-b*batchSize);
+    const hint=hints[b%hints.length];
+    promises.push(generateStudentRosterBatch(n,hint).then(arr=>{
+      done++;onProgress?.(done/batches);
+      return arr;
+    }));
+  }
+  const results=await Promise.all(promises);
+  const merged=[].concat(...results);
+  // dedupe by full name
+  const seen=new Set();
+  return merged.filter(s=>{const k=(s.first+" "+s.last).toLowerCase();if(seen.has(k))return false;seen.add(k);return true;});
 }
 
 // Ask the AI for the other-subject teacher roster.
@@ -434,12 +469,15 @@ async function generateClassName(){
   return null;
 }
 
-async function buildClass(size){
-  let roster=await generateStudentRoster(size);
-  // retry once if too short
-  if(!roster||roster.length<Math.floor(size*.7))roster=await generateStudentRoster(size);
+async function buildClass(size,onProgress){
+  let roster=await generateStudentRoster(size,onProgress);
+  if(!roster||roster.length<Math.floor(size*.6)){
+    // top-up with one more batch if undersized
+    const extra=await generateStudentRoster(size-roster.length,onProgress);
+    if(extra&&extra.length)roster=roster.concat(extra);
+  }
   if(!roster||!roster.length)return null;
-  const name=await generateClassName()||"7A"; // class name not creative content; fallback acceptable
+  const name=await generateClassName()||"7A";
   const students=[];
   roster.slice(0,size).forEach((d,i)=>{
     const s=makeStudent(i*97+Math.floor(Math.random()*97),d);
@@ -451,23 +489,26 @@ async function buildClass(size){
 
 async function newCareer(role,name,subject,className){
   const classes=[];
+  const ov=showBusy("Starting the school year...");
+  ov.setProgress(2);
   if(role==="tutor"){
-    const ov=showBusy("Assembling your form class...");
-    const c=await buildClass(22);
-    ov.close();
-    if(!c){alert("AI roster generation failed. Please try again in a moment.");return false;}
+    ov.update("Assembling your form class");
+    ov.sub("Twenty-odd kids, all at once");
+    const c=await buildClass(22,p=>ov.setProgress(5+p*55));
+    if(!c){ov.close();alert("Roster generation failed. The AI service may be slow right now - please try again.");return false;}
     c.name=className||c.name;
     classes.push(c);
   }else{
-    const ov=showBusy("Assembling your three classes...");
     for(let i=0;i<3;i++){
-      ov.update(`Building class ${i+1} of 3...`);
-      const c=await buildClass(20);
+      ov.update(`Assembling class ${i+1} of 3`);
+      ov.sub("Building roster...");
+      const startP=5+i*18;
+      const c=await buildClass(20,p=>ov.setProgress(startP+p*16));
       if(c)classes.push(c);
     }
-    ov.close();
-    if(!classes.length){alert("AI roster generation failed. Please try again in a moment.");return false;}
+    if(!classes.length){ov.close();alert("Roster generation failed. The AI service may be slow right now - please try again.");return false;}
   }
+  ov.setProgress(65);
   state={
     role,name,subject:role==="subject"?subject:null,
     formClass:role==="tutor"?className:null,
@@ -487,13 +528,17 @@ async function newCareer(role,name,subject,className){
     npcTeachers:[],            // populated from AI
     pendingReplies:[]          // queued student/parent replies
   };
-  // build NPC teacher roster (other subjects)
-  const ov=showBusy("Hiring the rest of the faculty...");
+  ov.update("Hiring the rest of the faculty");ov.sub("");
+  ov.setProgress(72);
   let teachers=await generateTeacherRoster(7,state.subject);
   if(!teachers||!teachers.length)teachers=await generateTeacherRoster(7,state.subject);
-  ov.close();
   state.npcTeachers=teachers||[];
+  ov.setProgress(88);
+  ov.update("Reaching out to the first parents");
   await seedContacts();
+  ov.setProgress(100);
+  await new Promise(r=>setTimeout(r,180));
+  ov.close();
   return true;
 }
 
@@ -544,9 +589,11 @@ async function beginCareer(){
   renderHud();
 }
 function quitToMenu(){
-  if(!confirm("Return to main menu? Unsaved progress will be lost."))return;
+  if(!confirm("Return to main menu? Your progress is auto-saved."))return;
+  saveGame(false);
   document.getElementById("game").classList.remove("active");
   document.getElementById("menu").classList.remove("hidden");
+  refreshContinueButton();
 }
 
 // ============================================================
@@ -583,7 +630,10 @@ function buildNav(){
   html+=navBtn("messages","Messages"+msgBadge);
   html+=navBtn("missions","Missions"+misBadge);
   html+=navBtn("activity","Staffroom Feed");
-  html+=`<div class="sep"></div><button onclick="quitToMenu()">Quit to Menu</button>`;
+  html+=`<div class="sep"></div>
+    <button onclick="saveGame(true)">Save Game</button>
+    <button onclick="quitToMenu()">Quit to Menu</button>
+    <div style="opacity:.4;font-size:.75em;margin-top:auto;padding-top:.5em">v${VERSION}</div>`;
   nav.innerHTML=html;
 }
 function navBtn(v,label){return `<button data-view="${v}" onclick="showView('${v}')">${label}</button>`;}
@@ -1722,6 +1772,7 @@ async function advanceDay(){
   await tickMessages(false);
   ov.close();
   renderHud();buildNav();refreshCurrentView();
+  saveGame(false);
 }
 async function advanceWeek(){
   for(let i=0;i<5;i++){
@@ -1738,6 +1789,7 @@ async function advanceWeek(){
   await tickMessages(true);
   ov.close();
   renderHud();buildNav();refreshCurrentView();
+  saveGame(false);
 }
 async function weeklyTick(){
   tickMissions();
@@ -1783,13 +1835,114 @@ function toast(msg){
   const t=document.createElement("div");t.className="toast";t.textContent=msg;
   document.body.appendChild(t);setTimeout(()=>t.remove(),3000);
 }
-function showBusy(msg){
+window.addEventListener("DOMContentLoaded",refreshContinueButton);
+// ============================================================
+// SAVE / LOAD - localStorage based, single slot
+// ============================================================
+function saveGame(announce){
+  if(!state)return;
+  try{
+    const payload={version:VERSION,savedAt:new Date().toISOString(),state};
+    localStorage.setItem(SAVE_KEY,JSON.stringify(payload));
+    if(announce)toast("Game saved.");
+  }catch(e){
+    if(announce)toast("Save failed: "+e.message);
+  }
+}
+function loadGame(){
+  try{
+    const raw=localStorage.getItem(SAVE_KEY);if(!raw)return null;
+    const payload=JSON.parse(raw);
+    return payload;
+  }catch(e){return null;}
+}
+function continueGame(){
+  const p=loadGame();
+  if(!p){toast("No save found.");return;}
+  if(p.version!==VERSION){
+    if(!confirm(`Save is from version ${p.version}; current is ${VERSION}. Try loading anyway?`))return;
+  }
+  state=p.state;
+  document.getElementById("menu").classList.add("hidden");
+  document.getElementById("game").classList.add("active");
+  buildNav();
+  showView(state.role==="tutor"?"formroom":"classroom");
+  renderHud();
+  toast("Welcome back.");
+}
+function refreshContinueButton(){
+  const btn=document.getElementById("continueBtn");if(!btn)return;
+  const p=loadGame();
+  if(p){
+    const when=new Date(p.savedAt);
+    btn.disabled=false;
+    btn.textContent=`Continue (saved ${when.toLocaleDateString()} ${when.toLocaleTimeString().slice(0,5)})`;
+  }else{
+    btn.disabled=true;btn.textContent="Continue (no save)";
+  }
+  const v=document.getElementById("menuVersion");if(v)v.textContent="version "+VERSION;
+}
+
+// ============================================================
+// CREDITS / HOW TO PLAY
+// ============================================================
+function showHowToPlay(){
   const m=document.createElement("div");m.className="modal";
-  m.innerHTML=`<div class="box" style="text-align:center"><h3 id="busyMsg">${esc(msg)}</h3><p class="muted">Please wait...</p></div>`;
+  m.innerHTML=`<div class="box">
+    <h2>How to Play</h2>
+    <p><b>Pick a role.</b> Form Tutor guides one class and reads cards other teachers write. Subject Teacher teaches their subject across multiple classes, builds tests, grades them, and writes cards.</p>
+    <p><b>Cards</b> need a reason. They affect the student's mood and your reputation. Green for good, Yellow for trouble, Purple for outstanding.</p>
+    <p><b>Tests</b>: drag question blocks onto the canvas in Test Builder. Pick a scale (Percentage, Letter, Points, Stars, Pass/Fail) and weight. Students attempt the test (AI writes their answers in voice). You grade every paper, flipping with the arrows.</p>
+    <p><b>Messages</b>: parents and students reach out. You can compose to a student too - whether they reply depends on who they are. Missions arrive with some messages.</p>
+    <p><b>Time</b>: Next Day or Next Week. The school keeps moving with or without you - other teachers issue cards, post grades, gossip happens.</p>
+    <p><b>Save</b> from the sidebar at any time. Continue from the main menu.</p>
+    <div class="row" style="justify-content:flex-end"><button class="primary" onclick="closeModal()">Got it</button></div>
+  </div>`;
   document.body.appendChild(m);
+  m.onclick=e=>{if(e.target===m)closeModal();};
+}
+function showCredits(){
+  const m=document.createElement("div");m.className="modal";
+  m.innerHTML=`<div class="box">
+    <h2>Chalkdust</h2>
+    <p style="opacity:.7">A teacher dashboard sim, version ${VERSION}</p>
+    <p><b>Setting:</b> Rust Hollow Public School #14, a struggling public school somewhere out past the highway.</p>
+    <p><b>Engine:</b> Hand-built browser game in a single HTML file. No framework, no build step.</p>
+    <p><b>AI:</b> All in-game creative content - student names and stories, teacher rosters, card reasons, parent and student messages, gossip - is generated live via <a href="https://pollinations.ai" target="_blank" rel="noopener" style="color:var(--accent)">Pollinations.ai</a> (keyless text endpoint, OpenAI model). No placeholders.</p>
+    <p><b>Built by:</b> You and Claude, iteratively.</p>
+    <div class="row" style="justify-content:flex-end"><button class="primary" onclick="closeModal()">Close</button></div>
+  </div>`;
+  document.body.appendChild(m);
+  m.onclick=e=>{if(e.target===m)closeModal();};
+}
+
+function showBusy(msg,opts={}){
+  const m=document.createElement("div");m.className="modal";
+  const showBar=opts.progress!==false;
+  m.innerHTML=`<div class="box" style="text-align:center;max-width:420px">
+    <h3 class="busyMsg">${esc(msg)}</h3>
+    ${showBar?`<div class="bar" style="height:14px;background:#0e0a07;border:1px solid #000"><div class="busyFill" style="width:0%;background:var(--accent);transition:width .3s ease"></div></div>
+    <p class="muted busyPct">0%</p>`:`<p class="muted">Please wait...</p>`}
+    <p class="muted busySub" style="font-style:italic"></p>
+  </div>`;
+  document.body.appendChild(m);
+  let last=0;
+  const tick=()=>{
+    // gentle creeping animation so the bar always feels alive
+    const fill=m.querySelector(".busyFill");if(!fill)return;
+    const cur=parseFloat(fill.style.width)||0;
+    if(cur<last-1){fill.style.width=Math.min(last,cur+1)+"%";}
+  };
+  const iv=setInterval(tick,120);
   return {
-    update:(t)=>{const el=document.getElementById("busyMsg");if(el)el.textContent=t;},
-    close:()=>m.remove()
+    update:(t)=>{const el=m.querySelector(".busyMsg");if(el)el.textContent=t;},
+    sub:(t)=>{const el=m.querySelector(".busySub");if(el)el.textContent=t||"";},
+    setProgress:(p)=>{
+      p=Math.max(0,Math.min(100,p));last=p;
+      const fill=m.querySelector(".busyFill");const lab=m.querySelector(".busyPct");
+      if(fill)fill.style.width=p+"%";if(lab)lab.textContent=p.toFixed(0)+"%";
+    },
+    close:()=>{clearInterval(iv);m.remove();}
   };
 }
 </script>
