@@ -587,6 +587,8 @@ async function newCareer(role,name,subject,className){
     activity:[],npcTeachers:teachers,pendingReplies:[]
   };
   await seedContacts();
+  ov.setProgress(98);ov.update("Planning the first week");
+  await planWeek();    // populate state.weekPlan so Monday actually has events
   ov.setProgress(100);
   ov.close();
   return true;
@@ -780,6 +782,9 @@ function openStudent(id,canAdminister){
     const revoke=canRevoke&&!isMine?`<button class="reroll" onclick="revokeCard(${id},${i})">revoke</button>`:"";
     return `<li><span class="pill ${c.color[0]}">${c.color}</span> wk ${c.week} - <i>${esc(c.reason)}</i> <small class="muted">by ${esc(c.by)}</small> ${revoke}</li>`;
   }).join(""):"<li><i>No cards yet.</i></li>";
+  const canDetain=canAdminister && rankLevel()>=1;     // Junior+
+  const canHonors=canAdminister && rankLevel()>=2;     // Senior+
+  const canConference=rankLevel()>=3;                  // Master+
   const adminBtns=canAdminister?`
     <h3>Issue a card</h3>
     <div class="row">
@@ -790,7 +795,12 @@ function openStudent(id,canAdminister){
       </select>
       <input id="cardReason" type="text" placeholder="Reason (required)" style="flex:1;min-width:200px">
       <button class="primary" onclick="issueCard(${id})">Issue</button>
-    </div>`:`<p class="muted"><i>Form Tutors can read cards but not issue them.</i></p>`;
+    </div>
+    ${canDetain||canHonors||canConference?`<h3>Promoted actions</h3><div class="row">
+      ${canDetain?`<button onclick="scheduleDetention(${id})" title="Junior Teacher unlock">Schedule Detention</button>`:""}
+      ${canHonors?`<button class="primary" onclick="recommendHonors(${id})" title="Senior Teacher unlock">Recommend for Honors</button>`:""}
+      ${canConference?`<button onclick="parentConference(${id})" title="Master Teacher unlock">Parent Conference</button>`:""}
+    </div>`:""}`:`<p class="muted"><i>Form Tutors can read cards but not issue them. You can still revoke colleagues' cards (see below).</i></p>`;
   const m=document.createElement("div");
   m.className="modal";
   m.innerHTML=`<div class="box">
@@ -826,6 +836,111 @@ function messageStudent(id){
   setTimeout(()=>{const sel=document.getElementById("composeStudent");if(sel)sel.value=id;},10);
 }
 function closeModal(){document.querySelectorAll(".modal").forEach(m=>m.remove());}
+
+// ============================================================
+// PROMOTIONS - rank-gated abilities
+// ============================================================
+const RANKS=[
+  {key:"Probationary",rep:0},
+  {key:"Junior Teacher",rep:30},
+  {key:"Senior Teacher",rep:70},
+  {key:"Master Teacher",rep:110}
+];
+function rankLevel(){
+  if(!state)return 0;
+  for(let i=RANKS.length-1;i>=0;i--){
+    if(state.rep>=RANKS[i].rep)return i;
+  }
+  return 0;
+}
+function applyPromotions(){
+  const tier=RANKS[rankLevel()];
+  if(state.rank!==tier.key){
+    const prev=state.rank;
+    state.rank=tier.key;
+    toast(`Promoted to ${tier.key}`);
+    logActivity({type:"gossip",text:`${prev?"Promoted from "+prev+" ":"Promoted "}to ${tier.key}. New abilities unlocked.`});
+  }
+}
+
+// Detention (Junior+) - heavy yellow card with parent loop.
+async function scheduleDetention(studentId){
+  const s=findStudent(studentId);if(!s)return;
+  const reason=prompt(`Detention reason for ${s.first}?`);
+  if(!reason||!reason.trim()){toast("Detention needs a reason.");return;}
+  s.cards.push({color:"yellow",reason:"DETENTION: "+reason.trim(),week:state.week,by:"Ms. "+state.name});
+  s.mood=clamp(s.mood-10);
+  s.effort=clamp(s.effort+5);   // mixed effect - shapes up effort
+  state.rep+=2;
+  logActivity({type:"card",text:`You put ${s.first} in detention - "${reason.trim()}"`});
+  toast(`${s.first} has detention. +2 rep.`);
+  // ensure parent contact + outbound notification
+  const c=spawnParentContactIfMissing(s);
+  if(c){
+    state.messages.push({id:"m"+Date.now(),contactId:c.id,fromMe:true,
+      subject:"Detention notice",body:`Hello, I'm writing to let you know that ${s.first} has detention this week. Reason: ${reason.trim()}.`,
+      week:state.week,day:DAYS[state.dayIdx],read:true});
+    // parent will probably react
+    state.pendingReplies.push({contactId:c.id,studentId:s.id,
+      fireAtTick:tickCounter()+1+Math.floor(Math.random()*2),
+      inReplyTo:`Their child ${s.first} got detention for: ${reason.trim()}`,subject:"Re: Detention notice"});
+  }
+  closeModal();renderHud();buildNav();refreshCurrentView();saveGame(false);
+}
+
+// Honors (Senior+) - purple card + parent praise + mission to keep avg up.
+async function recommendHonors(studentId){
+  const s=findStudent(studentId);if(!s)return;
+  s.cards.push({color:"purple",reason:"HONORS recommendation",week:state.week,by:"Ms. "+state.name});
+  s.mood=clamp(s.mood+12);
+  state.rep+=4;
+  logActivity({type:"gossip",text:`You nominated ${s.first} for honors.`});
+  toast(`${s.first} recommended for honors. +4 rep.`);
+  const c=spawnParentContactIfMissing(s);
+  if(c){
+    state.messages.push({id:"m"+Date.now(),contactId:c.id,fromMe:true,
+      subject:"Honors nomination",body:`I'm delighted to let you know I have recommended ${s.first} for our honors programme this year.`,
+      week:state.week,day:DAYS[state.dayIdx],read:true});
+    state.pendingReplies.push({contactId:c.id,studentId:s.id,
+      fireAtTick:tickCounter()+1+Math.floor(Math.random()*2),
+      inReplyTo:`Their child ${s.first} was just nominated for honors.`,subject:"Re: Honors nomination"});
+  }
+  // mission: keep their grade up
+  state.missions.push({id:"x"+Date.now()+Math.floor(Math.random()*999),
+    title:`Honor ${s.first}'s promise`,
+    desc:`Keep ${s.first}'s test average above 80 over the next 3 weeks.`,
+    kind:"raise_avg",studentId:s.id,contactId:c?.id||null,
+    createdWeek:state.week,deadlineWeek:state.week+3,
+    status:"open",reward:6,sourceMsg:null});
+  closeModal();renderHud();buildNav();refreshCurrentView();saveGame(false);
+}
+
+// Parent conference (Master+) - schedules a heavy event.
+async function parentConference(studentId){
+  const s=findStudent(studentId);if(!s)return;
+  const c=spawnParentContactIfMissing(s);
+  if(!c){toast("Couldn't find a parent contact.");return;}
+  const ov=showBusy("Drafting the meeting summary");
+  const prompt=`Write a SHORT meeting note (4-6 sentences) for a parent conference scheduled between Ms. ${state.name} and ${c.name} regarding their child ${s.first} ${s.last}. Context: ${s.story||s.first+" is in your class."}. Tone: professional, neutral, specific. Plain prose only.`;
+  const note=await aiLine(prompt,800);
+  ov.close();
+  if(!note){toast("Couldn't draft - try again.");return;}
+  state.messages.push({id:"m"+Date.now(),contactId:c.id,fromMe:true,
+    subject:`Conference re: ${s.first}`,body:note,
+    week:state.week,day:DAYS[state.dayIdx],read:true});
+  state.rep+=3;state.pendingReplies.push({contactId:c.id,studentId:s.id,
+    fireAtTick:tickCounter()+1,
+    inReplyTo:note.slice(0,200),subject:`Re: Conference re: ${s.first}`});
+  logActivity({type:"gossip",text:`Parent conference scheduled with ${c.name}.`});
+  toast("Conference summary sent. +3 rep.");
+  closeModal();renderHud();buildNav();refreshCurrentView();saveGame(false);
+}
+
+function spawnParentContactIfMissing(s){
+  let c=state.contacts.find(x=>x.kind==="parent"&&x.studentId===s.id);
+  if(!c)c=spawnParentContact(s);
+  return c;
+}
 
 // ============================================================
 // CARD REVOCATION (form tutor only)
@@ -1254,34 +1369,53 @@ async function administer(testId){
 }
 
 // One AI call - up to ~10 students answer one written question. Compact format.
+// Batch class answers using a delimiter format - immune to the multi-line-newline
+// problem that broke JSON parsing for essays. Per-student fallback for any gaps.
 async function classWrittenAnswers(students,q){
   const items=students.map((s,i)=>{
     const ability=(s.ability*.7+s.effort*.2+s.mood*.1)/100;
     const correctness=ability<.3?"wrong":ability<.55?"partial":ability<.8?"mostly_right":"correct";
-    return `${i+1}. ${s.first}: voice=${s.voiceKey}, write_skill=${s.writing<35?"weak":s.writing<70?"ok":"clean"}, target=${correctness}`;
+    return `Student ${i+1} (${s.first}): voice=${s.voiceKey}, write_skill=${s.writing<35?"weak":s.writing<70?"ok":"clean"}, target=${correctness}`;
   }).join("\n");
   const len=q.type==="sa"?"1 short sentence":"2-3 short sentences";
-  const prompt=`Write ${students.length} student answers to ONE exam question. Each must match that student's writing level (weak = drop apostrophes, misspellings; ok = age-appropriate prose with one slip; clean = good prose, never advanced vocab) and correctness target (wrong = actually wrong answer; partial = right idea with a clear mistake; mostly_right = answer correct but a small slip; correct = right and clear). ${len} each.
+  const prompt=`Write each student's answer to ONE exam question. Match each student's writing level (weak=drop apostrophes/misspellings; ok=age-appropriate, one slip; clean=good prose, no advanced vocab) AND correctness target (wrong=actually wrong; partial=right idea with a mistake; mostly_right=correct with a small slip; correct=clear and right). ${len} each.
 
 Question: ${q.prompt}${q.answer?`\n(Model answer for reference - do NOT copy: ${q.answer})`:""}
 
 Students:
 ${items}
 
-Return ONLY a JSON array of ${students.length} answer strings, in order. Example: ["answer1","answer2",...]. No object keys. No preamble.`;
+OUTPUT FORMAT (very important):
+Output a delimiter line and then the answer for each student. Use this EXACT delimiter format:
+###1###
+<answer for student 1>
+###2###
+<answer for student 2>
+... continue for all ${students.length} students.
+No JSON. No quotes around answers. No preamble. Start the very first line with ###1###.`;
   const txt=await aiText(prompt,{retries:3,timeout:45000});
-  // Tolerant extraction - handles truncation and trailing prose.
-  const arr=extractJSONArray(txt)||[];
-  if(window.console&&!arr.length)console.warn("[AI] class answers parse failed; raw:",txt?.slice(0,300));
-  // For any missing entries, fall back to a per-student call (small, won't truncate).
+  const parsed=parseDelimited(txt,students.length);
+  if(window.console&&parsed.filter(Boolean).length===0)console.warn("[AI] essay batch returned nothing; raw:",txt?.slice(0,300));
   const out=[];
   for(let i=0;i<students.length;i++){
-    const v=arr[i];
-    if(typeof v==="string" && v.trim()){
-      out.push(v.slice(0,400));
+    if(parsed[i]&&parsed[i].trim()){
+      out.push(parsed[i].slice(0,500));
     }else{
       const fb=await singleWrittenAnswer(students[i],q);
       out.push(fb||null);
+    }
+  }
+  return out;
+}
+function parseDelimited(txt,n){
+  const out=new Array(n).fill(null);
+  if(!txt)return out;
+  const re=/###\s*(\d+)\s*###\s*\n?([\s\S]*?)(?=\n\s*###\s*\d+\s*###|\s*$)/g;
+  let m;
+  while((m=re.exec(txt))!==null){
+    const idx=parseInt(m[1],10)-1;
+    if(idx>=0 && idx<n){
+      out[idx]=m[2].trim();
     }
   }
   return out;
@@ -1316,26 +1450,8 @@ async function studentAnswer(s,q){
   return {text:await generateWrittenAnswer(s,q,ability,writing)};
 }
 async function generateWrittenAnswer(s,q,ability,writing){
-  // Correctness bucket from academic ability, with realistic variance.
-  const roll=ability+(Math.random()*.3-.15);
-  const correctness=roll<.3?"mostly wrong or confused (give the wrong answer or miss the point)":
-                    roll<.55?"partially correct (right idea but a clear mistake or gap)":
-                    roll<.8 ?"mostly correct with a minor slip or imprecise phrasing":
-                             "correct and clear";
-  // Writing style hints
-  const v=STUDENT_VOICES.find(v=>v.key===s.voiceKey)||STUDENT_VOICES[0];
-  const writeHint=writing<.35?"Spelling and grammar are weak: drop apostrophes, occasional misspelling, run-on sentences.":
-                  writing<.7 ?"Writing is okay for their age - one small grammar slip is fine.":
-                              "Writing is clean for a school student, but stays age-appropriate (no advanced vocabulary).";
-  const len=q.type==="sa"?"Exactly 1 sentence, no more.":"2 to 3 sentences. Do not exceed.";
-  const prompt=`You are writing a school exam answer in the voice of a real student named ${s.first}. Style: ${v.style}. ${writeHint}\nThe answer must be ${correctness}. ${len}\nDo NOT add quotation marks, headings, or preamble. Just the answer text.\nQuestion: ${q.prompt}${q.answer?`\n(Teacher's model answer, for your reference - do NOT copy it verbatim: ${q.answer})`:""}`;
-  try{
-    const r=await fetch("https://text.pollinations.ai/"+encodeURIComponent(prompt));
-    const txt=(await r.text()).trim().replace(/^["']|["']$/g,"").replace(/\s+/g," ");
-    return txt.slice(0,400)||"(no answer)";
-  }catch(e){
-    return ability>.5?"(plausible attempt - AI unreachable)":"(left mostly blank - AI unreachable)";
-  }
+  // Delegate to singleWrittenAnswer which uses the queued aiText with retries.
+  return await singleWrittenAnswer(s,q);
 }
 async function rerollAnswer(testId,sid,qi){
   const t=state.tests.find(x=>x.id===testId);const sub=t.assignments[state.activeClassIdx][sid];
@@ -1466,19 +1582,18 @@ async function studentReaction(s,score){
 async function aiSuggest(){
   toast("Asking the muse...");
   const subj=state.subject||"general knowledge";
-  const prompt=`Write ONE short multiple-choice quiz question for a school ${subj} class. Reply in strict JSON: {"q":"...","options":["a","b","c","d"],"correct":0}. No prose.`;
-  try{
-    const r=await fetch("https://text.pollinations.ai/"+encodeURIComponent(prompt));
-    const txt=await r.text();
-    const m=txt.match(/\{[\s\S]*\}/);
-    if(!m)throw 0;
-    const j=JSON.parse(m[0]);
-    addQuestion("mc",{prompt:j.q,options:j.options,correct:j.correct|0});
-    toast("AI question added.");
-  }catch(e){
-    addQuestion("mc",{prompt:"Sample: 1/2 + 1/4 = ?",options:["1/6","3/4","2/6","1"],correct:1});
-    toast("AI unreachable - placeholder added.");
+  const prompt=`Write ONE multiple-choice quiz question for a school ${subj} class. The question must be answerable, the correct answer must be ONE of the four options, and the distractors must be plausible.
+Return ONLY a compact JSON object: {"q":"<question text>","options":["a","b","c","d"],"correct":<integer 0-3>}`;
+  const data=await aiJSON(prompt,{retries:3,timeout:25000});
+  if(!data||typeof data.q!=="string"||!Array.isArray(data.options)||data.options.length<2){
+    toast("AI couldn't draft a question right now - try again.");
+    return;
   }
+  const correct=Math.max(0,Math.min(data.options.length-1,parseInt(data.correct)||0));
+  // pad options to 4 if needed
+  while(data.options.length<4)data.options.push("");
+  addQuestion("mc",{prompt:data.q,options:data.options.slice(0,4).map(o=>String(o||"")),correct});
+  toast("AI question added.");
 }
 
 // ============================================================
@@ -1486,8 +1601,29 @@ async function aiSuggest(){
 // ============================================================
 function viewGrades(){
   const cls=currentClass();
-  const overall=cls.students.reduce((a,s)=>a+avg(s),0)/cls.students.length||0;
+  const studs=cls.students.slice();
+  studs.forEach(s=>s._avg=avg(s));
+  const overall=studs.reduce((a,s)=>a+s._avg,0)/Math.max(1,studs.length);
   if(state.quarterAverages[state.quarter-1]===null)state.quarterAverages[state.quarter-1]=overall;
+  const sorted=studs.filter(s=>s._avg>0).sort((a,b)=>b._avg-a._avg);
+  const top=sorted.slice(0,3);
+  const bottom=sorted.slice(-3).reverse();
+  // trend (compare current quarter avg to previous)
+  const prev=state.quarterAverages[state.quarter-2];
+  const trend=prev==null?"":(overall>prev+1?"trending up":overall<prev-1?"trending down":"steady");
+  // collect "subjects" data for form tutors
+  let subjectBlock="";
+  if(state.role==="tutor"){
+    const sub={};
+    cls.students.forEach(s=>(s.otherGrades||[]).forEach(g=>{
+      sub[g.subject]=sub[g.subject]||{sum:0,n:0};
+      sub[g.subject].sum+=g.score;sub[g.subject].n++;
+    }));
+    const rows=Object.entries(sub).sort(([,a],[,b])=>b.sum/b.n-a.sum/a.n).map(([k,v])=>
+      `<tr><td>${esc(k)}</td><td>${(v.sum/v.n).toFixed(1)}</td><td>${v.n} marks</td></tr>`).join("");
+    if(rows)subjectBlock=`<h3>Subject averages (all teachers)</h3>
+      <table><thead><tr><th>Subject</th><th>Class avg</th><th>Marks recorded</th></tr></thead><tbody>${rows}</tbody></table>`;
+  }
   return `<h2>Quarterly Grades - Year ${state.year}</h2>${classPicker()}
     <div class="quarter">${[1,2,3,4].map(q=>{
       const v=state.quarterAverages[q-1];const cur=q===state.quarter;
@@ -1496,7 +1632,38 @@ function viewGrades(){
         <h4>Quarter ${q}${cur?" (current)":""}</h4>
         <div>Class avg: <b>${val}</b></div>
         <div class="bar"><div style="width:${pct}%"></div></div></div>`;
-    }).join("")}</div>`;
+    }).join("")}</div>
+    <p class="muted" style="margin-top:.6em">Quarter ${state.quarter}: class avg <b>${overall.toFixed(1)}</b>${trend?" - "+trend:""}</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1em;margin-top:.6em">
+      <div class="q"><h4>Top performers</h4>
+        ${top.length?`<table><tbody>${top.map(s=>`<tr><td>${s.name}</td><td><b>${s._avg.toFixed(1)}</b></td></tr>`).join("")}</tbody></table>`:`<p><i>No grades yet.</i></p>`}
+      </div>
+      <div class="q"><h4>Need support</h4>
+        ${bottom.length?`<table><tbody>${bottom.map(s=>`<tr><td>${s.name}</td><td style="color:var(--red)"><b>${s._avg.toFixed(1)}</b></td></tr>`).join("")}</tbody></table>`:`<p><i>No grades yet.</i></p>`}
+      </div>
+    </div>
+    ${subjectBlock}
+    <div class="row" style="margin-top:1em">
+      <button onclick="writeQuarterReport()">Draft Quarter Report</button>
+    </div>`;
+}
+
+async function writeQuarterReport(){
+  const cls=currentClass();
+  const overall=cls.students.reduce((a,s)=>a+avg(s),0)/Math.max(1,cls.students.length);
+  const ov=showBusy("Drafting Quarter Report");
+  const prompt=`Write a SHORT quarter report (4-6 sentences, professional tone) for ${cls.name} in ${state.subject||"the form group"}. Class average this quarter: ${overall.toFixed(1)}/100. Quarter ${state.quarter}, Year ${state.year}. Note any general trend (positive/negative). Plain prose, no headings. Sign off as Ms. ${state.name}.`;
+  const txt=await aiLine(prompt,1200);
+  ov.close();
+  if(!txt){toast("Report drafting failed - try again.");return;}
+  const m=document.createElement("div");m.className="modal";
+  m.innerHTML=`<div class="box"><h2>${cls.name} - Quarter ${state.quarter} Report</h2>
+    <div style="background:#f7efd9;color:#1b1410;padding:1em;border-radius:6px;font-family:Georgia,serif;white-space:pre-wrap">${esc(txt)}</div>
+    <div class="row" style="justify-content:flex-end;margin-top:.6em">
+      <button class="primary" onclick="closeModal()">Close</button>
+    </div></div>`;
+  document.body.appendChild(m);
+  m.onclick=e=>{if(e.target===m)closeModal();};
 }
 
 // ============================================================
@@ -1980,8 +2147,9 @@ function updateTicker(){
   t.classList.remove("bump");void t.offsetWidth;t.classList.add("bump");
 }
 
-// Combined weekly simulation: 3 cards + 1 gossip + up to 2 story updates in ONE call.
-async function simulateWeek(){
+// Plans the upcoming week in ONE AI call, then distributes results across the 5 days.
+// Days then release their events as the player advances through the week.
+async function planWeek(){
   const teachers=otherTeachers();
   if(!teachers.length)return;
   const notable=pickNotableStudents(6);
@@ -2024,42 +2192,39 @@ ${storySpec}
 
 Return ONLY the JSON object.`;
   const data=await aiJSON(prompt,{retries:4,timeout:75000});
-  if(!data){
-    // graceful degradation - drop everything (no placeholders)
-    return;
-  }
-  if(Array.isArray(data.cards)){
+  // Initialize a fresh 5-day plan. Even on partial failure, populate what we can.
+  state.weekPlan=[[],[],[],[],[]];
+  // Distribute card events across random days of the week.
+  if(data && Array.isArray(data.cards)){
     data.cards.forEach((reason,i)=>{
       const p=plans[i];if(!p||!reason)return;
-      p.student.cards.push({color:p.color,reason,week:state.week,by:p.teacher.name});
-      if(p.color==="green")p.student.mood=clamp(p.student.mood+2);
-      if(p.color==="yellow")p.student.mood=clamp(p.student.mood-4);
-      if(p.color==="purple")p.student.mood=clamp(p.student.mood+6);
-      logActivity({type:"card",text:`${p.teacher.name} gave ${p.student.first} a ${p.color} card - "${reason}"`});
+      const day=Math.floor(Math.random()*5);
+      state.weekPlan[day].push({type:"card",studentId:p.student.id,color:p.color,reason,by:p.teacher.name});
     });
   }
-  if(typeof data.gossip==="string" && data.gossip.trim()){
-    logActivity({type:"gossip",text:data.gossip.trim()});
+  // Gossip - usually mid-week.
+  if(data && typeof data.gossip==="string" && data.gossip.trim()){
+    state.weekPlan[1+Math.floor(Math.random()*3)].push({type:"gossip",text:data.gossip.trim()});
   }
-  if(Array.isArray(data.storyUpdates)){
+  // Story updates - usually Friday.
+  if(data && Array.isArray(data.storyUpdates)){
     data.storyUpdates.forEach((line,i)=>{
       const s=storyTargets[i];if(!s||!line)return;
-      s.story=line;s.storyUpdatedWeek=state.week;
+      state.weekPlan[4].push({type:"story",studentId:s.id,story:line});
     });
   }
-
-  // Grades from other teachers - NO AI needed for these (just a score number).
+  // Grades from other teachers - no AI needed, spread across the week.
   const gradesCount=Math.min(notable.length,2);
   for(let i=0;i<gradesCount;i++){
     const s=notable[(i+plans.length)%notable.length].s;
     const teacher=teachers[(i+state.week)%teachers.length];
     const drift=(Math.random()*20-10);
     const score=clamp(s.ability*.65+s.effort*.2+s.mood*.15+drift);
-    s.otherGrades=s.otherGrades||[];
-    s.otherGrades.push({subject:teacher.subject,by:teacher.name,score,week:state.week});
-    if(s.otherGrades.length>30)s.otherGrades.shift();
-    logActivity({type:"grade",text:`${teacher.name} returned ${teacher.subject} mark for ${s.first}: ${score.toFixed(0)}`});
+    const day=Math.floor(Math.random()*5);
+    state.weekPlan[day].push({type:"grade",studentId:s.id,subject:teacher.subject,by:teacher.name,score});
   }
+  // If TODAY (dayIdx) already passed when AI returned, release its events now.
+  if(state.dayIdx>0)releaseDayEvents(0);   // first day events apply since week just started
 }
 
 // (legacy) story-driven world simulation kept for any direct caller; unused on day ticks now.
@@ -2155,41 +2320,76 @@ function viewActivity(){
 // TIME
 // ============================================================
 
-// Daily tick: ZERO AI. Pure mechanic - mood/effort drift, day++. Instant.
-function advanceDay(){
+// Daily tick: releases scheduled events for the current day. AI was already called
+// at the START of the week to plan all 5 days, so daily releases are instant.
+async function advanceDay(){
   state.classes.forEach(c=>c.students.forEach(s=>{
     s.mood=clamp(s.mood+(Math.random()*6-3));
     s.effort=clamp(s.effort+(Math.random()*4-2));
   }));
+  releaseDayEvents(state.dayIdx);
   state.dayIdx++;
   if(state.dayIdx>=DAYS.length){
     state.dayIdx=0;state.week++;
-    // weekly events happen on the day roll-over - kick off async, don't block UI
-    runWeeklyAI();
+    runWeeklyAI();   // async, doesn't block UI
   }
   renderHud();buildNav();refreshCurrentView();
   saveGame(false);
+  // Tick replies and inbound messages on every day, not only weekly.
+  tickPendingReplies().catch(()=>{});
+  // Daily inbound message has a low chance - throttled by tickMessages itself.
+  tickMessages(false).catch(()=>{});
 }
-// Weekly tick: ONE combined AI call. Player can keep playing while it resolves.
 async function advanceWeek(){
-  for(let i=0;i<5;i++){
+  // Skip to end of current week, then start the new week.
+  for(let d=state.dayIdx;d<DAYS.length;d++){
     state.classes.forEach(c=>c.students.forEach(s=>{
       s.mood=clamp(s.mood+(Math.random()*6-3));
       s.effort=clamp(s.effort+(Math.random()*4-2));
     }));
+    releaseDayEvents(d);
   }
   state.dayIdx=0;state.week++;
   renderHud();buildNav();refreshCurrentView();
   saveGame(false);
   await runWeeklyAI();
 }
+
+// Reveals the pre-planned events scheduled for `dayIdx` of the current week.
+function releaseDayEvents(dayIdx){
+  if(!state.weekPlan||!Array.isArray(state.weekPlan[dayIdx]))return;
+  const dayEvents=state.weekPlan[dayIdx];
+  for(const ev of dayEvents){
+    if(ev.type==="card"){
+      const s=findStudent(ev.studentId);if(!s)continue;
+      s.cards.push({color:ev.color,reason:ev.reason,week:state.week,by:ev.by});
+      if(ev.color==="green")s.mood=clamp(s.mood+2);
+      if(ev.color==="yellow")s.mood=clamp(s.mood-4);
+      if(ev.color==="purple")s.mood=clamp(s.mood+6);
+      logActivity({type:"card",text:`${ev.by} gave ${s.first} a ${ev.color} card - "${ev.reason}"`});
+    }else if(ev.type==="grade"){
+      const s=findStudent(ev.studentId);if(!s)continue;
+      s.otherGrades=s.otherGrades||[];
+      s.otherGrades.push({subject:ev.subject,by:ev.by,score:ev.score,week:state.week});
+      if(s.otherGrades.length>30)s.otherGrades.shift();
+      logActivity({type:"grade",text:`${ev.by} returned ${ev.subject} mark for ${s.first}: ${ev.score.toFixed(0)}`});
+    }else if(ev.type==="gossip"){
+      logActivity({type:"gossip",text:ev.text});
+    }else if(ev.type==="story"){
+      const s=findStudent(ev.studentId);if(!s)continue;
+      s.story=ev.story;s.storyUpdatedWeek=state.week;
+    }
+  }
+  state.weekPlan[dayIdx]=[];   // consumed
+}
+
 let _weeklyRunning=false;
 async function runWeeklyAI(){
   if(_weeklyRunning)return;
   _weeklyRunning=true;
   try{
     tickMissions();
-    await simulateWeek();
+    await planWeek();              // ONE combined call - results are spread across days
     await tickPendingReplies();
     await tickMessages(true);
     checkFireConditions();
@@ -2225,8 +2425,7 @@ async function weeklyTick(){
       state.classes.forEach(c=>c.students.forEach(s=>s.grades=[]));
     }else toast(`Quarter ${state.quarter} begins.`);
   }
-  if(state.rep>=30&&state.rank==="Probationary"){state.rank="Junior Teacher";toast("Promoted: Junior Teacher.");}
-  if(state.rep>=70&&state.rank==="Junior Teacher"){state.rank="Senior Teacher";toast("Promoted: Senior Teacher.");}
+  applyPromotions();
 }
 function clamp(v){return Math.max(0,Math.min(100,v));}
 function refreshCurrentView(){
