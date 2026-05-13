@@ -342,23 +342,48 @@ const VERSION="0.6";
 const SAVE_KEY="chalkdust:save";
 
 // ============ AI helpers (single point for the no-placeholder rule) ============
-// Pollinations supports a `model` query. 'openai' is the fastest acceptable option.
-async function aiText(prompt,opts={}){
-  const tries=opts.retries??2;
-  for(let i=0;i<=tries;i++){
-    try{
-      const url="https://text.pollinations.ai/"+encodeURIComponent(prompt)+"?model=openai&seed="+(Math.floor(Math.random()*1e6));
-      const ctrl=new AbortController();
-      const to=setTimeout(()=>ctrl.abort(),opts.timeout||25000);
-      const r=await fetch(url,{signal:ctrl.signal});
-      clearTimeout(to);
-      if(!r.ok){if(i===tries)return null;continue;}
-      let t=(await r.text()).trim();
-      t=t.replace(/^```(?:json)?\s*/i,"").replace(/```$/,"").trim();
-      if(t)return t;
-    }catch(e){if(i===tries)return null;}
+// Pollinations rate-limits anonymous traffic to ONE in-flight request per IP.
+// All AI calls go through a serial queue. 429s trigger a backoff retry.
+let _aiChain=Promise.resolve();
+function aiEnqueue(task){
+  const run=_aiChain.then(task,task);
+  _aiChain=run.catch(()=>{});  // never break the chain
+  return run;
+}
+async function _aiOnce(prompt,opts={}){
+  const url="https://text.pollinations.ai/"+encodeURIComponent(prompt)+"?model=openai&seed="+(Math.floor(Math.random()*1e6));
+  const ctrl=new AbortController();
+  const to=setTimeout(()=>ctrl.abort(),opts.timeout||45000);
+  let resp;
+  try{resp=await fetch(url,{signal:ctrl.signal});}
+  finally{clearTimeout(to);}
+  const txt=await resp.text();
+  if(!resp.ok || /"error"\s*:|Queue full/i.test(txt)){
+    const err=new Error("ai_http_"+resp.status);
+    err.status=resp.status;err.body=txt;
+    throw err;
   }
-  return null;
+  let t=txt.trim().replace(/^```(?:json)?\s*/i,"").replace(/```$/,"").trim();
+  return t||null;
+}
+async function aiText(prompt,opts={}){
+  const tries=opts.retries??3;
+  return aiEnqueue(async ()=>{
+    let lastErr=null;
+    for(let i=0;i<=tries;i++){
+      try{
+        const t=await _aiOnce(prompt,opts);
+        if(t)return t;
+      }catch(e){
+        lastErr=e;
+        // 429 / queue full: wait longer between tries
+        const wait=e.status===429?2500+i*1500:600+i*900;
+        await new Promise(r=>setTimeout(r,wait));
+      }
+    }
+    if(lastErr&&window.console)console.warn("ai_text failed",lastErr.status,lastErr.message);
+    return null;
+  });
 }
 async function aiJSON(prompt,opts={}){
   const t=await aiText(prompt+"\n\nReply with ONLY valid JSON. No prose. No markdown fences.",opts);
@@ -433,22 +458,18 @@ async function generateStudentRosterBatch(n,seedHint){
   return data.filter(d=>d&&d.first&&d.last&&d.personality&&d.voiceKey&&d.story);
 }
 async function generateStudentRoster(size,onProgress){
-  const batchSize=6;
+  const batchSize=7;
   const batches=Math.ceil(size/batchSize);
   const hints=["Mix of 7th and 8th graders.","Include shy kids and class clowns.","Some bright students who hide it.","Include kids dealing with family stuff."];
-  let done=0;
-  const promises=[];
+  const merged=[];
+  // Serial - Pollinations anonymous queue allows only 1 in-flight per IP.
   for(let b=0;b<batches;b++){
     const n=Math.min(batchSize,size-b*batchSize);
     const hint=hints[b%hints.length];
-    promises.push(generateStudentRosterBatch(n,hint).then(arr=>{
-      done++;onProgress?.(done/batches);
-      return arr;
-    }));
+    const arr=await generateStudentRosterBatch(n,hint);
+    merged.push(...arr);
+    onProgress?.((b+1)/batches);
   }
-  const results=await Promise.all(promises);
-  const merged=[].concat(...results);
-  // dedupe by full name
   const seen=new Set();
   return merged.filter(s=>{const k=(s.first+" "+s.last).toLowerCase();if(seen.has(k))return false;seen.add(k);return true;});
 }
@@ -1553,8 +1574,11 @@ function maybeScheduleStudentReply(student,contact,originalMsg){
 function tickCounter(){return state.week*5+state.dayIdx;}
 async function tickPendingReplies(){
   const now=tickCounter();
-  const due=state.pendingReplies.filter(r=>r.fireAtTick<=now);
-  state.pendingReplies=state.pendingReplies.filter(r=>r.fireAtTick>now);
+  // Process at most 1 reply per tick to keep AI bandwidth for cards/messages.
+  const dueIdx=state.pendingReplies.findIndex(r=>r.fireAtTick<=now);
+  if(dueIdx<0)return;
+  const due=[state.pendingReplies[dueIdx]];
+  state.pendingReplies.splice(dueIdx,1);
   for(const r of due){
     const s=findStudent(r.studentId);const c=state.contacts.find(x=>x.id===r.contactId);
     if(!s||!c)continue;
@@ -1722,8 +1746,10 @@ async function simulateWorld(weekly){
     if(g)logActivity({type:"gossip",text:g});
   }
 
-  // Story evolution - students with significant new events get story updates (AI).
-  await evolveStoriesFor(notable.slice(0,2).map(x=>x.s));
+  // Story evolution is expensive - only run on weekly ticks, and at most 2 students.
+  if(weekly){
+    await evolveStoriesFor(notable.slice(0,2).map(x=>x.s));
+  }
 }
 
 async function evolveStoriesFor(students){
