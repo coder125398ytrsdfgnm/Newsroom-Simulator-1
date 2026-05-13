@@ -1,0 +1,542 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Chalkdust: Teacher Sim</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root{
+    --bg:#1b1410; --panel:#2a1f18; --panel2:#3a2b20; --ink:#f3e7d3;
+    --accent:#d9a441; --green:#4caf50; --yellow:#f7c948; --purple:#9b59ff; --red:#e26464;
+    --chalk:#eef3ef;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+    font-family:"Trebuchet MS",system-ui,sans-serif}
+  button{font:inherit;background:var(--panel2);color:var(--ink);border:1px solid #000;
+    padding:.5em .9em;border-radius:6px;cursor:pointer}
+  button:hover{background:#4a3828}
+  button.primary{background:var(--accent);color:#1b1410;font-weight:bold}
+  button.primary:hover{background:#eab863}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  h1,h2,h3{margin:.3em 0}
+  .hidden{display:none!important}
+
+  /* main menu */
+  #menu{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;background:
+    radial-gradient(circle at 50% 30%, #3a2b20 0%, #1b1410 70%);}
+  #menu h1{font-size:4em;color:var(--accent);text-shadow:3px 3px 0 #000;letter-spacing:2px}
+  #menu .sub{opacity:.7;margin-bottom:2em;font-style:italic}
+  #menu button{font-size:1.2em;margin:.3em;min-width:220px}
+
+  /* hud */
+  #hud{display:flex;justify-content:space-between;align-items:center;
+    padding:.5em 1em;background:#0e0a07;border-bottom:2px solid var(--accent)}
+  #hud .stats span{margin-right:1.2em}
+  #hud .stats b{color:var(--accent)}
+
+  /* layout */
+  #game{display:none;flex-direction:column;height:100vh}
+  #game.active{display:flex}
+  main{flex:1;display:flex;overflow:hidden}
+  nav.side{width:170px;background:#0e0a07;padding:.5em;display:flex;flex-direction:column;gap:.3em}
+  nav.side button{text-align:left}
+  nav.side button.on{background:var(--accent);color:#1b1410}
+  section.view{flex:1;overflow:auto;padding:1em}
+
+  /* classroom */
+  .room{background:linear-gradient(#3a2b20,#2a1f18);border:2px solid #000;
+    border-radius:10px;padding:1em;position:relative;min-height:340px}
+  .board{background:#2d4a3a;color:var(--chalk);border:8px solid #6b4a2b;border-radius:6px;
+    padding:.8em;font-family:"Comic Sans MS",cursive;min-height:80px;margin-bottom:1em}
+  .seats{display:grid;grid-template-columns:repeat(5,1fr);gap:.6em}
+  .seat{background:#1b1410;border:1px solid #000;border-radius:6px;padding:.5em;
+    text-align:center;cursor:pointer;position:relative;transition:transform .1s}
+  .seat:hover{transform:translateY(-2px);outline:2px solid var(--accent)}
+  .seat .face{font-size:2em}
+  .seat .name{font-size:.85em;font-weight:bold}
+  .seat .gr{font-size:.75em;opacity:.8}
+  .seat .card{position:absolute;top:2px;right:2px;width:14px;height:18px;border-radius:2px;
+    border:1px solid #000}
+  .card.green{background:var(--green)} .card.yellow{background:var(--yellow)}
+  .card.purple{background:var(--purple)}
+
+  /* modal */
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;
+    align-items:center;justify-content:center;z-index:50}
+  .modal .box{background:var(--panel);border:2px solid var(--accent);border-radius:10px;
+    padding:1.2em;max-width:560px;width:90%;max-height:85vh;overflow:auto}
+  .row{display:flex;gap:.5em;flex-wrap:wrap;align-items:center;margin:.4em 0}
+
+  /* roster table */
+  table{width:100%;border-collapse:collapse}
+  th,td{padding:.4em .6em;border-bottom:1px solid #4a3828;text-align:left}
+  th{color:var(--accent)}
+  tr:hover{background:#241a14}
+
+  /* test builder dnd */
+  .builder{display:grid;grid-template-columns:240px 1fr;gap:1em}
+  .palette,.canvas{background:var(--panel);border:1px solid #000;border-radius:8px;
+    padding:.6em;min-height:300px}
+  .palette h3,.canvas h3{margin-top:0;color:var(--accent)}
+  .block{background:var(--panel2);border:1px dashed var(--accent);border-radius:6px;
+    padding:.5em;margin:.4em 0;cursor:grab;user-select:none}
+  .block.dragging{opacity:.4}
+  .canvas .drop{min-height:240px;border:2px dashed #555;border-radius:6px;padding:.5em}
+  .canvas .drop.over{border-color:var(--accent);background:#241a14}
+  .qitem{background:#1b1410;border-left:4px solid var(--accent);border-radius:4px;
+    padding:.5em;margin:.4em 0}
+  .qitem .meta{font-size:.75em;opacity:.7;margin-bottom:.2em}
+  .qitem input,.qitem textarea{width:100%;background:#0e0a07;color:var(--ink);
+    border:1px solid #333;border-radius:4px;padding:.3em;font:inherit;margin-top:.2em}
+  .qitem .opts input[type=text]{display:inline-block;width:78%}
+  .qitem .opts label{display:flex;gap:.4em;align-items:center;margin:.2em 0}
+  .qitem .rm{float:right;background:var(--red);border:none;color:#fff;
+    border-radius:4px;padding:.1em .5em;cursor:pointer}
+
+  /* grades */
+  .quarter{display:grid;grid-template-columns:repeat(4,1fr);gap:.6em}
+  .q{background:var(--panel);border:1px solid #000;border-radius:6px;padding:.6em}
+  .q h4{margin:.1em 0;color:var(--accent)}
+  .bar{height:10px;background:#000;border-radius:5px;overflow:hidden;margin-top:.3em}
+  .bar>div{height:100%;background:var(--green)}
+
+  .toast{position:fixed;bottom:1em;left:50%;transform:translateX(-50%);
+    background:var(--accent);color:#1b1410;padding:.6em 1em;border-radius:6px;
+    font-weight:bold;z-index:100;animation:fade 3s forwards}
+  @keyframes fade{0%{opacity:0}10%{opacity:1}80%{opacity:1}100%{opacity:0}}
+</style>
+</head>
+<body>
+
+<!-- ============== MAIN MENU ============== -->
+<div id="menu">
+  <h1>CHALKDUST</h1>
+  <div class="sub">A teacher's life at Rust Hollow Public School #14</div>
+  <button class="primary" onclick="startGame()">New Career</button>
+  <button onclick="alert('Save/Load coming soon.')">Continue</button>
+  <button onclick="alert('Use the sidebar to navigate. Click students to assign cards. Build tests by dragging question blocks.')">How to Play</button>
+  <button onclick="alert('Chalkdust v0.1 — bones build.')">Credits</button>
+</div>
+
+<!-- ============== GAME ============== -->
+<div id="game">
+  <header id="hud">
+    <div><b style="color:var(--accent)">Ms. Hale</b> · Rust Hollow #14 · Rank: <b id="rank">Substitute</b></div>
+    <div class="stats">
+      <span>Year <b id="year">1</b></span>
+      <span>Q<b id="quarter">1</b></span>
+      <span>Week <b id="week">1</b></span>
+      <span>Day <b id="day">Mon</b></span>
+      <span>Reputation <b id="rep">12</b></span>
+    </div>
+    <div>
+      <button onclick="advanceDay()">Next Day</button>
+      <button class="primary" onclick="advanceWeek()">Next Week</button>
+    </div>
+  </header>
+  <main>
+    <nav class="side">
+      <button data-view="classroom" class="on" onclick="showView('classroom')">Classroom</button>
+      <button data-view="roster" onclick="showView('roster')">Roster</button>
+      <button data-view="tests" onclick="showView('tests')">Tests</button>
+      <button data-view="builder" onclick="showView('builder')">Test Builder</button>
+      <button data-view="grades" onclick="showView('grades')">Quarterly Grades</button>
+      <button onclick="quitToMenu()">Quit</button>
+    </nav>
+
+    <section class="view" id="view-classroom">
+      <div class="room">
+        <div class="board" id="board">Today's lesson: <span id="lesson">Intro to fractions</span></div>
+        <div class="seats" id="seats"></div>
+      </div>
+      <p style="opacity:.7;font-size:.9em;margin-top:.8em">
+        Click a student to assign a card (🟢 good · 🟡 bad · 🟣 amazing) or view their record.
+      </p>
+    </section>
+
+    <section class="view hidden" id="view-roster">
+      <h2>Class Roster</h2>
+      <table id="rosterTable">
+        <thead><tr><th>Name</th><th>Avg</th><th>🟢</th><th>🟡</th><th>🟣</th><th>Notes</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <section class="view hidden" id="view-tests">
+      <h2>Tests</h2>
+      <div id="testList"></div>
+      <p style="opacity:.7">Build a new test in the Test Builder, then administer it here.</p>
+    </section>
+
+    <section class="view hidden" id="view-builder">
+      <h2>Test Builder <small style="opacity:.6">— drag blocks from the left onto the test</small></h2>
+      <div class="row">
+        <label>Title: <input id="testTitle" value="Unit 1 Quiz" style="background:#0e0a07;color:var(--ink);border:1px solid #333;padding:.3em;border-radius:4px"></label>
+        <button onclick="aiSuggest()">✨ AI Suggest Question</button>
+        <button class="primary" onclick="saveTest()">Save Test</button>
+      </div>
+      <div class="builder">
+        <div class="palette">
+          <h3>Question Blocks</h3>
+          <div class="block" draggable="true" data-type="mc">📝 Multiple Choice</div>
+          <div class="block" draggable="true" data-type="tf">✅ True / False</div>
+          <div class="block" draggable="true" data-type="sa">✏️ Short Answer</div>
+          <div class="block" draggable="true" data-type="es">📜 Essay</div>
+        </div>
+        <div class="canvas">
+          <h3 id="canvasTitle">Untitled Test</h3>
+          <div class="drop" id="drop"><p style="opacity:.5">Drop question blocks here…</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="view hidden" id="view-grades">
+      <h2>Quarterly Grades — Year <span id="gyear">1</span></h2>
+      <div class="quarter" id="quarterGrid"></div>
+    </section>
+  </main>
+</div>
+
+<script>
+// ============ STATE ============
+const FIRST=["Avery","Bren","Cleo","Dax","Eli","Fae","Gus","Hana","Iggy","Jo","Kit","Lex","Mia","Nico","Opal","Pip","Quinn","Rue","Sam","Tess"];
+const LAST=["Park","Vega","Cole","Day","Reed","Ash","Lin","Moss","Wren","Holt"];
+const FACES=["😀","🙂","😐","😎","🤓","😶","🧒","👧","👦","🙃"];
+const DAYS=["Mon","Tue","Wed","Thu","Fri"];
+
+let state=null;
+
+function newGame(){
+  const students=[];
+  for(let i=0;i<20;i++){
+    students.push({
+      id:i,
+      name:FIRST[i%FIRST.length]+" "+LAST[(i*3)%LAST.length],
+      face:FACES[i%FACES.length],
+      ability:30+Math.random()*50,        // hidden
+      mood:50+Math.random()*30,
+      grades:[],                          // {testId,score}
+      cards:{green:0,yellow:0,purple:0},
+      notes:""
+    });
+  }
+  state={
+    year:1,quarter:1,week:1,dayIdx:0,
+    rep:12,rank:"Substitute",
+    students,
+    tests:[],            // {id,title,questions:[]}
+    draftTest:{title:"Unit 1 Quiz",questions:[]},
+    quarterAverages:[null,null,null,null]
+  };
+}
+
+// ============ MENU / NAV ============
+function startGame(){
+  newGame();
+  document.getElementById("menu").classList.add("hidden");
+  document.getElementById("game").classList.add("active");
+  renderAll();
+}
+function quitToMenu(){
+  if(!confirm("Return to main menu? Unsaved progress will be lost."))return;
+  document.getElementById("game").classList.remove("active");
+  document.getElementById("menu").classList.remove("hidden");
+}
+function showView(v){
+  document.querySelectorAll(".view").forEach(e=>e.classList.add("hidden"));
+  document.getElementById("view-"+v).classList.remove("hidden");
+  document.querySelectorAll("nav.side button").forEach(b=>{
+    b.classList.toggle("on",b.dataset.view===v);
+  });
+  if(v==="roster")renderRoster();
+  if(v==="tests")renderTests();
+  if(v==="grades")renderGrades();
+}
+
+// ============ HUD ============
+function renderHud(){
+  document.getElementById("year").textContent=state.year;
+  document.getElementById("quarter").textContent=state.quarter;
+  document.getElementById("week").textContent=state.week;
+  document.getElementById("day").textContent=DAYS[state.dayIdx];
+  document.getElementById("rep").textContent=state.rep;
+  document.getElementById("rank").textContent=state.rank;
+}
+
+// ============ CLASSROOM ============
+function renderSeats(){
+  const seats=document.getElementById("seats");
+  seats.innerHTML="";
+  state.students.forEach(s=>{
+    const top=topCard(s);
+    const div=document.createElement("div");
+    div.className="seat";
+    div.innerHTML=`
+      ${top?`<div class="card ${top}"></div>`:""}
+      <div class="face">${s.face}</div>
+      <div class="name">${s.name}</div>
+      <div class="gr">Avg: ${avg(s).toFixed(0)}</div>`;
+    div.onclick=()=>openStudent(s.id);
+    seats.appendChild(div);
+  });
+}
+function topCard(s){
+  if(s.cards.purple>0)return "purple";
+  if(s.cards.yellow>s.cards.green)return "yellow";
+  if(s.cards.green>0)return "green";
+  return null;
+}
+function avg(s){
+  if(!s.grades.length)return 0;
+  return s.grades.reduce((a,b)=>a+b.score,0)/s.grades.length;
+}
+
+function openStudent(id){
+  const s=state.students[id];
+  const m=document.createElement("div");
+  m.className="modal";
+  m.innerHTML=`
+    <div class="box">
+      <h2>${s.face} ${s.name}</h2>
+      <p>Average: <b>${avg(s).toFixed(1)}</b> · Mood: ${s.mood.toFixed(0)}</p>
+      <p>Cards — 🟢 ${s.cards.green} · 🟡 ${s.cards.yellow} · 🟣 ${s.cards.purple}</p>
+      <div class="row">
+        <button onclick="assignCard(${id},'green');closeModal()" style="background:var(--green);color:#000">🟢 Green</button>
+        <button onclick="assignCard(${id},'yellow');closeModal()" style="background:var(--yellow);color:#000">🟡 Yellow</button>
+        <button onclick="assignCard(${id},'purple');closeModal()" style="background:var(--purple);color:#fff">🟣 Purple</button>
+      </div>
+      <h3>Recent grades</h3>
+      <div>${s.grades.slice(-5).map(g=>`<div>· Test #${g.testId}: ${g.score.toFixed(0)}</div>`).join("")||"<i>None yet.</i>"}</div>
+      <h3>Notes</h3>
+      <textarea id="noteBox" rows="3" style="width:100%;background:#0e0a07;color:var(--ink);border:1px solid #333">${s.notes||""}</textarea>
+      <div class="row" style="justify-content:flex-end">
+        <button onclick="saveNote(${id})">Save Note</button>
+        <button class="primary" onclick="closeModal()">Close</button>
+      </div>
+    </div>`;
+  document.body.appendChild(m);
+  m.onclick=e=>{if(e.target===m)closeModal();};
+}
+function saveNote(id){
+  state.students[id].notes=document.getElementById("noteBox").value;
+  toast("Note saved.");
+}
+function closeModal(){document.querySelectorAll(".modal").forEach(m=>m.remove());}
+function assignCard(id,color){
+  const s=state.students[id];
+  s.cards[color]++;
+  if(color==="green"){s.mood=Math.min(100,s.mood+4);state.rep+=1;}
+  if(color==="yellow"){s.mood=Math.max(0,s.mood-6);state.rep-=1;}
+  if(color==="purple"){s.mood=Math.min(100,s.mood+10);state.rep+=3;}
+  toast(`${color.toUpperCase()} card → ${s.name}`);
+  renderAll();
+}
+
+// ============ ROSTER ============
+function renderRoster(){
+  const tb=document.querySelector("#rosterTable tbody");
+  tb.innerHTML="";
+  state.students.forEach(s=>{
+    tb.innerHTML+=`<tr onclick="openStudent(${s.id})" style="cursor:pointer">
+      <td>${s.face} ${s.name}</td>
+      <td>${avg(s).toFixed(1)}</td>
+      <td>${s.cards.green}</td>
+      <td>${s.cards.yellow}</td>
+      <td>${s.cards.purple}</td>
+      <td>${(s.notes||"").slice(0,40)}</td></tr>`;
+  });
+}
+
+// ============ TESTS (administer) ============
+function renderTests(){
+  const list=document.getElementById("testList");
+  if(!state.tests.length){list.innerHTML="<p><i>No tests yet. Build one in the Test Builder.</i></p>";return;}
+  list.innerHTML=state.tests.map(t=>`
+    <div class="qitem">
+      <b>${t.title}</b> — ${t.questions.length} question(s)
+      <button class="primary" style="float:right" onclick="administer(${t.id})">Administer</button>
+    </div>`).join("");
+}
+function administer(id){
+  const t=state.tests.find(x=>x.id===id);
+  if(!t||!t.questions.length){toast("Test has no questions.");return;}
+  state.students.forEach(s=>{
+    // score = student ability + mood bonus + noise, bounded 0-100
+    const raw=s.ability*.7 + s.mood*.2 + (Math.random()*30-10);
+    const score=Math.max(0,Math.min(100,raw));
+    s.grades.push({testId:id,score});
+  });
+  toast(`"${t.title}" graded.`);
+  renderAll();
+}
+
+// ============ TEST BUILDER (drag & drop) ============
+let dragType=null;
+function initBuilder(){
+  document.querySelectorAll(".palette .block").forEach(b=>{
+    b.addEventListener("dragstart",e=>{
+      dragType=b.dataset.type;
+      b.classList.add("dragging");
+      e.dataTransfer.effectAllowed="copy";
+      e.dataTransfer.setData("text/plain",dragType);
+    });
+    b.addEventListener("dragend",()=>b.classList.remove("dragging"));
+  });
+  const drop=document.getElementById("drop");
+  drop.addEventListener("dragover",e=>{e.preventDefault();drop.classList.add("over");});
+  drop.addEventListener("dragleave",()=>drop.classList.remove("over"));
+  drop.addEventListener("drop",e=>{
+    e.preventDefault();drop.classList.remove("over");
+    const t=e.dataTransfer.getData("text/plain")||dragType;
+    if(t)addQuestion(t);
+  });
+  document.getElementById("testTitle").addEventListener("input",e=>{
+    state.draftTest.title=e.target.value;
+    document.getElementById("canvasTitle").textContent=e.target.value||"Untitled Test";
+  });
+}
+function addQuestion(type,seed){
+  const q={type,prompt:seed?.prompt||"",answer:"",options:seed?.options||(type==="mc"?["","","",""]:type==="tf"?["True","False"]:[]),correct:seed?.correct??0};
+  state.draftTest.questions.push(q);
+  renderDraft();
+}
+function renderDraft(){
+  const drop=document.getElementById("drop");
+  if(!state.draftTest.questions.length){
+    drop.innerHTML='<p style="opacity:.5">Drop question blocks here…</p>';return;
+  }
+  drop.innerHTML=state.draftTest.questions.map((q,i)=>{
+    const meta={mc:"Multiple Choice",tf:"True/False",sa:"Short Answer",es:"Essay"}[q.type];
+    let body=`<input placeholder="Question prompt…" value="${esc(q.prompt)}" oninput="upd(${i},'prompt',this.value)">`;
+    if(q.type==="mc"){
+      body+=`<div class="opts">`+q.options.map((o,j)=>`
+        <label>
+          <input type="radio" name="c${i}" ${q.correct===j?"checked":""} onchange="upd(${i},'correct',${j})">
+          <input type="text" value="${esc(o)}" placeholder="Option ${j+1}" oninput="updOpt(${i},${j},this.value)">
+        </label>`).join("")+`</div>`;
+    } else if(q.type==="tf"){
+      body+=`<div class="opts">
+        <label><input type="radio" name="c${i}" ${q.correct===0?"checked":""} onchange="upd(${i},'correct',0)"> True</label>
+        <label><input type="radio" name="c${i}" ${q.correct===1?"checked":""} onchange="upd(${i},'correct',1)"> False</label></div>`;
+    } else if(q.type==="sa"){
+      body+=`<input placeholder="Expected answer" value="${esc(q.answer)}" oninput="upd(${i},'answer',this.value)">`;
+    } else {
+      body+=`<textarea rows="2" placeholder="Essay rubric / notes" oninput="upd(${i},'answer',this.value)">${esc(q.answer)}</textarea>`;
+    }
+    return `<div class="qitem">
+      <button class="rm" onclick="rmQ(${i})">×</button>
+      <div class="meta">Q${i+1} · ${meta}</div>${body}</div>`;
+  }).join("");
+}
+function esc(s){return String(s||"").replace(/[<>"&]/g,c=>({"<":"&lt;",">":"&gt;",'"':"&quot;","&":"&amp;"}[c]));}
+function upd(i,k,v){state.draftTest.questions[i][k]=v;}
+function updOpt(i,j,v){state.draftTest.questions[i].options[j]=v;}
+function rmQ(i){state.draftTest.questions.splice(i,1);renderDraft();}
+function saveTest(){
+  if(!state.draftTest.questions.length){toast("Add at least one question.");return;}
+  const id=state.tests.length+1;
+  state.tests.push({id,title:state.draftTest.title||"Untitled Test",
+    questions:JSON.parse(JSON.stringify(state.draftTest.questions))});
+  state.draftTest={title:"Unit "+(state.tests.length+1)+" Quiz",questions:[]};
+  document.getElementById("testTitle").value=state.draftTest.title;
+  renderDraft();
+  toast("Test saved! View it under Tests.");
+}
+
+// ============ AI (Pollinations, keyless) ============
+async function aiSuggest(){
+  toast("Asking the muse…");
+  const topic=document.getElementById("lesson").textContent||"general knowledge";
+  const prompt=`Write ONE short multiple-choice quiz question for grade school students about: ${topic}. Reply in strict JSON: {"q":"...","options":["a","b","c","d"],"correct":0}. No prose.`;
+  try{
+    const r=await fetch("https://text.pollinations.ai/"+encodeURIComponent(prompt));
+    const txt=await r.text();
+    const m=txt.match(/\{[\s\S]*\}/);
+    if(!m)throw new Error("no json");
+    const j=JSON.parse(m[0]);
+    addQuestion("mc",{prompt:j.q,options:j.options,correct:j.correct|0});
+    toast("AI question added.");
+  }catch(e){
+    addQuestion("mc",{prompt:"What is 1/2 + 1/4?",options:["1/6","3/4","2/6","1"],correct:1});
+    toast("AI unreachable — added a placeholder.");
+  }
+}
+
+// ============ GRADES ============
+function renderGrades(){
+  document.getElementById("gyear").textContent=state.year;
+  const grid=document.getElementById("quarterGrid");
+  const overall=state.students.reduce((a,s)=>a+avg(s),0)/state.students.length||0;
+  if(state.quarterAverages[state.quarter-1]===null)state.quarterAverages[state.quarter-1]=overall;
+  grid.innerHTML=[1,2,3,4].map(q=>{
+    const v=state.quarterAverages[q-1];
+    const cur=q===state.quarter;
+    const val=v===null?"—":v.toFixed(1);
+    const pct=v===null?0:Math.max(0,Math.min(100,v));
+    return `<div class="q" style="${cur?'outline:2px solid var(--accent)':''}">
+      <h4>Quarter ${q}${cur?" (current)":""}</h4>
+      <div>Class avg: <b>${val}</b></div>
+      <div class="bar"><div style="width:${pct}%"></div></div>
+    </div>`;
+  }).join("");
+}
+
+// ============ TIME ============
+function advanceDay(){
+  // small mood drift
+  state.students.forEach(s=>s.mood=Math.max(0,Math.min(100,s.mood+(Math.random()*6-3))));
+  state.dayIdx++;
+  if(state.dayIdx>=DAYS.length){state.dayIdx=0;state.week++;checkQuarter();}
+  renderAll();
+}
+function advanceWeek(){
+  for(let i=0;i<5;i++){
+    state.students.forEach(s=>s.mood=Math.max(0,Math.min(100,s.mood+(Math.random()*6-3))));
+  }
+  state.dayIdx=0;state.week++;
+  checkQuarter();
+  renderAll();
+}
+function checkQuarter(){
+  // 9 weeks per quarter
+  const qWeek=((state.week-1)%9)+1;
+  const newQuarter=Math.floor((state.week-1)/9)+1;
+  if(newQuarter>state.quarter){
+    state.quarterAverages[state.quarter-1]=
+      state.students.reduce((a,s)=>a+avg(s),0)/state.students.length||0;
+    state.quarter=newQuarter;
+    if(state.quarter>4){
+      toast(`Year ${state.year} complete!`);
+      state.year++;state.quarter=1;state.week=1;
+      state.quarterAverages=[null,null,null,null];
+      state.students.forEach(s=>s.grades=[]);
+    }else{
+      toast(`Quarter ${state.quarter} begins.`);
+    }
+  }
+  // rank up
+  if(state.rep>=30&&state.rank==="Substitute"){state.rank="Junior Teacher";toast("Promoted to Junior Teacher!");}
+  if(state.rep>=70&&state.rank==="Junior Teacher"){state.rank="Senior Teacher";toast("Promoted to Senior Teacher!");}
+}
+
+// ============ UTIL ============
+function toast(msg){
+  const t=document.createElement("div");t.className="toast";t.textContent=msg;
+  document.body.appendChild(t);setTimeout(()=>t.remove(),3000);
+}
+function renderAll(){renderHud();renderSeats();
+  const active=document.querySelector("nav.side button.on")?.dataset.view;
+  if(active==="roster")renderRoster();
+  if(active==="tests")renderTests();
+  if(active==="grades")renderGrades();
+  if(active==="builder")renderDraft();
+}
+
+window.addEventListener("DOMContentLoaded",()=>{
+  initBuilder();
+});
+</script>
+</body>
+</html>
