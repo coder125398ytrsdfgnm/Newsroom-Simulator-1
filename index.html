@@ -467,92 +467,112 @@ function makeStudent(id,data){
 }
 
 // Ask the AI for a class roster. Parallel batches for speed + reliability.
-// One tight compact call: students + teachers as ultra-compact arrays.
-// 22 students + 7 teachers = ~1100 chars total, well under truncation.
-async function generateBootBundle(studentCount,teacherCount,excludeSubject){
+// Helper: pull the first JSON array out of free text, with truncation tolerance.
+function extractJSONArray(txt){
+  if(!txt)return null;
+  // Find first '[' and walk to matching ']' or end - tolerant of trailing junk.
+  const start=txt.indexOf("[");
+  if(start<0)return null;
+  // try greedy then progressively trim
+  for(let end=txt.length;end>start+1;end--){
+    if(txt[end-1]!=="]")continue;
+    const slice=txt.slice(start,end);
+    try{const v=JSON.parse(slice);if(Array.isArray(v))return v;}catch(e){}
+    try{const v=JSON.parse(slice.replace(/,\s*\]/g,"]"));if(Array.isArray(v))return v;}catch(e){}
+  }
+  return null;
+}
+
+async function generateStudents(n){
   const pers=PERSONALITIES.join("|");
   const voices=STUDENT_VOICES.map(v=>v.key).join("|");
-  const subjects=["Mathematics","English","Science","History","Geography","Art","Music","P.E.","Drama","Computer Science"].filter(s=>s!==excludeSubject);
-  const prompt=`Return ONLY a JSON object in this exact compact shape:
-{"s":[ ${studentCount} entries of ["First","Last","personality","voiceKey"] ],"t":[ ${teacherCount} entries of ["Mr./Ms./Dr. Surname","subject",strictness,"short style phrase"] ]}
-Rules:
-- personality MUST be one of: ${pers}
-- voiceKey MUST be one of: ${voices}
-- teacher subject MUST be a unique pick from: ${subjects.join("|")}
-- strictness is a number between 0.1 and 0.9
-- Diverse cultural names (white, Black, Hispanic, Asian, Middle Eastern, South Asian)
-- Each style phrase under 8 words
-- No markdown. No prose. JSON object only.`;
-  const txt=await aiText(prompt,{retries:4,timeout:55000});
-  if(!txt||!isCompleteJSON(txt))return null;
-  const m=txt.match(/\{[\s\S]*\}/);if(!m)return null;
-  let obj;
-  try{obj=JSON.parse(m[0]);}
-  catch(e){
-    try{obj=JSON.parse(m[0].replace(/,\s*([}\]])/g,"$1"));}catch(_){return null;}
-  }
-  if(!obj||!Array.isArray(obj.s)||!Array.isArray(obj.t))return null;
-  const students=obj.s.filter(x=>Array.isArray(x)&&x.length>=4).map(x=>({
+  const prompt=`Return ONLY a JSON array of ${n} school students in this compact shape: [["First","Last","personality","voiceKey"], ...].
+- personality: one of ${pers}
+- voiceKey: one of ${voices}
+- Diverse cultural first and surnames.
+- No markdown. No prose. ${n} entries exactly.`;
+  const txt=await aiText(prompt,{retries:4,timeout:40000});
+  const arr=extractJSONArray(txt);
+  if(!arr||!arr.length){if(window.console)console.warn("[AI] students parse failed; got:",txt?.slice(0,300));return [];}
+  return arr.filter(x=>Array.isArray(x)&&x.length>=4).map(x=>({
     first:String(x[0]||"").trim(),last:String(x[1]||"").trim(),
     personality:String(x[2]||"").trim(),voiceKey:String(x[3]||"").trim()
   })).filter(d=>d.first&&d.last&&d.personality&&d.voiceKey);
-  const teachers=obj.t.filter(x=>Array.isArray(x)&&x.length>=4).map(x=>({
+}
+
+async function generateTeachers(count,excludeSubject){
+  const subjects=["Mathematics","English","Science","History","Geography","Art","Music","P.E.","Drama","Computer Science"].filter(s=>s!==excludeSubject);
+  const prompt=`Return ONLY a JSON array of ${count} school teachers in this compact shape: [["Mr./Ms./Dr. Surname","subject",strict,"style phrase"], ...].
+- subject is a UNIQUE pick from: ${subjects.join("|")}
+- strict is a number between 0.1 and 0.9
+- style phrase under 7 words
+- Varied cultural surnames
+- No markdown. ${count} entries exactly.`;
+  const txt=await aiText(prompt,{retries:4,timeout:30000});
+  const arr=extractJSONArray(txt);
+  if(!arr||!arr.length){if(window.console)console.warn("[AI] teachers parse failed; got:",txt?.slice(0,300));return [];}
+  return arr.filter(x=>Array.isArray(x)&&x.length>=4).map(x=>({
     name:String(x[0]||"").trim(),subject:String(x[1]||"").trim(),
     strict:Math.max(0.1,Math.min(0.9,parseFloat(x[2])||0.5)),
     style:String(x[3]||"").trim()
   })).filter(t=>t.name&&t.subject);
-  return {students,teachers};
 }
 
 async function newCareer(role,name,subject,className){
   const ov=showBusy("Starting the school year...");
-  ov.setProgress(5);
-  // For subject teachers we need 60 students - that's too many for one call's output cap.
-  // Form tutor: 22 in one call. Subject teacher: 22 + 22 + 22 = three calls (one per class).
-  const perClass=role==="tutor"?22:22;
+  ov.setProgress(3);
+  const perClass=role==="tutor"?22:20;
   const wantedClasses=role==="tutor"?1:3;
-  const teacherCount=7;
-  ov.update("Building the school");
-  ov.sub(`Roster + faculty in ${wantedClasses===1?"one call":wantedClasses+" calls"}`);
+  // For form tutor: 1 students-call (22) + 1 teachers-call = 2 calls (~6-10s).
+  // For subject teacher: 3 students-calls (20 each) + 1 teachers-call = 4 calls.
+  const totalCalls=wantedClasses+1;
+  let done=0;
+  const tick=(label,sub)=>{ov.update(label);ov.sub(sub||"");ov.setProgress(Math.round((done/totalCalls)*92)+3);};
 
-  let teachers=null;
+  // teacher first (smaller, faster, validates AI is alive)
+  tick("Hiring faculty","1 colleagues call");
+  let teachers=await generateTeachers(7,subject);
+  if(!teachers.length){
+    tick("Hiring faculty (retry)","");
+    teachers=await generateTeachers(7,subject);
+  }
+  if(!teachers.length){
+    ov.close();
+    alert("Couldn't reach the AI right now. Open the browser console for details, then try New Career again in 20-30 seconds.");
+    return false;
+  }
+  done++;
+
   const classes=[];
   let idx=0;
   for(let i=0;i<wantedClasses;i++){
-    ov.setProgress(10+Math.round((i/wantedClasses)*80));
-    ov.update(`Class ${i+1} of ${wantedClasses}`);
-    // Only ask for teachers on the FIRST call to save tokens.
-    const wantTeachers=i===0?teacherCount:0;
-    let bundle=await generateBootBundle(perClass,wantTeachers,subject);
-    if(!bundle||!bundle.students.length){
-      // one retry
-      bundle=await generateBootBundle(perClass,wantTeachers,subject);
+    tick(`Class ${i+1} of ${wantedClasses}`,`Loading roster of ${perClass}`);
+    let stus=await generateStudents(perClass);
+    // accept ANY non-empty result; only retry on total failure
+    if(!stus.length)stus=await generateStudents(perClass);
+    // if we got at least 50% of what we asked for, proceed; otherwise top up.
+    if(stus.length && stus.length<Math.floor(perClass*0.6)){
+      const extra=await generateStudents(perClass-stus.length);
+      stus=stus.concat(extra);
     }
-    if(!bundle||!bundle.students.length){
-      ov.close();
-      alert("The AI service is having a rough moment. Wait 20-30 seconds and click New Career again.");
-      return false;
+    done++;
+    if(!stus.length){
+      // accept smaller class rather than failing the whole game
+      continue;
     }
-    if(i===0){
-      teachers=bundle.teachers;
-      if(!teachers||!teachers.length){
-        // try once more for teachers alone
-        const t2=await generateBootBundle(0,teacherCount,subject);
-        teachers=t2?.teachers||[];
-      }
-    }
-    // dedupe by name
     const seen=new Set();
-    const uniq=bundle.students.filter(s=>{const k=(s.first+" "+s.last).toLowerCase();if(seen.has(k))return false;seen.add(k);return true;});
+    const uniq=stus.filter(s=>{const k=(s.first+" "+s.last).toLowerCase();if(seen.has(k))return false;seen.add(k);return true;});
     const cname=role==="tutor"?(className||"7A"):(["7A","8B","9A"][i]);
-    const studs=uniq.slice(0,perClass).map((d,j)=>makeStudent(idx++*97+j,d)).filter(Boolean);
-    if(studs.length)classes.push({name:cname,students:studs});
+    const built=uniq.slice(0,perClass).map((d,j)=>makeStudent(idx++*97+j,d)).filter(Boolean);
+    if(built.length)classes.push({name:cname,students:built});
   }
-  if(!classes.length){ov.close();alert("Couldn't load classes. Try again.");return false;}
-  if(!teachers||!teachers.length){
-    ov.close();alert("Couldn't load colleagues. Try again.");return false;
+  if(!classes.length){
+    ov.close();
+    alert("Couldn't load any classes. The AI is having a rough moment. Try again in 20-30s.");
+    return false;
   }
-  ov.setProgress(95);ov.update("Final setup");
+
+  ov.setProgress(96);ov.update("Final setup");
   state={
     role,name,subject:role==="subject"?subject:null,
     formClass:role==="tutor"?className:null,
@@ -941,6 +961,7 @@ function sendTeacherMessage(){
   state.selectedContact=c.id;
   showView("messages");buildNav();
   toast(`Message to ${teacher.name} sent.`);
+  evaluatePlayerMessage(body,c);
 }
 function saveNote(id){
   const s=findStudent(id);
@@ -1693,13 +1714,51 @@ function sendReply(){
   const body=(ta.value||"").trim();
   if(!body){toast("Type something first.");return;}
   const cid=state.selectedContact;
+  const c=state.contacts.find(x=>x.id===cid);
   state.messages.push({id:"m"+Date.now(),contactId:cid,fromMe:true,
     subject:"(reply)",body,week:state.week,day:DAYS[state.dayIdx],read:true});
   checkReplyMissions(cid);
   ta.value="";
-  // contact may follow up in 1-2 weeks
   showView("messages");buildNav();
   toast("Reply sent.");
+  // background evaluation (does not block UI)
+  evaluatePlayerMessage(body,c);
+}
+
+// Send the player's message text to AI for a professionalism rating.
+// Result adjusts reputation accordingly. Fire-and-forget.
+async function evaluatePlayerMessage(text,contact){
+  if(!text||text.length<3)return;
+  const audience=contact?.kind==="student"?`a school student named ${contact.name}`
+              :contact?.kind==="staff"?`a colleague (${contact.relation})`
+              :contact?.kind==="parent"?`a parent (${contact.relation})`:"a contact";
+  const prompt=`A school teacher named Ms. ${state.name} just wrote this message to ${audience}:
+"""${text.slice(0,800)}"""
+
+Rate the message on professionalism and judgment from -3 to +3 where:
+- +3 = exemplary, warm and on-point
+- +1 = perfectly fine
+- 0 = neutral or mildly clumsy
+- -1 = unprofessional or insensitive
+- -3 = a fireable offense (insults, threats, profanity, sharing private student info)
+
+Reply with ONLY a compact JSON object: {"score":<integer -3..3>,"note":"<6-12 word reason>"}`;
+  const data=await aiJSON(prompt,{retries:2,timeout:25000});
+  if(!data||typeof data.score!=="number")return;
+  const score=Math.max(-3,Math.min(3,Math.round(data.score)));
+  if(score===0)return;
+  state.rep=Math.max(0,state.rep+score);
+  const verb=score>0?"+":"";
+  toast(`${audience.split(" ")[0]==="a"?"That message":"Your message"}: ${verb}${score} rep (${data.note||"noted"}).`);
+  if(score<=-2){
+    logActivity({type:"gossip",text:`A clumsy message from you is making the rounds. ${data.note||""}`});
+    state.warned=state.warned||true;
+  }
+  if(score>=2){
+    logActivity({type:"gossip",text:`Your latest message went down well. ${data.note||""}`});
+  }
+  renderHud();buildNav();
+  saveGame(false);
 }
 
 // ============================================================
@@ -1753,6 +1812,7 @@ function sendStudentMessage(){
   state.selectedContact=c.id;
   showView("messages");buildNav();
   toast(`Message to ${s.first} sent.`);
+  evaluatePlayerMessage(body,c);
 }
 
 // Decide whether the student will reply, based on personality + relationship signals.
