@@ -21,61 +21,70 @@
   button:disabled{opacity:.4;cursor:not-allowed}
   h1,h2,h3{margin:.3em 0}
   .hidden{display:none!important}
+  small.muted{opacity:.65}
 
-  /* main menu */
   #menu{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;
     justify-content:center;background:
-    radial-gradient(circle at 50% 30%, #3a2b20 0%, #1b1410 70%);}
-  #menu h1{font-size:4em;color:var(--accent);text-shadow:3px 3px 0 #000;letter-spacing:2px}
+    radial-gradient(circle at 50% 30%, #3a2b20 0%, #1b1410 70%);z-index:10}
+  #menu h1{font-size:4em;color:var(--accent);text-shadow:3px 3px 0 #000;letter-spacing:2px;margin:0}
   #menu .sub{opacity:.7;margin-bottom:2em;font-style:italic}
-  #menu button{font-size:1.2em;margin:.3em;min-width:220px}
+  #menu button{font-size:1.1em;margin:.3em;min-width:240px}
 
-  /* hud */
-  #hud{display:flex;justify-content:space-between;align-items:center;
+  #setup{position:fixed;inset:0;display:none;align-items:center;justify-content:center;
+    background:var(--bg);z-index:9;padding:2em;overflow:auto}
+  #setup.active{display:flex}
+  #setup .card{background:var(--panel);border:2px solid var(--accent);border-radius:10px;
+    padding:1.5em;max-width:620px;width:100%}
+  .roles{display:grid;grid-template-columns:1fr 1fr;gap:.6em;margin:.6em 0}
+  .role{background:var(--panel2);border:2px solid #000;border-radius:8px;padding:.8em;cursor:pointer}
+  .role:hover{border-color:var(--accent)}
+  .role.sel{border-color:var(--accent);background:#4a3828}
+  .role h3{margin:0 0 .3em 0;color:var(--accent)}
+  .role p{margin:0;font-size:.9em;opacity:.85}
+
+  #hud{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;
     padding:.5em 1em;background:#0e0a07;border-bottom:2px solid var(--accent)}
   #hud .stats span{margin-right:1.2em}
   #hud .stats b{color:var(--accent)}
 
-  /* layout */
   #game{display:none;flex-direction:column;height:100vh}
   #game.active{display:flex}
   main{flex:1;display:flex;overflow:hidden}
-  nav.side{width:170px;background:#0e0a07;padding:.5em;display:flex;flex-direction:column;gap:.3em}
+  nav.side{width:180px;background:#0e0a07;padding:.5em;display:flex;flex-direction:column;gap:.3em}
   nav.side button{text-align:left}
   nav.side button.on{background:var(--accent);color:#1b1410}
+  nav.side .sep{height:1px;background:#3a2b20;margin:.3em 0}
   section.view{flex:1;overflow:auto;padding:1em}
 
-  /* classroom */
   .room{background:linear-gradient(#3a2b20,#2a1f18);border:2px solid #000;
-    border-radius:10px;padding:1em;position:relative;min-height:340px}
+    border-radius:10px;padding:1em;min-height:340px}
   .board{background:#2d4a3a;color:var(--chalk);border:8px solid #6b4a2b;border-radius:6px;
-    padding:.8em;font-family:"Comic Sans MS",cursive;min-height:80px;margin-bottom:1em}
+    padding:.8em;min-height:60px;margin-bottom:1em}
   .seats{display:grid;grid-template-columns:repeat(5,1fr);gap:.6em}
   .seat{background:#1b1410;border:1px solid #000;border-radius:6px;padding:.5em;
     text-align:center;cursor:pointer;position:relative;transition:transform .1s}
   .seat:hover{transform:translateY(-2px);outline:2px solid var(--accent)}
-  .seat .face{font-size:2em}
-  .seat .name{font-size:.85em;font-weight:bold}
+  .seat .name{font-size:.9em;font-weight:bold}
   .seat .gr{font-size:.75em;opacity:.8}
-  .seat .card{position:absolute;top:2px;right:2px;width:14px;height:18px;border-radius:2px;
-    border:1px solid #000}
-  .card.green{background:var(--green)} .card.yellow{background:var(--yellow)}
-  .card.purple{background:var(--purple)}
+  .seat .cstrip{display:flex;gap:2px;justify-content:center;margin-top:.3em;min-height:8px}
+  .seat .cstrip i{width:10px;height:14px;border-radius:2px;border:1px solid #000;display:inline-block}
+  .ci-green{background:var(--green)} .ci-yellow{background:var(--yellow)} .ci-purple{background:var(--purple)}
 
-  /* modal */
   .modal{position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;
-    align-items:center;justify-content:center;z-index:50}
+    align-items:center;justify-content:center;z-index:50;padding:1em}
   .modal .box{background:var(--panel);border:2px solid var(--accent);border-radius:10px;
-    padding:1.2em;max-width:560px;width:90%;max-height:85vh;overflow:auto}
+    padding:1.2em;max-width:640px;width:100%;max-height:85vh;overflow:auto}
   .row{display:flex;gap:.5em;flex-wrap:wrap;align-items:center;margin:.4em 0}
+  input[type=text],textarea,select{background:#0e0a07;color:var(--ink);border:1px solid #333;
+    padding:.35em;border-radius:4px;font:inherit}
+  textarea{width:100%}
 
-  /* roster table */
   table{width:100%;border-collapse:collapse}
-  th,td{padding:.4em .6em;border-bottom:1px solid #4a3828;text-align:left}
+  th,td{padding:.4em .6em;border-bottom:1px solid #4a3828;text-align:left;vertical-align:top}
   th{color:var(--accent)}
-  tr:hover{background:#241a14}
+  tr.clickable{cursor:pointer}
+  tr.clickable:hover{background:#241a14}
 
-  /* test builder dnd */
   .builder{display:grid;grid-template-columns:240px 1fr;gap:1em}
   .palette,.canvas{background:var(--panel);border:1px solid #000;border-radius:8px;
     padding:.6em;min-height:300px}
@@ -88,48 +97,103 @@
   .qitem{background:#1b1410;border-left:4px solid var(--accent);border-radius:4px;
     padding:.5em;margin:.4em 0}
   .qitem .meta{font-size:.75em;opacity:.7;margin-bottom:.2em}
-  .qitem input,.qitem textarea{width:100%;background:#0e0a07;color:var(--ink);
-    border:1px solid #333;border-radius:4px;padding:.3em;font:inherit;margin-top:.2em}
-  .qitem .opts input[type=text]{display:inline-block;width:78%}
+  .qitem input[type=text],.qitem textarea{width:100%;margin-top:.2em}
   .qitem .opts label{display:flex;gap:.4em;align-items:center;margin:.2em 0}
+  .qitem .opts input[type=text]{width:80%}
   .qitem .rm{float:right;background:var(--red);border:none;color:#fff;
     border-radius:4px;padding:.1em .5em;cursor:pointer}
 
-  /* grades */
   .quarter{display:grid;grid-template-columns:repeat(4,1fr);gap:.6em}
   .q{background:var(--panel);border:1px solid #000;border-radius:6px;padding:.6em}
   .q h4{margin:.1em 0;color:var(--accent)}
   .bar{height:10px;background:#000;border-radius:5px;overflow:hidden;margin-top:.3em}
   .bar>div{height:100%;background:var(--green)}
 
+  .grading .student-ans{background:#1b1410;border:1px solid #333;border-radius:6px;
+    padding:.6em;margin:.5em 0}
+  .grading .student-ans .resp{background:#0e0a07;padding:.4em;border-radius:4px;
+    margin:.3em 0;white-space:pre-wrap;font-family:Georgia,serif}
+  .auto-correct{color:var(--green);font-weight:bold}
+  .auto-wrong{color:var(--red);font-weight:bold}
+
+  .needs li{margin:.3em 0}
+
   .toast{position:fixed;bottom:1em;left:50%;transform:translateX(-50%);
     background:var(--accent);color:#1b1410;padding:.6em 1em;border-radius:6px;
-    font-weight:bold;z-index:100;animation:fade 3s forwards}
+    font-weight:bold;z-index:100;animation:fade 3s forwards;max-width:80%;text-align:center}
   @keyframes fade{0%{opacity:0}10%{opacity:1}80%{opacity:1}100%{opacity:0}}
+
+  .pill{display:inline-block;padding:.1em .5em;border-radius:10px;font-size:.75em;
+    border:1px solid #000;margin-right:.3em}
+  .pill.g{background:var(--green);color:#000}
+  .pill.y{background:var(--yellow);color:#000}
+  .pill.p{background:var(--purple);color:#fff}
 </style>
 </head>
 <body>
 
-<!-- ============== MAIN MENU ============== -->
 <div id="menu">
   <h1>CHALKDUST</h1>
   <div class="sub">A teacher's life at Rust Hollow Public School #14</div>
-  <button class="primary" onclick="startGame()">New Career</button>
-  <button onclick="alert('Save/Load coming soon.')">Continue</button>
-  <button onclick="alert('Use the sidebar to navigate. Click students to assign cards. Build tests by dragging question blocks.')">How to Play</button>
-  <button onclick="alert('Chalkdust v0.1 — bones build.')">Credits</button>
+  <button class="primary" onclick="openSetup()">New Career</button>
+  <button onclick="alert('Save/Load coming later.')">Continue</button>
+  <button onclick="alert('Pick a role at the start. Form Tutors guide one class through the year. Subject Teachers teach a subject to several classes and run tests. Cards always need a reason. Tests are built by dragging blocks, taken by students, then graded by you.')">How to Play</button>
+  <button onclick="alert('Chalkdust v0.2 - bones')">Credits</button>
 </div>
 
-<!-- ============== GAME ============== -->
+<div id="setup">
+  <div class="card">
+    <h2 style="color:var(--accent);margin-top:0">Start Your Career</h2>
+    <p>You begin at Rust Hollow Public School #14 - a beat-down building, low pay, low rank. Pick your role.</p>
+    <div class="roles">
+      <div class="role sel" data-role="tutor" onclick="pickRole('tutor')">
+        <h3>Form Tutor</h3>
+        <p>Guide ONE class through the year. You attend to their needs, track their progress, and read the cards other teachers give them. You cannot administer cards or run tests.</p>
+      </div>
+      <div class="role" data-role="subject" onclick="pickRole('subject')">
+        <h3>Subject Teacher</h3>
+        <p>Teach ONE subject to SEVERAL classes. Build and administer tests, grade student responses, and assign green / yellow / purple cards (with a reason).</p>
+      </div>
+    </div>
+
+    <div class="row">
+      <label>Your name: <input id="setupName" type="text" value="Hale"></label>
+    </div>
+    <div class="row" id="subjectRow">
+      <label>Subject:
+        <select id="setupSubject">
+          <option>Mathematics</option><option>English</option><option>Science</option>
+          <option>History</option><option>Geography</option><option>Art</option>
+        </select>
+      </label>
+    </div>
+    <div class="row" id="classRow">
+      <label>Form class:
+        <select id="setupClass">
+          <option>7A</option><option>7B</option><option>8A</option><option>8B</option><option>9A</option>
+        </select>
+      </label>
+    </div>
+    <div class="row" style="justify-content:flex-end">
+      <button onclick="cancelSetup()">Back</button>
+      <button class="primary" onclick="beginCareer()">Begin</button>
+    </div>
+  </div>
+</div>
+
 <div id="game">
   <header id="hud">
-    <div><b style="color:var(--accent)">Ms. Hale</b> · Rust Hollow #14 · Rank: <b id="rank">Substitute</b></div>
+    <div>
+      <b id="hudName" style="color:var(--accent)">Ms. Hale</b> ·
+      <span id="hudRole">Form Tutor</span> ·
+      Rank: <b id="rank">Probationary</b>
+    </div>
     <div class="stats">
       <span>Year <b id="year">1</b></span>
       <span>Q<b id="quarter">1</b></span>
       <span>Week <b id="week">1</b></span>
       <span>Day <b id="day">Mon</b></span>
-      <span>Reputation <b id="rep">12</b></span>
+      <span>Reputation <b id="rep">10</b></span>
     </div>
     <div>
       <button onclick="advanceDay()">Next Day</button>
@@ -137,126 +201,144 @@
     </div>
   </header>
   <main>
-    <nav class="side">
-      <button data-view="classroom" class="on" onclick="showView('classroom')">Classroom</button>
-      <button data-view="roster" onclick="showView('roster')">Roster</button>
-      <button data-view="tests" onclick="showView('tests')">Tests</button>
-      <button data-view="builder" onclick="showView('builder')">Test Builder</button>
-      <button data-view="grades" onclick="showView('grades')">Quarterly Grades</button>
-      <button onclick="quitToMenu()">Quit</button>
-    </nav>
-
-    <section class="view" id="view-classroom">
-      <div class="room">
-        <div class="board" id="board">Today's lesson: <span id="lesson">Intro to fractions</span></div>
-        <div class="seats" id="seats"></div>
-      </div>
-      <p style="opacity:.7;font-size:.9em;margin-top:.8em">
-        Click a student to assign a card (🟢 good · 🟡 bad · 🟣 amazing) or view their record.
-      </p>
-    </section>
-
-    <section class="view hidden" id="view-roster">
-      <h2>Class Roster</h2>
-      <table id="rosterTable">
-        <thead><tr><th>Name</th><th>Avg</th><th>🟢</th><th>🟡</th><th>🟣</th><th>Notes</th></tr></thead>
-        <tbody></tbody>
-      </table>
-    </section>
-
-    <section class="view hidden" id="view-tests">
-      <h2>Tests</h2>
-      <div id="testList"></div>
-      <p style="opacity:.7">Build a new test in the Test Builder, then administer it here.</p>
-    </section>
-
-    <section class="view hidden" id="view-builder">
-      <h2>Test Builder <small style="opacity:.6">— drag blocks from the left onto the test</small></h2>
-      <div class="row">
-        <label>Title: <input id="testTitle" value="Unit 1 Quiz" style="background:#0e0a07;color:var(--ink);border:1px solid #333;padding:.3em;border-radius:4px"></label>
-        <button onclick="aiSuggest()">✨ AI Suggest Question</button>
-        <button class="primary" onclick="saveTest()">Save Test</button>
-      </div>
-      <div class="builder">
-        <div class="palette">
-          <h3>Question Blocks</h3>
-          <div class="block" draggable="true" data-type="mc">📝 Multiple Choice</div>
-          <div class="block" draggable="true" data-type="tf">✅ True / False</div>
-          <div class="block" draggable="true" data-type="sa">✏️ Short Answer</div>
-          <div class="block" draggable="true" data-type="es">📜 Essay</div>
-        </div>
-        <div class="canvas">
-          <h3 id="canvasTitle">Untitled Test</h3>
-          <div class="drop" id="drop"><p style="opacity:.5">Drop question blocks here…</p></div>
-        </div>
-      </div>
-    </section>
-
-    <section class="view hidden" id="view-grades">
-      <h2>Quarterly Grades — Year <span id="gyear">1</span></h2>
-      <div class="quarter" id="quarterGrid"></div>
-    </section>
+    <nav class="side" id="sideNav"></nav>
+    <section class="view" id="viewHost"></section>
   </main>
 </div>
 
 <script>
-// ============ STATE ============
-const FIRST=["Avery","Bren","Cleo","Dax","Eli","Fae","Gus","Hana","Iggy","Jo","Kit","Lex","Mia","Nico","Opal","Pip","Quinn","Rue","Sam","Tess"];
-const LAST=["Park","Vega","Cole","Day","Reed","Ash","Lin","Moss","Wren","Holt"];
-const FACES=["😀","🙂","😐","😎","🤓","😶","🧒","👧","👦","🙃"];
+// ============================================================
+// STATE
+// ============================================================
+const FIRST=["Avery","Bren","Cleo","Dax","Eli","Fae","Gus","Hana","Iggy","Jo","Kit","Lex","Mia","Nico","Opal","Pip","Quinn","Rue","Sam","Tess","Una","Vic","Wren","Xan","Yael","Zane"];
+const LAST=["Park","Vega","Cole","Day","Reed","Ash","Lin","Moss","Wren","Holt","Frey","Bain","Ortiz","Kane"];
 const DAYS=["Mon","Tue","Wed","Thu","Fri"];
-
 let state=null;
+let selectedRole="tutor";
 
-function newGame(){
+function makeStudent(id){
+  return {
+    id,
+    name:FIRST[id%FIRST.length]+" "+LAST[(id*3+7)%LAST.length],
+    ability:25+Math.random()*60,    // hidden 0-100
+    mood:45+Math.random()*30,
+    effort:40+Math.random()*40,
+    grades:[],                       // {testId,score}
+    cards:[],                        // {color,reason,week,by}
+    notes:"",
+    flag:null                        // form-tutor: pending need string
+  };
+}
+function makeClass(name,size){
   const students=[];
-  for(let i=0;i<20;i++){
-    students.push({
-      id:i,
-      name:FIRST[i%FIRST.length]+" "+LAST[(i*3)%LAST.length],
-      face:FACES[i%FACES.length],
-      ability:30+Math.random()*50,        // hidden
-      mood:50+Math.random()*30,
-      grades:[],                          // {testId,score}
-      cards:{green:0,yellow:0,purple:0},
-      notes:""
-    });
+  for(let i=0;i<size;i++)students.push(makeStudent(i + name.charCodeAt(0)*100));
+  return {name,students};
+}
+
+function newCareer(role,name,subject,className){
+  const classes=[];
+  if(role==="tutor"){
+    classes.push(makeClass(className,22));
+  }else{
+    ["7A","8B","9A"].forEach(n=>classes.push(makeClass(n,20)));
   }
   state={
+    role,name,subject:role==="subject"?subject:null,
+    formClass:role==="tutor"?className:null,
     year:1,quarter:1,week:1,dayIdx:0,
-    rep:12,rank:"Substitute",
-    students,
-    tests:[],            // {id,title,questions:[]}
+    rep:10,rank:"Probationary",
+    classes,
+    activeClassIdx:0,
+    tests:[],                 // {id,title,questions:[],subject,assignments:{classIdx:{studentId:{answers,scored,score}}}}
     draftTest:{title:"Unit 1 Quiz",questions:[]},
     quarterAverages:[null,null,null,null]
   };
 }
 
-// ============ MENU / NAV ============
-function startGame(){
-  newGame();
+// ============================================================
+// SETUP
+// ============================================================
+function openSetup(){
   document.getElementById("menu").classList.add("hidden");
+  document.getElementById("setup").classList.add("active");
+  pickRole("tutor");
+}
+function cancelSetup(){
+  document.getElementById("setup").classList.remove("active");
+  document.getElementById("menu").classList.remove("hidden");
+}
+function pickRole(r){
+  selectedRole=r;
+  document.querySelectorAll(".role").forEach(el=>el.classList.toggle("sel",el.dataset.role===r));
+  document.getElementById("subjectRow").style.display=r==="subject"?"":"none";
+  document.getElementById("classRow").style.display=r==="tutor"?"":"none";
+}
+function beginCareer(){
+  const name=document.getElementById("setupName").value.trim()||"Hale";
+  const subject=document.getElementById("setupSubject").value;
+  const cls=document.getElementById("setupClass").value;
+  newCareer(selectedRole,name,subject,cls);
+  document.getElementById("setup").classList.remove("active");
   document.getElementById("game").classList.add("active");
-  renderAll();
+  buildNav();
+  showView(state.role==="tutor"?"formroom":"classroom");
+  renderHud();
 }
 function quitToMenu(){
   if(!confirm("Return to main menu? Unsaved progress will be lost."))return;
   document.getElementById("game").classList.remove("active");
   document.getElementById("menu").classList.remove("hidden");
 }
+
+// ============================================================
+// NAV
+// ============================================================
+function buildNav(){
+  const nav=document.getElementById("sideNav");
+  const role=state.role;
+  let html="";
+  if(role==="tutor"){
+    html+=navBtn("formroom","Form Room");
+    html+=navBtn("roster","Roster");
+    html+=navBtn("needs","Student Needs");
+    html+=navBtn("cards","Card Record");
+    html+=navBtn("grades","Quarterly Grades");
+  }else{
+    html+=navBtn("classroom","Classroom");
+    html+=navBtn("roster","Roster");
+    html+=navBtn("builder","Test Builder");
+    html+=navBtn("tests","Tests");
+    html+=navBtn("grading","Grading");
+    html+=navBtn("grades","Quarterly Grades");
+  }
+  html+=`<div class="sep"></div><button onclick="quitToMenu()">Quit to Menu</button>`;
+  nav.innerHTML=html;
+}
+function navBtn(v,label){return `<button data-view="${v}" onclick="showView('${v}')">${label}</button>`;}
+
 function showView(v){
-  document.querySelectorAll(".view").forEach(e=>e.classList.add("hidden"));
-  document.getElementById("view-"+v).classList.remove("hidden");
-  document.querySelectorAll("nav.side button").forEach(b=>{
+  document.querySelectorAll("nav.side button[data-view]").forEach(b=>{
     b.classList.toggle("on",b.dataset.view===v);
   });
-  if(v==="roster")renderRoster();
-  if(v==="tests")renderTests();
-  if(v==="grades")renderGrades();
+  const host=document.getElementById("viewHost");
+  if(v==="formroom")host.innerHTML=viewFormRoom();
+  else if(v==="classroom")host.innerHTML=viewClassroom();
+  else if(v==="roster")host.innerHTML=viewRoster();
+  else if(v==="needs")host.innerHTML=viewNeeds();
+  else if(v==="cards")host.innerHTML=viewCardRecord();
+  else if(v==="builder"){host.innerHTML=viewBuilder();initBuilder();renderDraft();}
+  else if(v==="tests")host.innerHTML=viewTests();
+  else if(v==="grading")host.innerHTML=viewGrading();
+  else if(v==="grades")host.innerHTML=viewGrades();
 }
 
-// ============ HUD ============
+// ============================================================
+// HUD
+// ============================================================
 function renderHud(){
+  document.getElementById("hudName").textContent="Ms. "+state.name;
+  document.getElementById("hudRole").textContent=
+    state.role==="tutor"?`Form Tutor (${state.formClass})`:`Teacher - ${state.subject}`;
   document.getElementById("year").textContent=state.year;
   document.getElementById("quarter").textContent=state.quarter;
   document.getElementById("week").textContent=state.week;
@@ -265,120 +347,188 @@ function renderHud(){
   document.getElementById("rank").textContent=state.rank;
 }
 
-// ============ CLASSROOM ============
-function renderSeats(){
-  const seats=document.getElementById("seats");
-  seats.innerHTML="";
-  state.students.forEach(s=>{
-    const top=topCard(s);
-    const div=document.createElement("div");
-    div.className="seat";
-    div.innerHTML=`
-      ${top?`<div class="card ${top}"></div>`:""}
-      <div class="face">${s.face}</div>
+// ============================================================
+// CLASSROOM / FORMROOM VIEWS
+// ============================================================
+function currentClass(){return state.classes[state.activeClassIdx];}
+function classPicker(){
+  if(state.classes.length<2)return "";
+  return `<div class="row">Class:
+    ${state.classes.map((c,i)=>`<button class="${i===state.activeClassIdx?'primary':''}" onclick="setClass(${i})">${c.name}</button>`).join("")}
+  </div>`;
+}
+function setClass(i){state.activeClassIdx=i;showView(state.role==="tutor"?"formroom":"classroom");}
+
+function seatGrid(canAdminister){
+  const c=currentClass();
+  return `<div class="seats">${c.students.map(s=>{
+    const cs=s.cards.slice(-4).map(c=>`<i class="ci-${c.color}"></i>`).join("");
+    return `<div class="seat" onclick="openStudent(${s.id},${canAdminister})">
       <div class="name">${s.name}</div>
-      <div class="gr">Avg: ${avg(s).toFixed(0)}</div>`;
-    div.onclick=()=>openStudent(s.id);
-    seats.appendChild(div);
-  });
-}
-function topCard(s){
-  if(s.cards.purple>0)return "purple";
-  if(s.cards.yellow>s.cards.green)return "yellow";
-  if(s.cards.green>0)return "green";
-  return null;
-}
-function avg(s){
-  if(!s.grades.length)return 0;
-  return s.grades.reduce((a,b)=>a+b.score,0)/s.grades.length;
+      <div class="gr">Avg: ${avg(s).toFixed(0)}</div>
+      <div class="cstrip">${cs}</div>
+    </div>`;
+  }).join("")}</div>`;
 }
 
-function openStudent(id){
-  const s=state.students[id];
+function viewFormRoom(){
+  const c=currentClass();
+  const pending=c.students.filter(s=>s.flag).length;
+  return `<h2>Form Room - ${c.name}</h2>
+    <div class="room">
+      <div class="board">Form period. Take the register, address concerns, read recent cards.</div>
+      ${seatGrid(false)}
+    </div>
+    <p class="muted">As Form Tutor you cannot administer cards. Click a student to view their record. ${pending} pending need(s) this week.</p>`;
+}
+function viewClassroom(){
+  const c=currentClass();
+  return `<h2>Classroom - ${c.name} (${state.subject})</h2>
+    ${classPicker()}
+    <div class="room">
+      <div class="board">Today's lesson plan goes here. Run a test or assign a card.</div>
+      ${seatGrid(true)}
+    </div>
+    <p class="muted">Click a student to view their record or assign a card (with a reason).</p>`;
+}
+
+// ============================================================
+// STUDENT MODAL
+// ============================================================
+function openStudent(id,canAdminister){
+  const c=currentClass();
+  const s=c.students.find(x=>x.id===id);
+  const cardHist=s.cards.length?s.cards.slice().reverse().map(c=>
+    `<li><span class="pill ${c.color[0]}">${c.color}</span> wk ${c.week} - <i>${esc(c.reason)}</i> <small class="muted">by ${esc(c.by)}</small></li>`
+  ).join(""):"<li><i>No cards yet.</i></li>";
+  const adminBtns=canAdminister?`
+    <h3>Issue a card</h3>
+    <div class="row">
+      <select id="cardColor">
+        <option value="green">Green - good</option>
+        <option value="yellow">Yellow - bad</option>
+        <option value="purple">Purple - amazing</option>
+      </select>
+      <input id="cardReason" type="text" placeholder="Reason (required)" style="flex:1;min-width:200px">
+      <button class="primary" onclick="issueCard(${id})">Issue</button>
+    </div>`:`<p class="muted"><i>Form Tutors can read cards but not issue them.</i></p>`;
   const m=document.createElement("div");
   m.className="modal";
-  m.innerHTML=`
-    <div class="box">
-      <h2>${s.face} ${s.name}</h2>
-      <p>Average: <b>${avg(s).toFixed(1)}</b> · Mood: ${s.mood.toFixed(0)}</p>
-      <p>Cards — 🟢 ${s.cards.green} · 🟡 ${s.cards.yellow} · 🟣 ${s.cards.purple}</p>
-      <div class="row">
-        <button onclick="assignCard(${id},'green');closeModal()" style="background:var(--green);color:#000">🟢 Green</button>
-        <button onclick="assignCard(${id},'yellow');closeModal()" style="background:var(--yellow);color:#000">🟡 Yellow</button>
-        <button onclick="assignCard(${id},'purple');closeModal()" style="background:var(--purple);color:#fff">🟣 Purple</button>
-      </div>
-      <h3>Recent grades</h3>
-      <div>${s.grades.slice(-5).map(g=>`<div>· Test #${g.testId}: ${g.score.toFixed(0)}</div>`).join("")||"<i>None yet.</i>"}</div>
-      <h3>Notes</h3>
-      <textarea id="noteBox" rows="3" style="width:100%;background:#0e0a07;color:var(--ink);border:1px solid #333">${s.notes||""}</textarea>
-      <div class="row" style="justify-content:flex-end">
-        <button onclick="saveNote(${id})">Save Note</button>
-        <button class="primary" onclick="closeModal()">Close</button>
-      </div>
-    </div>`;
+  m.innerHTML=`<div class="box">
+    <h2>${s.name}</h2>
+    <p>Average: <b>${avg(s).toFixed(1)}</b> · Mood: ${s.mood.toFixed(0)} · Effort: ${s.effort.toFixed(0)}</p>
+    ${s.flag?`<p style="color:var(--yellow)"><b>Need:</b> ${esc(s.flag)} <button onclick="resolveNeed(${id})">Address</button></p>`:""}
+    <h3>Card history</h3>
+    <ul>${cardHist}</ul>
+    ${adminBtns}
+    <h3>Recent grades</h3>
+    <div>${s.grades.slice(-5).map(g=>`<div>Test #${g.testId}: ${g.score.toFixed(0)}</div>`).join("")||"<i>None yet.</i>"}</div>
+    <h3>Private notes</h3>
+    <textarea id="noteBox" rows="3">${esc(s.notes||"")}</textarea>
+    <div class="row" style="justify-content:flex-end">
+      <button onclick="saveNote(${id})">Save Note</button>
+      <button class="primary" onclick="closeModal()">Close</button>
+    </div>
+  </div>`;
   document.body.appendChild(m);
   m.onclick=e=>{if(e.target===m)closeModal();};
 }
+function closeModal(){document.querySelectorAll(".modal").forEach(m=>m.remove());}
 function saveNote(id){
-  state.students[id].notes=document.getElementById("noteBox").value;
+  const s=findStudent(id);
+  s.notes=document.getElementById("noteBox").value;
   toast("Note saved.");
 }
-function closeModal(){document.querySelectorAll(".modal").forEach(m=>m.remove());}
-function assignCard(id,color){
-  const s=state.students[id];
-  s.cards[color]++;
+function findStudent(id){
+  for(const c of state.classes){const s=c.students.find(x=>x.id===id);if(s)return s;}
+}
+function issueCard(id){
+  const color=document.getElementById("cardColor").value;
+  const reason=document.getElementById("cardReason").value.trim();
+  if(!reason){toast("A card needs a reason.");return;}
+  const s=findStudent(id);
+  s.cards.push({color,reason,week:state.week,by:"Ms. "+state.name});
   if(color==="green"){s.mood=Math.min(100,s.mood+4);state.rep+=1;}
   if(color==="yellow"){s.mood=Math.max(0,s.mood-6);state.rep-=1;}
   if(color==="purple"){s.mood=Math.min(100,s.mood+10);state.rep+=3;}
-  toast(`${color.toUpperCase()} card → ${s.name}`);
-  renderAll();
+  toast(`${color} card issued to ${s.name}`);
+  closeModal();renderHud();showView(state.role==="tutor"?"formroom":"classroom");
+}
+function resolveNeed(id){
+  const s=findStudent(id);
+  s.flag=null;s.mood=Math.min(100,s.mood+8);state.rep+=1;
+  toast("Need addressed.");
+  closeModal();renderHud();
+  showView("needs");
 }
 
-// ============ ROSTER ============
-function renderRoster(){
-  const tb=document.querySelector("#rosterTable tbody");
-  tb.innerHTML="";
-  state.students.forEach(s=>{
-    tb.innerHTML+=`<tr onclick="openStudent(${s.id})" style="cursor:pointer">
-      <td>${s.face} ${s.name}</td>
-      <td>${avg(s).toFixed(1)}</td>
-      <td>${s.cards.green}</td>
-      <td>${s.cards.yellow}</td>
-      <td>${s.cards.purple}</td>
-      <td>${(s.notes||"").slice(0,40)}</td></tr>`;
-  });
+// ============================================================
+// ROSTER / CARDS / NEEDS
+// ============================================================
+function avg(s){return s.grades.length?s.grades.reduce((a,b)=>a+b.score,0)/s.grades.length:0;}
+
+function viewRoster(){
+  return `<h2>Roster</h2>${classPicker()}
+    <table><thead><tr><th>Name</th><th>Avg</th><th>G</th><th>Y</th><th>P</th><th>Notes</th></tr></thead>
+    <tbody>${currentClass().students.map(s=>{
+      const cc={green:0,yellow:0,purple:0};s.cards.forEach(c=>cc[c.color]++);
+      return `<tr class="clickable" onclick="openStudent(${s.id},${state.role==='subject'})">
+        <td>${s.name}</td><td>${avg(s).toFixed(1)}</td>
+        <td>${cc.green}</td><td>${cc.yellow}</td><td>${cc.purple}</td>
+        <td>${esc((s.notes||"").slice(0,40))}</td></tr>`;
+    }).join("")}</tbody></table>`;
+}
+function viewCardRecord(){
+  const all=[];
+  currentClass().students.forEach(s=>s.cards.forEach(c=>all.push({s,c})));
+  all.sort((a,b)=>b.c.week-a.c.week);
+  return `<h2>Card Record - ${currentClass().name}</h2>
+    <p class="muted">Read-only view of cards issued by other teachers.</p>
+    <table><thead><tr><th>Week</th><th>Student</th><th>Card</th><th>Reason</th><th>By</th></tr></thead>
+    <tbody>${all.map(({s,c})=>`<tr><td>${c.week}</td><td>${s.name}</td>
+      <td><span class="pill ${c.color[0]}">${c.color}</span></td>
+      <td>${esc(c.reason)}</td><td>${esc(c.by)}</td></tr>`).join("")||"<tr><td colspan=5><i>No cards yet.</i></td></tr>"}</tbody></table>`;
+}
+function viewNeeds(){
+  const c=currentClass();
+  const flagged=c.students.filter(s=>s.flag);
+  return `<h2>Student Needs - ${c.name}</h2>
+    <p class="muted">As Form Tutor, attend to your students' issues each week.</p>
+    <ul class="needs">${flagged.length?flagged.map(s=>
+      `<li><b>${s.name}</b>: ${esc(s.flag)}
+        <button onclick="openStudent(${s.id},false)">Open</button>
+        <button class="primary" onclick="resolveNeed(${s.id})">Address</button></li>`
+    ).join(""):"<li><i>No outstanding needs. Good week.</i></li>"}</ul>`;
 }
 
-// ============ TESTS (administer) ============
-function renderTests(){
-  const list=document.getElementById("testList");
-  if(!state.tests.length){list.innerHTML="<p><i>No tests yet. Build one in the Test Builder.</i></p>";return;}
-  list.innerHTML=state.tests.map(t=>`
-    <div class="qitem">
-      <b>${t.title}</b> — ${t.questions.length} question(s)
-      <button class="primary" style="float:right" onclick="administer(${t.id})">Administer</button>
-    </div>`).join("");
+// ============================================================
+// TEST BUILDER (subject teacher only)
+// ============================================================
+function viewBuilder(){
+  return `<h2>Test Builder <small class="muted">- drag blocks from the left onto the test</small></h2>
+    <div class="row">
+      <label>Title: <input id="testTitle" type="text" value="${esc(state.draftTest.title)}"></label>
+      <button onclick="aiSuggest()">AI Suggest Question</button>
+      <button class="primary" onclick="saveTest()">Save Test</button>
+    </div>
+    <div class="builder">
+      <div class="palette"><h3>Question Blocks</h3>
+        <div class="block" draggable="true" data-type="mc">Multiple Choice</div>
+        <div class="block" draggable="true" data-type="tf">True / False</div>
+        <div class="block" draggable="true" data-type="sa">Short Answer</div>
+        <div class="block" draggable="true" data-type="es">Essay</div>
+      </div>
+      <div class="canvas">
+        <h3 id="canvasTitle">${esc(state.draftTest.title)}</h3>
+        <div class="drop" id="drop"></div>
+      </div>
+    </div>`;
 }
-function administer(id){
-  const t=state.tests.find(x=>x.id===id);
-  if(!t||!t.questions.length){toast("Test has no questions.");return;}
-  state.students.forEach(s=>{
-    // score = student ability + mood bonus + noise, bounded 0-100
-    const raw=s.ability*.7 + s.mood*.2 + (Math.random()*30-10);
-    const score=Math.max(0,Math.min(100,raw));
-    s.grades.push({testId:id,score});
-  });
-  toast(`"${t.title}" graded.`);
-  renderAll();
-}
-
-// ============ TEST BUILDER (drag & drop) ============
 let dragType=null;
 function initBuilder(){
   document.querySelectorAll(".palette .block").forEach(b=>{
     b.addEventListener("dragstart",e=>{
-      dragType=b.dataset.type;
-      b.classList.add("dragging");
+      dragType=b.dataset.type;b.classList.add("dragging");
       e.dataTransfer.effectAllowed="copy";
       e.dataTransfer.setData("text/plain",dragType);
     });
@@ -398,18 +548,23 @@ function initBuilder(){
   });
 }
 function addQuestion(type,seed){
-  const q={type,prompt:seed?.prompt||"",answer:"",options:seed?.options||(type==="mc"?["","","",""]:type==="tf"?["True","False"]:[]),correct:seed?.correct??0};
+  const q={type,
+    prompt:seed?.prompt||"",
+    answer:seed?.answer||"",
+    options:seed?.options||(type==="mc"?["","","",""]:type==="tf"?["True","False"]:[]),
+    correct:seed?.correct??0};
   state.draftTest.questions.push(q);
   renderDraft();
 }
 function renderDraft(){
   const drop=document.getElementById("drop");
+  if(!drop)return;
   if(!state.draftTest.questions.length){
-    drop.innerHTML='<p style="opacity:.5">Drop question blocks here…</p>';return;
+    drop.innerHTML='<p class="muted">Drop question blocks here...</p>';return;
   }
   drop.innerHTML=state.draftTest.questions.map((q,i)=>{
     const meta={mc:"Multiple Choice",tf:"True/False",sa:"Short Answer",es:"Essay"}[q.type];
-    let body=`<input placeholder="Question prompt…" value="${esc(q.prompt)}" oninput="upd(${i},'prompt',this.value)">`;
+    let body=`<input type="text" placeholder="Question prompt..." value="${esc(q.prompt)}" oninput="upd(${i},'prompt',this.value)">`;
     if(q.type==="mc"){
       body+=`<div class="opts">`+q.options.map((o,j)=>`
         <label>
@@ -421,122 +576,267 @@ function renderDraft(){
         <label><input type="radio" name="c${i}" ${q.correct===0?"checked":""} onchange="upd(${i},'correct',0)"> True</label>
         <label><input type="radio" name="c${i}" ${q.correct===1?"checked":""} onchange="upd(${i},'correct',1)"> False</label></div>`;
     } else if(q.type==="sa"){
-      body+=`<input placeholder="Expected answer" value="${esc(q.answer)}" oninput="upd(${i},'answer',this.value)">`;
+      body+=`<input type="text" placeholder="Expected answer (used as model answer)" value="${esc(q.answer)}" oninput="upd(${i},'answer',this.value)">`;
     } else {
-      body+=`<textarea rows="2" placeholder="Essay rubric / notes" oninput="upd(${i},'answer',this.value)">${esc(q.answer)}</textarea>`;
+      body+=`<textarea rows="2" placeholder="Essay rubric / model points" oninput="upd(${i},'answer',this.value)">${esc(q.answer)}</textarea>`;
     }
     return `<div class="qitem">
-      <button class="rm" onclick="rmQ(${i})">×</button>
+      <button class="rm" onclick="rmQ(${i})">x</button>
       <div class="meta">Q${i+1} · ${meta}</div>${body}</div>`;
   }).join("");
 }
-function esc(s){return String(s||"").replace(/[<>"&]/g,c=>({"<":"&lt;",">":"&gt;",'"':"&quot;","&":"&amp;"}[c]));}
+function esc(s){return String(s==null?"":s).replace(/[<>"&]/g,c=>({"<":"&lt;",">":"&gt;",'"':"&quot;","&":"&amp;"}[c]));}
 function upd(i,k,v){state.draftTest.questions[i][k]=v;}
 function updOpt(i,j,v){state.draftTest.questions[i].options[j]=v;}
 function rmQ(i){state.draftTest.questions.splice(i,1);renderDraft();}
 function saveTest(){
   if(!state.draftTest.questions.length){toast("Add at least one question.");return;}
   const id=state.tests.length+1;
-  state.tests.push({id,title:state.draftTest.title||"Untitled Test",
-    questions:JSON.parse(JSON.stringify(state.draftTest.questions))});
+  state.tests.push({id,
+    title:state.draftTest.title||"Untitled Test",
+    subject:state.subject,
+    questions:JSON.parse(JSON.stringify(state.draftTest.questions)),
+    assignments:{}    // classIdx -> {studentId -> {answers,scored,score}}
+  });
   state.draftTest={title:"Unit "+(state.tests.length+1)+" Quiz",questions:[]};
-  document.getElementById("testTitle").value=state.draftTest.title;
-  renderDraft();
-  toast("Test saved! View it under Tests.");
+  toast("Test saved. Administer it from Tests.");
+  showView("tests");
 }
 
-// ============ AI (Pollinations, keyless) ============
+// ============================================================
+// TESTS - administer (students take it)
+// ============================================================
+function viewTests(){
+  if(!state.tests.length)return `<h2>Tests</h2><p><i>No tests built. Open Test Builder.</i></p>`;
+  return `<h2>Tests</h2>${classPicker()}
+    <table><thead><tr><th>Title</th><th>Questions</th><th>Status</th><th></th></tr></thead>
+    <tbody>${state.tests.map(t=>{
+      const a=t.assignments[state.activeClassIdx];
+      const status=!a?"Not given":Object.values(a).every(x=>x.scored)?"Graded":"Awaiting grading";
+      return `<tr><td>${esc(t.title)}</td><td>${t.questions.length}</td><td>${status}</td>
+        <td>${!a?`<button class="primary" onclick="administer(${t.id})">Administer to ${currentClass().name}</button>`:
+          status==="Awaiting grading"?`<button class="primary" onclick="showView('grading')">Grade</button>`:`<small class="muted">done</small>`}</td></tr>`;
+    }).join("")}</tbody></table>`;
+}
+
+async function administer(testId){
+  const test=state.tests.find(t=>t.id===testId);
+  const cls=currentClass();
+  toast(`Administering "${test.title}" to ${cls.name}...`);
+  test.assignments[state.activeClassIdx]={};
+  for(const s of cls.students){
+    const answers=[];
+    for(const q of test.questions){
+      answers.push(await studentAnswer(s,q));
+    }
+    test.assignments[state.activeClassIdx][s.id]={answers,scored:false,score:0};
+  }
+  toast(`Test taken. Open Grading to mark.`);
+  showView("grading");
+}
+
+// Student answers a question based on ability + effort + mood.
+// MC/TF: probability of correct. SA/Essay: ask AI (Pollinations) with quality hint.
+async function studentAnswer(s,q){
+  const skill=(s.ability*.6 + s.effort*.25 + s.mood*.15)/100; // 0..1
+  if(q.type==="mc"){
+    if(Math.random()<skill)return q.correct;
+    // wrong pick
+    const wrongs=q.options.map((_,i)=>i).filter(i=>i!==q.correct);
+    return wrongs[Math.floor(Math.random()*wrongs.length)];
+  }
+  if(q.type==="tf"){
+    return Math.random()<skill?q.correct:(q.correct===0?1:0);
+  }
+  // SA / essay -> AI
+  const quality=skill<.35?"a weak, partly incorrect or off-topic":skill<.65?"a partial, somewhat correct":"a strong, mostly correct";
+  const len=q.type==="sa"?"in 1 short sentence":"in 2-3 sentences";
+  const ref=q.answer?` (model answer for reference: "${q.answer}")`:"";
+  const prompt=`You are a school student named ${s.name}. Write ${quality} answer ${len} to this exam question. Just the answer, no preamble.\nQuestion: ${q.prompt}${ref}`;
+  try{
+    const r=await fetch("https://text.pollinations.ai/"+encodeURIComponent(prompt));
+    const txt=(await r.text()).trim();
+    return txt.slice(0,400);
+  }catch(e){
+    return skill>.5?"(plausible attempt - AI unreachable)":"(blank - AI unreachable)";
+  }
+}
+
+// ============================================================
+// GRADING (teacher reviews student answers and returns scored test)
+// ============================================================
+function viewGrading(){
+  const pending=state.tests.filter(t=>{
+    const a=t.assignments[state.activeClassIdx];
+    return a && Object.values(a).some(x=>!x.scored);
+  });
+  if(!pending.length)return `<h2>Grading</h2>${classPicker()}<p><i>Nothing to grade in ${currentClass().name}.</i></p>`;
+  const t=pending[0];
+  const cls=currentClass();
+  const asn=t.assignments[state.activeClassIdx];
+  return `<h2>Grading - "${esc(t.title)}" (${cls.name})</h2>
+    ${classPicker()}
+    <p class="muted">Auto-marks for MC/TF are shown. Enter scores for written answers (0-100 weight applied evenly). Return tests when done.</p>
+    <div class="grading">${cls.students.map(s=>{
+      const sub=asn[s.id];
+      if(sub.scored)return "";
+      let preScore=0,manual=0,manualMax=0;
+      const blocks=t.questions.map((q,i)=>{
+        const ans=sub.answers[i];
+        if(q.type==="mc"){
+          const ok=ans===q.correct;preScore+=ok?100:0;
+          return `<div>Q${i+1} (MC): chose <i>${esc(q.options[ans]??"?")}</i> <span class="${ok?'auto-correct':'auto-wrong'}">${ok?"correct":"wrong"}</span></div>`;
+        }
+        if(q.type==="tf"){
+          const ok=ans===q.correct;preScore+=ok?100:0;
+          return `<div>Q${i+1} (TF): chose <i>${ans===0?"True":"False"}</i> <span class="${ok?'auto-correct':'auto-wrong'}">${ok?"correct":"wrong"}</span></div>`;
+        }
+        manualMax+=100;
+        return `<div>Q${i+1} (${q.type==="sa"?"Short":"Essay"}): <i>${esc(q.prompt)}</i>
+          <div class="resp">${esc(ans)}</div>
+          <label>Score (0-100): <input type="number" min="0" max="100" value="50" data-sid="${s.id}" data-qi="${i}" class="manualInput"></label></div>`;
+      }).join("");
+      return `<div class="student-ans">
+        <h3>${s.name}</h3>${blocks}
+        <button class="primary" onclick="finalize(${t.id},${s.id})">Mark &amp; Return</button>
+      </div>`;
+    }).join("")}</div>
+    <div class="row" style="justify-content:flex-end">
+      <button class="primary" onclick="finalizeAll(${t.id})">Mark &amp; Return All</button>
+    </div>`;
+}
+function finalize(testId,studentId){
+  const t=state.tests.find(x=>x.id===testId);
+  const asn=t.assignments[state.activeClassIdx];
+  const sub=asn[studentId];
+  let total=0,n=0;
+  t.questions.forEach((q,i)=>{
+    n++;
+    if(q.type==="mc"||q.type==="tf"){
+      total+=(sub.answers[i]===q.correct)?100:0;
+    }else{
+      const inp=document.querySelector(`.manualInput[data-sid="${studentId}"][data-qi="${i}"]`);
+      const v=inp?parseInt(inp.value,10):50;
+      total+=Math.max(0,Math.min(100,isNaN(v)?50:v));
+    }
+  });
+  const score=total/n;
+  sub.scored=true;sub.score=score;
+  const s=findStudent(studentId);
+  s.grades.push({testId,score});
+  toast(`${s.name}: ${score.toFixed(0)} returned.`);
+  showView("grading");
+}
+function finalizeAll(testId){
+  const t=state.tests.find(x=>x.id===testId);
+  const asn=t.assignments[state.activeClassIdx];
+  Object.keys(asn).forEach(sid=>{if(!asn[sid].scored)finalize(testId,+sid);});
+  showView("tests");
+}
+
+// ============================================================
+// AI question suggest (builder)
+// ============================================================
 async function aiSuggest(){
-  toast("Asking the muse…");
-  const topic=document.getElementById("lesson").textContent||"general knowledge";
-  const prompt=`Write ONE short multiple-choice quiz question for grade school students about: ${topic}. Reply in strict JSON: {"q":"...","options":["a","b","c","d"],"correct":0}. No prose.`;
+  toast("Asking the muse...");
+  const subj=state.subject||"general knowledge";
+  const prompt=`Write ONE short multiple-choice quiz question for a school ${subj} class. Reply in strict JSON: {"q":"...","options":["a","b","c","d"],"correct":0}. No prose.`;
   try{
     const r=await fetch("https://text.pollinations.ai/"+encodeURIComponent(prompt));
     const txt=await r.text();
     const m=txt.match(/\{[\s\S]*\}/);
-    if(!m)throw new Error("no json");
+    if(!m)throw 0;
     const j=JSON.parse(m[0]);
     addQuestion("mc",{prompt:j.q,options:j.options,correct:j.correct|0});
     toast("AI question added.");
   }catch(e){
-    addQuestion("mc",{prompt:"What is 1/2 + 1/4?",options:["1/6","3/4","2/6","1"],correct:1});
-    toast("AI unreachable — added a placeholder.");
+    addQuestion("mc",{prompt:"Sample: 1/2 + 1/4 = ?",options:["1/6","3/4","2/6","1"],correct:1});
+    toast("AI unreachable - placeholder added.");
   }
 }
 
-// ============ GRADES ============
-function renderGrades(){
-  document.getElementById("gyear").textContent=state.year;
-  const grid=document.getElementById("quarterGrid");
-  const overall=state.students.reduce((a,s)=>a+avg(s),0)/state.students.length||0;
+// ============================================================
+// GRADES
+// ============================================================
+function viewGrades(){
+  const cls=currentClass();
+  const overall=cls.students.reduce((a,s)=>a+avg(s),0)/cls.students.length||0;
   if(state.quarterAverages[state.quarter-1]===null)state.quarterAverages[state.quarter-1]=overall;
-  grid.innerHTML=[1,2,3,4].map(q=>{
-    const v=state.quarterAverages[q-1];
-    const cur=q===state.quarter;
-    const val=v===null?"—":v.toFixed(1);
-    const pct=v===null?0:Math.max(0,Math.min(100,v));
-    return `<div class="q" style="${cur?'outline:2px solid var(--accent)':''}">
-      <h4>Quarter ${q}${cur?" (current)":""}</h4>
-      <div>Class avg: <b>${val}</b></div>
-      <div class="bar"><div style="width:${pct}%"></div></div>
-    </div>`;
-  }).join("");
+  return `<h2>Quarterly Grades - Year ${state.year}</h2>${classPicker()}
+    <div class="quarter">${[1,2,3,4].map(q=>{
+      const v=state.quarterAverages[q-1];const cur=q===state.quarter;
+      const val=v===null?"-":v.toFixed(1);const pct=v===null?0:Math.max(0,Math.min(100,v));
+      return `<div class="q" style="${cur?'outline:2px solid var(--accent)':''}">
+        <h4>Quarter ${q}${cur?" (current)":""}</h4>
+        <div>Class avg: <b>${val}</b></div>
+        <div class="bar"><div style="width:${pct}%"></div></div></div>`;
+    }).join("")}</div>`;
 }
 
-// ============ TIME ============
+// ============================================================
+// TIME
+// ============================================================
+const NEEDS=["seems withdrawn","missed homework","argued with a classmate","asked about extra help","mentioned trouble at home","fell asleep in class","forgot supplies repeatedly"];
+
 function advanceDay(){
-  // small mood drift
-  state.students.forEach(s=>s.mood=Math.max(0,Math.min(100,s.mood+(Math.random()*6-3))));
+  state.classes.forEach(c=>c.students.forEach(s=>{
+    s.mood=clamp(s.mood+(Math.random()*6-3));
+    s.effort=clamp(s.effort+(Math.random()*4-2));
+  }));
   state.dayIdx++;
-  if(state.dayIdx>=DAYS.length){state.dayIdx=0;state.week++;checkQuarter();}
-  renderAll();
+  if(state.dayIdx>=DAYS.length){state.dayIdx=0;state.week++;weeklyTick();}
+  renderHud();refreshCurrentView();
 }
 function advanceWeek(){
   for(let i=0;i<5;i++){
-    state.students.forEach(s=>s.mood=Math.max(0,Math.min(100,s.mood+(Math.random()*6-3))));
+    state.classes.forEach(c=>c.students.forEach(s=>{
+      s.mood=clamp(s.mood+(Math.random()*6-3));
+      s.effort=clamp(s.effort+(Math.random()*4-2));
+    }));
   }
-  state.dayIdx=0;state.week++;
-  checkQuarter();
-  renderAll();
+  state.dayIdx=0;state.week++;weeklyTick();
+  renderHud();refreshCurrentView();
 }
-function checkQuarter(){
-  // 9 weeks per quarter
-  const qWeek=((state.week-1)%9)+1;
-  const newQuarter=Math.floor((state.week-1)/9)+1;
-  if(newQuarter>state.quarter){
-    state.quarterAverages[state.quarter-1]=
-      state.students.reduce((a,s)=>a+avg(s),0)/state.students.length||0;
-    state.quarter=newQuarter;
-    if(state.quarter>4){
-      toast(`Year ${state.year} complete!`);
-      state.year++;state.quarter=1;state.week=1;
-      state.quarterAverages=[null,null,null,null];
-      state.students.forEach(s=>s.grades=[]);
-    }else{
-      toast(`Quarter ${state.quarter} begins.`);
+function weeklyTick(){
+  // form tutors: each week, 0-3 students get a "need"
+  if(state.role==="tutor"){
+    const cls=state.classes[0];
+    const n=Math.floor(Math.random()*4);
+    for(let i=0;i<n;i++){
+      const s=cls.students[Math.floor(Math.random()*cls.students.length)];
+      if(!s.flag)s.flag=NEEDS[Math.floor(Math.random()*NEEDS.length)];
     }
   }
-  // rank up
-  if(state.rep>=30&&state.rank==="Substitute"){state.rank="Junior Teacher";toast("Promoted to Junior Teacher!");}
-  if(state.rep>=70&&state.rank==="Junior Teacher"){state.rank="Senior Teacher";toast("Promoted to Senior Teacher!");}
+  // quarter / year roll
+  const newQuarter=Math.floor((state.week-1)/9)+1;
+  if(newQuarter>state.quarter){
+    const cls=currentClass();
+    state.quarterAverages[state.quarter-1]=
+      cls.students.reduce((a,s)=>a+avg(s),0)/cls.students.length||0;
+    state.quarter=newQuarter;
+    if(state.quarter>4){
+      toast(`Year ${state.year} complete.`);
+      state.year++;state.quarter=1;state.week=1;
+      state.quarterAverages=[null,null,null,null];
+      state.classes.forEach(c=>c.students.forEach(s=>s.grades=[]));
+    }else toast(`Quarter ${state.quarter} begins.`);
+  }
+  if(state.rep>=30&&state.rank==="Probationary"){state.rank="Junior Teacher";toast("Promoted: Junior Teacher.");}
+  if(state.rep>=70&&state.rank==="Junior Teacher"){state.rank="Senior Teacher";toast("Promoted: Senior Teacher.");}
+}
+function clamp(v){return Math.max(0,Math.min(100,v));}
+function refreshCurrentView(){
+  const on=document.querySelector("nav.side button.on");
+  if(on)showView(on.dataset.view);
 }
 
-// ============ UTIL ============
+// ============================================================
+// UTIL
+// ============================================================
 function toast(msg){
   const t=document.createElement("div");t.className="toast";t.textContent=msg;
   document.body.appendChild(t);setTimeout(()=>t.remove(),3000);
 }
-function renderAll(){renderHud();renderSeats();
-  const active=document.querySelector("nav.side button.on")?.dataset.view;
-  if(active==="roster")renderRoster();
-  if(active==="tests")renderTests();
-  if(active==="grades")renderGrades();
-  if(active==="builder")renderDraft();
-}
-
-window.addEventListener("DOMContentLoaded",()=>{
-  initBuilder();
-});
 </script>
 </body>
 </html>
