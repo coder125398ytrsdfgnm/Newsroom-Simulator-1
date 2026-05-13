@@ -109,12 +109,29 @@
   .bar{height:10px;background:#000;border-radius:5px;overflow:hidden;margin-top:.3em}
   .bar>div{height:100%;background:var(--green)}
 
-  .grading .student-ans{background:#1b1410;border:1px solid #333;border-radius:6px;
-    padding:.6em;margin:.5em 0}
-  .grading .student-ans .resp{background:#0e0a07;padding:.4em;border-radius:4px;
-    margin:.3em 0;white-space:pre-wrap;font-family:Georgia,serif}
-  .auto-correct{color:var(--green);font-weight:bold}
-  .auto-wrong{color:var(--red);font-weight:bold}
+  /* grading paper frame */
+  .pager{display:flex;align-items:center;justify-content:space-between;
+    margin:.6em 0;gap:.5em}
+  .pager .arrow{font-size:1.4em;min-width:3em}
+  .paper{background:#f7efd9;color:#1b1410;border:1px solid #000;border-radius:6px;
+    padding:1.2em 1.5em;font-family:Georgia,"Times New Roman",serif;
+    box-shadow:0 6px 16px rgba(0,0,0,.5);position:relative}
+  .paper:before{content:"";position:absolute;left:1em;top:0;bottom:0;
+    border-left:1px solid #d9a441;opacity:.6}
+  .paper h3{color:#7a4a1f;margin:0 0 .3em 0;border-bottom:1px solid #c9a45c;padding-bottom:.2em}
+  .paper .qp{margin:.8em 0;padding-left:.4em}
+  .paper .qp .prompt{font-weight:bold}
+  .paper .qp .resp{background:#fff;border:1px dashed #888;padding:.4em .6em;
+    margin:.3em 0;white-space:pre-wrap;font-family:"Comic Sans MS","Bradley Hand",cursive;
+    color:#222;min-height:1.5em}
+  .paper .qp .scorer{margin-top:.3em;display:flex;align-items:center;gap:.4em}
+  .paper .qp .scorer input{width:5em;background:#fff;color:#000;border:1px solid #555}
+  .paper .qp .scorer .max{opacity:.6}
+  .paper .stamp{position:absolute;top:1em;right:1em;border:3px double #c0392b;
+    color:#c0392b;padding:.2em .6em;border-radius:6px;transform:rotate(-8deg);
+    font-weight:bold;letter-spacing:1px;font-size:1.1em;display:none}
+  .paper.graded .stamp{display:block}
+  .paper .total{margin-top:1em;font-size:1.1em;font-weight:bold;color:#7a4a1f}
 
   .needs li{margin:.3em 0}
 
@@ -622,116 +639,143 @@ function viewTests(){
 async function administer(testId){
   const test=state.tests.find(t=>t.id===testId);
   const cls=currentClass();
-  toast(`Administering "${test.title}" to ${cls.name}...`);
+  const overlay=showBusy(`Administering "${test.title}" to ${cls.name}...`);
   test.assignments[state.activeClassIdx]={};
+  let done=0,total=cls.students.length*test.questions.length;
   for(const s of cls.students){
     const answers=[];
     for(const q of test.questions){
       answers.push(await studentAnswer(s,q));
+      done++;overlay.update(`Students writing... ${Math.floor(done/total*100)}%`);
     }
-    test.assignments[state.activeClassIdx][s.id]={answers,scored:false,score:0};
+    test.assignments[state.activeClassIdx][s.id]={
+      answers,
+      perQ:test.questions.map(()=>null),
+      scored:false,score:0
+    };
   }
-  toast(`Test taken. Open Grading to mark.`);
+  overlay.close();
+  toast(`Tests collected. Open Grading.`);
+  state.gradingPage=0;
   showView("grading");
 }
 
-// Student answers a question based on ability + effort + mood.
-// MC/TF: probability of correct. SA/Essay: ask AI (Pollinations) with quality hint.
+// Student attempts a question. AI is used for written answers; MC/TF use skill probability.
 async function studentAnswer(s,q){
   const skill=(s.ability*.6 + s.effort*.25 + s.mood*.15)/100; // 0..1
   if(q.type==="mc"){
-    if(Math.random()<skill)return q.correct;
-    // wrong pick
-    const wrongs=q.options.map((_,i)=>i).filter(i=>i!==q.correct);
-    return wrongs[Math.floor(Math.random()*wrongs.length)];
+    const idx=Math.random()<skill?q.correct
+      :q.options.map((_,i)=>i).filter(i=>i!==q.correct)[Math.floor(Math.random()*(q.options.length-1))]||0;
+    return {pick:idx,text:q.options[idx]||""};
   }
   if(q.type==="tf"){
-    return Math.random()<skill?q.correct:(q.correct===0?1:0);
+    const idx=Math.random()<skill?q.correct:(q.correct===0?1:0);
+    return {pick:idx,text:idx===0?"True":"False"};
   }
-  // SA / essay -> AI
   const quality=skill<.35?"a weak, partly incorrect or off-topic":skill<.65?"a partial, somewhat correct":"a strong, mostly correct";
   const len=q.type==="sa"?"in 1 short sentence":"in 2-3 sentences";
   const ref=q.answer?` (model answer for reference: "${q.answer}")`:"";
-  const prompt=`You are a school student named ${s.name}. Write ${quality} answer ${len} to this exam question. Just the answer, no preamble.\nQuestion: ${q.prompt}${ref}`;
+  const prompt=`You are a school student named ${s.name}. Write ${quality} answer ${len} to this exam question. Reply with just the answer text, no preamble, no quotation marks.\nQuestion: ${q.prompt}${ref}`;
   try{
     const r=await fetch("https://text.pollinations.ai/"+encodeURIComponent(prompt));
-    const txt=(await r.text()).trim();
-    return txt.slice(0,400);
+    const txt=(await r.text()).trim().replace(/^["']|["']$/g,"");
+    return {text:txt.slice(0,400)};
   }catch(e){
-    return skill>.5?"(plausible attempt - AI unreachable)":"(blank - AI unreachable)";
+    return {text:skill>.5?"(plausible attempt - AI unreachable)":"(left mostly blank - AI unreachable)"};
   }
 }
 
 // ============================================================
-// GRADING (teacher reviews student answers and returns scored test)
+// GRADING - paginated paper, one student per page, teacher scores every question
 // ============================================================
 function viewGrading(){
-  const pending=state.tests.filter(t=>{
-    const a=t.assignments[state.activeClassIdx];
-    return a && Object.values(a).some(x=>!x.scored);
-  });
-  if(!pending.length)return `<h2>Grading</h2>${classPicker()}<p><i>Nothing to grade in ${currentClass().name}.</i></p>`;
-  const t=pending[0];
+  const taken=state.tests.filter(t=>t.assignments[state.activeClassIdx]);
+  if(!taken.length)return `<h2>Grading</h2>${classPicker()}<p><i>No tests have been taken by ${currentClass().name}.</i></p>`;
+  // pick first test with unscored work, else first taken test
+  const t=taken.find(t=>Object.values(t.assignments[state.activeClassIdx]).some(x=>!x.scored))||taken[0];
   const cls=currentClass();
   const asn=t.assignments[state.activeClassIdx];
-  return `<h2>Grading - "${esc(t.title)}" (${cls.name})</h2>
+  if(state.gradingPage==null||state.gradingPage>=cls.students.length)state.gradingPage=0;
+  const idx=state.gradingPage;
+  const s=cls.students[idx];
+  const sub=asn[s.id];
+  const meta={mc:"Multiple Choice",tf:"True/False",sa:"Short Answer",es:"Essay"};
+  const qBlocks=t.questions.map((q,i)=>{
+    const ans=sub.answers[i]||{};
+    const respText=q.type==="mc"||q.type==="tf"?
+      `Chose: <i>${esc(ans.text||"(no answer)")}</i>`:esc(ans.text||"(left blank)");
+    const cur=sub.perQ[i];
+    return `<div class="qp">
+      <div class="prompt">Q${i+1}. ${esc(q.prompt)} <small style="opacity:.6">(${meta[q.type]})</small></div>
+      ${q.type==="mc"?`<div style="font-size:.85em;opacity:.7">Options: ${q.options.map((o,j)=>`${j===q.correct?"<b>":""}${esc(o)}${j===q.correct?" (key)</b>":""}`).join(" / ")}</div>`:""}
+      ${q.type==="tf"?`<div style="font-size:.85em;opacity:.7">Key: <b>${q.correct===0?"True":"False"}</b></div>`:""}
+      ${(q.type==="sa"||q.type==="es")&&q.answer?`<div style="font-size:.85em;opacity:.7">Model: <i>${esc(q.answer)}</i></div>`:""}
+      <div class="resp">${respText}</div>
+      <div class="scorer">
+        <label>Mark:</label>
+        <input type="number" min="0" max="100" value="${cur==null?"":cur}"
+          ${sub.scored?"disabled":""}
+          oninput="setQScore(${t.id},${s.id},${i},this.value)"
+          placeholder="0-100">
+        <span class="max">/ 100</span>
+      </div>
+    </div>`;
+  }).join("");
+  const totalSoFar=sub.perQ.reduce((a,v)=>a+(v==null?0:v),0);
+  const marked=sub.perQ.filter(v=>v!=null).length;
+  const avgSoFar=marked?(totalSoFar/marked):0;
+  const allMarked=marked===t.questions.length;
+  return `<h2>Grading - "${esc(t.title)}" (${currentClass().name})</h2>
     ${classPicker()}
-    <p class="muted">Auto-marks for MC/TF are shown. Enter scores for written answers (0-100 weight applied evenly). Return tests when done.</p>
-    <div class="grading">${cls.students.map(s=>{
-      const sub=asn[s.id];
-      if(sub.scored)return "";
-      let preScore=0,manual=0,manualMax=0;
-      const blocks=t.questions.map((q,i)=>{
-        const ans=sub.answers[i];
-        if(q.type==="mc"){
-          const ok=ans===q.correct;preScore+=ok?100:0;
-          return `<div>Q${i+1} (MC): chose <i>${esc(q.options[ans]??"?")}</i> <span class="${ok?'auto-correct':'auto-wrong'}">${ok?"correct":"wrong"}</span></div>`;
-        }
-        if(q.type==="tf"){
-          const ok=ans===q.correct;preScore+=ok?100:0;
-          return `<div>Q${i+1} (TF): chose <i>${ans===0?"True":"False"}</i> <span class="${ok?'auto-correct':'auto-wrong'}">${ok?"correct":"wrong"}</span></div>`;
-        }
-        manualMax+=100;
-        return `<div>Q${i+1} (${q.type==="sa"?"Short":"Essay"}): <i>${esc(q.prompt)}</i>
-          <div class="resp">${esc(ans)}</div>
-          <label>Score (0-100): <input type="number" min="0" max="100" value="50" data-sid="${s.id}" data-qi="${i}" class="manualInput"></label></div>`;
-      }).join("");
-      return `<div class="student-ans">
-        <h3>${s.name}</h3>${blocks}
-        <button class="primary" onclick="finalize(${t.id},${s.id})">Mark &amp; Return</button>
-      </div>`;
-    }).join("")}</div>
-    <div class="row" style="justify-content:flex-end">
-      <button class="primary" onclick="finalizeAll(${t.id})">Mark &amp; Return All</button>
+    <p class="muted">Flip through each paper with the arrows. Score every question yourself, then return the test.</p>
+    <div class="pager">
+      <button class="arrow" onclick="gradePage(-1,${t.id})" ${idx===0?"disabled":""}>&larr;</button>
+      <div><b>Paper ${idx+1} / ${cls.students.length}</b> · ${s.name} ${sub.scored?`<small style="color:var(--green)">(returned: ${sub.score.toFixed(0)})</small>`:`<small class="muted">(${marked}/${t.questions.length} marked)</small>`}</div>
+      <button class="arrow" onclick="gradePage(1,${t.id})" ${idx===cls.students.length-1?"disabled":""}>&rarr;</button>
+    </div>
+    <div class="paper ${sub.scored?"graded":""}">
+      <div class="stamp">RETURNED</div>
+      <h3>${esc(t.title)}</h3>
+      <div style="opacity:.7;font-size:.9em">Name: <b>${s.name}</b> · Class: ${currentClass().name}</div>
+      ${qBlocks}
+      <div class="total">Current average: ${marked?avgSoFar.toFixed(1):"-"} / 100</div>
+    </div>
+    <div class="row" style="justify-content:space-between;margin-top:1em">
+      <div>
+        <button onclick="gradePage(-1,${t.id})" ${idx===0?"disabled":""}>&larr; Prev student</button>
+        <button onclick="gradePage(1,${t.id})" ${idx===cls.students.length-1?"disabled":""}>Next student &rarr;</button>
+      </div>
+      <div>
+        ${sub.scored?"":`<button class="primary" onclick="returnPaper(${t.id},${s.id})">Mark &amp; Return Paper</button>`}
+      </div>
     </div>`;
 }
-function finalize(testId,studentId){
+function setQScore(testId,sid,qi,val){
   const t=state.tests.find(x=>x.id===testId);
-  const asn=t.assignments[state.activeClassIdx];
-  const sub=asn[studentId];
-  let total=0,n=0;
-  t.questions.forEach((q,i)=>{
-    n++;
-    if(q.type==="mc"||q.type==="tf"){
-      total+=(sub.answers[i]===q.correct)?100:0;
-    }else{
-      const inp=document.querySelector(`.manualInput[data-sid="${studentId}"][data-qi="${i}"]`);
-      const v=inp?parseInt(inp.value,10):50;
-      total+=Math.max(0,Math.min(100,isNaN(v)?50:v));
-    }
-  });
-  const score=total/n;
-  sub.scored=true;sub.score=score;
-  const s=findStudent(studentId);
-  s.grades.push({testId,score});
-  toast(`${s.name}: ${score.toFixed(0)} returned.`);
+  const sub=t.assignments[state.activeClassIdx][sid];
+  if(val===""||val==null){sub.perQ[qi]=null;return;}
+  let v=parseInt(val,10);if(isNaN(v))v=0;
+  sub.perQ[qi]=Math.max(0,Math.min(100,v));
+}
+function gradePage(delta,testId){
+  const cls=currentClass();
+  state.gradingPage=Math.max(0,Math.min(cls.students.length-1,(state.gradingPage||0)+delta));
   showView("grading");
 }
-function finalizeAll(testId){
+function returnPaper(testId,sid){
   const t=state.tests.find(x=>x.id===testId);
-  const asn=t.assignments[state.activeClassIdx];
-  Object.keys(asn).forEach(sid=>{if(!asn[sid].scored)finalize(testId,+sid);});
-  showView("tests");
+  const sub=t.assignments[state.activeClassIdx][sid];
+  if(sub.perQ.some(v=>v==null)){toast("Mark every question first.");return;}
+  const score=sub.perQ.reduce((a,b)=>a+b,0)/sub.perQ.length;
+  sub.scored=true;sub.score=score;
+  const s=findStudent(sid);
+  s.grades.push({testId,score});
+  toast(`${s.name}: ${score.toFixed(0)} returned.`);
+  // auto-advance to next unscored paper
+  const cls=currentClass();
+  const next=cls.students.findIndex((st,i)=>i>state.gradingPage && !t.assignments[state.activeClassIdx][st.id].scored);
+  if(next>=0)state.gradingPage=next;
+  showView("grading");
 }
 
 // ============================================================
@@ -836,6 +880,15 @@ function refreshCurrentView(){
 function toast(msg){
   const t=document.createElement("div");t.className="toast";t.textContent=msg;
   document.body.appendChild(t);setTimeout(()=>t.remove(),3000);
+}
+function showBusy(msg){
+  const m=document.createElement("div");m.className="modal";
+  m.innerHTML=`<div class="box" style="text-align:center"><h3 id="busyMsg">${esc(msg)}</h3><p class="muted">Please wait...</p></div>`;
+  document.body.appendChild(m);
+  return {
+    update:(t)=>{const el=document.getElementById("busyMsg");if(el)el.textContent=t;},
+    close:()=>m.remove()
+  };
 }
 </script>
 </body>
