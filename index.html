@@ -469,92 +469,81 @@ function makeStudent(id,data){
 }
 
 // Ask the AI for a class roster. Parallel batches for speed + reliability.
-async function generateStudentRosterBatch(n,seedHint){
+// One combined boot-time call: roster + teachers in a single response.
+// Stories are NOT requested here - they fill in lazily in the background while you play.
+async function generateBootBundle(rosterSize,teacherCount,excludeSubject,onProgress){
   const voices=STUDENT_VOICES.map(v=>v.key).join("|");
   const pers=PERSONALITIES.join("|");
-  const prompt=`Generate ${n} fictional school students for a struggling US public school (varied cultural names: white, Black, Hispanic, Asian, Middle Eastern). ${seedHint}\nFor each student return: {"first":"<first name>","last":"<surname>","personality":"<one of: ${pers}>","voiceKey":"<one of: ${voices}>","story":"<ONE sentence (12-22 words) about what this student is going through right now - specific, grounded, varied: some neutral, some struggling, some thriving>"}\nReply as a JSON array of exactly ${n} objects.`;
-  const data=await aiJSON(prompt,{retries:2,timeout:30000});
-  if(!Array.isArray(data))return [];
-  return data.filter(d=>d&&d.first&&d.last&&d.personality&&d.voiceKey&&d.story);
-}
-async function generateStudentRoster(size,onProgress){
-  const batchSize=7;
-  const batches=Math.ceil(size/batchSize);
-  const hints=["Mix of 7th and 8th graders.","Include shy kids and class clowns.","Some bright students who hide it.","Include kids dealing with family stuff."];
-  const merged=[];
-  // Serial - Pollinations anonymous queue allows only 1 in-flight per IP.
-  for(let b=0;b<batches;b++){
-    const n=Math.min(batchSize,size-b*batchSize);
-    const hint=hints[b%hints.length];
-    const arr=await generateStudentRosterBatch(n,hint);
-    merged.push(...arr);
-    onProgress?.((b+1)/batches);
-  }
-  const seen=new Set();
-  return merged.filter(s=>{const k=(s.first+" "+s.last).toLowerCase();if(seen.has(k))return false;seen.add(k);return true;});
-}
-
-// Ask the AI for the other-subject teacher roster.
-async function generateTeacherRoster(count,excludeSubject){
   const subjects=["Mathematics","English","Science","History","Geography","Art","Music","P.E.","Drama","Computer Science"].filter(s=>s!==excludeSubject);
-  const prompt=`Generate ${count} fictional teachers at a struggling US public school. For each: {"name":"<honorific Surname e.g. 'Mr. Hollis', 'Dr. Reeves', 'Ms. Quinn'>","subject":"<unique subject from ${subjects.join("|")}>","strict":<number 0.1-0.9>,"style":"<one short phrase describing their teaching style, e.g. 'soft-spoken but firm'>"}. Use varied cultural surnames. Each subject must appear at most once. Reply as a JSON array.`;
-  const data=await aiJSON(prompt);
-  if(!Array.isArray(data))return null;
-  return data.filter(t=>t&&t.name&&t.subject);
+  const prompt=`Generate fictional data for a struggling US public school. Return a JSON object exactly like:
+{
+ "students":[ ${rosterSize} objects: {"first":"<first name>","last":"<surname>","personality":"<one of: ${pers}>","voiceKey":"<one of: ${voices}>"} ],
+ "teachers":[ ${teacherCount} objects: {"name":"<honorific Surname e.g. 'Mr. Hollis', 'Dr. Reeves'>","subject":"<unique subject from: ${subjects.join("|")}>","strict":<0.1-0.9>,"style":"<short phrase e.g. 'soft-spoken but firm'>"} ]
 }
-
-async function generateClassName(){
-  // not user-facing creative content per se, but keep it driven anyway
-  const t=await aiLine(`Reply with ONLY a single short class name like '7A','8C','9B' (one digit + one letter A-D). No quotes.`,4);
-  if(t&&/^[7-9][A-D]$/.test(t.trim()))return t.trim();
-  return null;
+Rules:
+- Diverse cultural names (white, Black, Hispanic, Asian, Middle Eastern, South Asian).
+- Each teacher subject must be unique.
+- Vary personalities and voices realistically.
+- Return ONLY the JSON object.`;
+  onProgress?.(.2);
+  const data=await aiJSON(prompt,{retries:5,timeout:90000});
+  onProgress?.(1);
+  if(!data||!Array.isArray(data.students)||!Array.isArray(data.teachers))return null;
+  return {
+    students:data.students.filter(d=>d&&d.first&&d.last&&d.personality&&d.voiceKey),
+    teachers:data.teachers.filter(t=>t&&t.name&&t.subject)
+  };
 }
-
-async function buildClass(size,onProgress){
-  let roster=await generateStudentRoster(size,onProgress);
-  // top up once if undersized
-  if(!roster||roster.length<Math.floor(size*.5)){
-    const extra=await generateStudentRoster(size-(roster?.length||0),onProgress);
-    if(extra&&extra.length)roster=(roster||[]).concat(extra);
-  }
-  // if everything failed, try one more time with a smaller batch (more likely to succeed)
-  if(!roster||roster.length===0){
-    const small=await generateStudentRoster(Math.min(10,size),onProgress);
-    if(small&&small.length)roster=small;
-  }
-  if(!roster||!roster.length)return null;
-  const name=await generateClassName()||"7A";
-  const students=[];
-  roster.slice(0,size).forEach((d,i)=>{
-    const s=makeStudent(i*97+Math.floor(Math.random()*97),d);
-    if(s)students.push(s);
-  });
-  if(!students.length)return null;
-  return {name,students};
+async function topUpStudents(needed){
+  if(needed<=0)return [];
+  const prompt=`Generate ${needed} more fictional school students. Each: {"first","last","personality":"<one of: ${PERSONALITIES.join("|")}>","voiceKey":"<one of: ${STUDENT_VOICES.map(v=>v.key).join("|")}>"}. Diverse cultural names. JSON array only.`;
+  const d=await aiJSON(prompt,{retries:3});
+  return Array.isArray(d)?d.filter(s=>s&&s.first&&s.last):[];
 }
 
 async function newCareer(role,name,subject,className){
-  const classes=[];
   const ov=showBusy("Starting the school year...");
   ov.setProgress(2);
-  if(role==="tutor"){
-    ov.update("Assembling your form class");
-    ov.sub("Twenty-odd kids, all at once");
-    const c=await buildClass(22,p=>ov.setProgress(5+p*55));
-    if(!c){ov.close();alert("Roster generation failed. The AI service may be slow right now - please try again.");return false;}
-    c.name=className||c.name;
-    classes.push(c);
-  }else{
-    for(let i=0;i<3;i++){
-      ov.update(`Assembling class ${i+1} of 3`);
-      ov.sub("Building roster...");
-      const startP=5+i*18;
-      const c=await buildClass(20,p=>ov.setProgress(startP+p*16));
-      if(c)classes.push(c);
-    }
-    if(!classes.length){ov.close();alert("Roster generation failed. The AI service may be slow right now - please try again.");return false;}
+  ov.update("Building the school");
+  ov.sub("Roster + faculty in one batch");
+  const totalStudents=role==="tutor"?22:60;
+  const teacherCount=7;
+  let bundle=await generateBootBundle(totalStudents,teacherCount,subject,p=>ov.setProgress(5+p*70));
+  if(!bundle||!bundle.students.length){
+    // one more try
+    bundle=await generateBootBundle(totalStudents,teacherCount,subject,p=>ov.setProgress(5+p*70));
   }
-  ov.setProgress(65);
+  if(!bundle||!bundle.students.length){
+    ov.close();
+    alert("AI is having a rough patch loading the school. Please try again in a minute.");
+    return false;
+  }
+  // top-up if undersized
+  if(bundle.students.length<Math.floor(totalStudents*.6)){
+    ov.update("Topping up the roster");
+    const extra=await topUpStudents(totalStudents-bundle.students.length);
+    bundle.students=bundle.students.concat(extra);
+  }
+  // dedupe by full name
+  const seen=new Set();
+  bundle.students=bundle.students.filter(s=>{const k=(s.first+" "+s.last).toLowerCase();if(seen.has(k))return false;seen.add(k);return true;});
+
+  ov.setProgress(80);ov.update("Seating the classes");ov.sub("");
+  const classes=[];
+  let idx=0;
+  if(role==="tutor"){
+    const studs=bundle.students.slice(0,22).map((d,i)=>makeStudent(idx++*97+i,d)).filter(Boolean);
+    classes.push({name:className||"7A",students:studs});
+  }else{
+    const classNames=["7A","8B","9A"];
+    for(let i=0;i<3;i++){
+      const slice=bundle.students.slice(i*20,i*20+20);
+      const studs=slice.map((d,j)=>makeStudent(idx++*97+j,d)).filter(Boolean);
+      if(studs.length)classes.push({name:classNames[i],students:studs});
+    }
+  }
+  if(!classes.length){ov.close();alert("Roster generation failed. Please try again.");return false;}
+
   state={
     role,name,subject:role==="subject"?subject:null,
     formClass:role==="tutor"?className:null,
@@ -571,31 +560,43 @@ async function newCareer(role,name,subject,className){
     selectedContact:null,
     lastMsgWeek:0,
     activity:[],
-    npcTeachers:[],            // populated from AI
-    pendingReplies:[]          // queued student/parent replies
+    npcTeachers:bundle.teachers,
+    pendingReplies:[]
   };
-  ov.update("Hiring the rest of the faculty");ov.sub("");
-  ov.setProgress(72);
-  let teachers=await generateTeacherRoster(7,state.subject);
-  if(!teachers||!teachers.length)teachers=await generateTeacherRoster(7,state.subject);
-  state.npcTeachers=teachers||[];
-  ov.setProgress(88);
-  ov.update("Reaching out to the first parents");
+  ov.setProgress(95);ov.update("Reaching out to the first parents");
   await seedContacts();
   ov.setProgress(100);
-  await new Promise(r=>setTimeout(r,180));
+  await new Promise(r=>setTimeout(r,150));
   ov.close();
+  // kick off background story filler - non-blocking
+  fillStoriesInBackground();
   return true;
 }
 
-// Seed two parent contacts whose kids have non-trivial stories (not random students).
+// ============ Background story filler =====================================
+// Stories make cards/replies feel grounded but are EXPENSIVE to generate.
+// We fill them lazily after boot, one at a time, in the background.
+let _storyFilling=false;
+async function fillStoriesInBackground(){
+  if(_storyFilling)return;_storyFilling=true;
+  try{
+    while(state){
+      const target=state.classes.flatMap(c=>c.students).find(s=>!s.story);
+      if(!target)break;
+      const v=STUDENT_VOICES.find(v=>v.key===target.voiceKey);
+      const line=await aiLine(`Write ONE grounded sentence (12-22 words) about what a school student named ${target.first} ${target.last} is currently going through. Personality: ${target.personality}. Style hint: ${v?v.style:""}. Plain prose, no quotes.`,260);
+      if(line){target.story=line;target.storyUpdatedWeek=state?.week||1;}
+      // light pacing - the queue already serializes, but breathe between calls
+      await new Promise(r=>setTimeout(r,150));
+    }
+  }finally{_storyFilling=false;}
+}
+
+// Seed two parent contacts (by storyless? doesn't matter - pick first two).
 async function seedContacts(){
   const pool=state.classes.flatMap(c=>c.students);
-  // pick the two most "narrative" students - by story length / keywords
-  const scored=pool.map(s=>({s,score:storySalience(s.story)}));
-  scored.sort((a,b)=>b.score-a.score);
-  const picks=scored.slice(0,2).map(x=>x.s);
-  for(const s of picks)spawnParentContact(s);
+  // Stories may not be loaded yet at this point; pick first two students.
+  for(const s of pool.slice(0,2))spawnParentContact(s);
 }
 function storySalience(story){
   if(!story)return 0;
@@ -1052,25 +1053,70 @@ function viewTests(){
 async function administer(testId){
   const test=state.tests.find(t=>t.id===testId);
   const cls=currentClass();
-  const overlay=showBusy(`Administering "${test.title}" to ${cls.name}...`);
+  const overlay=showBusy(`Administering "${test.title}"`);
+  overlay.sub(cls.name);
   test.assignments[state.activeClassIdx]={};
-  let done=0,total=cls.students.length*test.questions.length;
-  for(const s of cls.students){
-    const answers=[];
-    for(const q of test.questions){
-      answers.push(await studentAnswer(s,q));
-      done++;overlay.update(`Students writing... ${Math.floor(done/total*100)}%`);
-    }
+  // initialize empty submissions
+  cls.students.forEach(s=>{
     test.assignments[state.activeClassIdx][s.id]={
-      answers,
+      answers:test.questions.map(()=>({text:""})),
       perQ:test.questions.map(()=>null),
       scored:false,score:0
     };
+  });
+  // For each question, one combined AI call for ALL students at once.
+  for(let qi=0;qi<test.questions.length;qi++){
+    const q=test.questions[qi];
+    overlay.setProgress((qi/test.questions.length)*100);
+    overlay.update(`Question ${qi+1} of ${test.questions.length}`);
+    if(q.type==="mc"||q.type==="tf"){
+      // No AI needed - picks based on ability probability.
+      cls.students.forEach(s=>{
+        const ability=(s.ability*.7+s.effort*.2+s.mood*.1)/100;
+        let idx;
+        if(q.type==="mc"){
+          idx=Math.random()<ability?q.correct
+            :q.options.map((_,i)=>i).filter(i=>i!==q.correct)[Math.floor(Math.random()*Math.max(1,q.options.length-1))]??0;
+        }else{
+          idx=Math.random()<ability?q.correct:(q.correct===0?1:0);
+        }
+        test.assignments[state.activeClassIdx][s.id].answers[qi]={pick:idx,text:q.type==="mc"?(q.options[idx]||""):(idx===0?"True":"False")};
+      });
+      continue;
+    }
+    // Written (sa/es): one AI call for the whole class
+    const answers=await classWrittenAnswers(cls.students,q);
+    cls.students.forEach((s,i)=>{
+      const text=answers[i];
+      test.assignments[state.activeClassIdx][s.id].answers[qi]={text:text||"(left blank)"};
+    });
   }
+  overlay.setProgress(100);
   overlay.close();
-  toast(`Tests collected. Open Grading.`);
+  toast("Tests collected. Open Grading.");
   state.gradingPage=0;
   showView("grading");
+}
+
+// One AI call - all students answer one written question. Saves N round-trips.
+async function classWrittenAnswers(students,q){
+  const items=students.map((s,i)=>{
+    const ability=(s.ability*.7+s.effort*.2+s.mood*.1)/100;
+    const correctness=ability<.3?"mostly wrong":ability<.55?"partial":ability<.8?"mostly correct with small slip":"correct and clear";
+    return `#${i+1} ${s.first} ${s.last}: voice=${s.voiceKey}, writing=${s.writing}/100, target=${correctness}`;
+  }).join("\n");
+  const len=q.type==="sa"?"1 sentence":"2-3 sentences";
+  const prompt=`For each student below, write their answer to the exam question. Each answer must match that student's writing level (drop apostrophes for weak writers, clean prose for strong writers - never advanced vocabulary, these are school kids) and the target correctness (wrong answers should actually be wrong, partial = right idea but a slip, etc.). ${len} max each. No quotation marks, no preamble.
+
+Question: ${q.prompt}${q.answer?`\n(Teacher's model answer for your reference - do NOT copy it: ${q.answer})`:""}
+
+Students:
+${items}
+
+Reply as a JSON array of exactly ${students.length} answer strings, in the same order as the numbered students.`;
+  const data=await aiJSON(prompt,{retries:3,timeout:60000});
+  if(Array.isArray(data))return data.map(x=>typeof x==="string"?x.slice(0,400):null);
+  return students.map(()=>null);
 }
 
 // Student attempts a question. Realism is the goal: skill drives correctness, voice drives style.
@@ -1716,7 +1762,89 @@ function updateTicker(){
   t.classList.remove("bump");void t.offsetWidth;t.classList.add("bump");
 }
 
-// Story-driven world simulation. Triggers are probabilistic; CONTENT is AI + story-tied.
+// Combined weekly simulation: 3 cards + 1 gossip + up to 2 story updates in ONE call.
+async function simulateWeek(){
+  const teachers=otherTeachers();
+  if(!teachers.length)return;
+  const notable=pickNotableStudents(6);
+  if(!notable.length)return;
+  // Pre-pick which students get cards and from whom, deterministically.
+  const plans=[];
+  const seen=new Set();
+  for(const t of notable){
+    if(plans.length>=3)break;
+    if(seen.has(t.s.id))continue;seen.add(t.s.id);
+    const avgStrict=teachers.reduce((a,t)=>a+t.strict,0)/teachers.length;
+    const color=pickCardColor(t.s,avgStrict);
+    const sorted=teachers.slice().sort((a,b)=>color==="yellow"?b.strict-a.strict:a.strict-b.strict);
+    const teacher=sorted[Math.floor(Math.random()*Math.min(3,sorted.length))];
+    plans.push({student:t.s,teacher,color});
+  }
+  // story-update targets: 2 highest salience among the cohort
+  const storyTargets=notable.slice(0,2).map(x=>x.s);
+
+  // Build the combined prompt.
+  const cardSpec=plans.map((p,i)=>
+    `card${i+1}: teacher='${p.teacher.name}' (${p.teacher.subject}, style: ${p.teacher.style}, strict ${p.teacher.strict.toFixed(1)}), student='${p.student.first} ${p.student.last}', color='${p.color}', story='${(p.student.story||"(no story yet)").replace(/'/g,"")}', mood=${p.student.mood.toFixed(0)}, effort=${p.student.effort.toFixed(0)}`
+  ).join("\n");
+  const storySpec=storyTargets.map((s,i)=>{
+    const last=s.cards.slice(-1)[0];
+    return `story${i+1}: student='${s.first} ${s.last}', personality='${s.personality}', currentStory='${(s.story||"(none)").replace(/'/g,"")}', recentMood=${s.mood.toFixed(0)}, recentEffort=${s.effort.toFixed(0)}${last?`, lastCard='${last.color}: ${last.reason.replace(/'/g,"")}'`:""}`;
+  }).join("\n");
+  const prompt=`A fictional struggling US public school. One week is ending. Generate, in a single JSON response:
+{
+ "cards": [ for each cardN above, a card-reason string of 6-14 words, terse and specific, connecting to that student's story or state. Green=positive, Yellow=trouble, Purple=exceptional. No period. ],
+ "gossip": "<one staffroom gossip sentence, 8-16 words, dry tone>",
+ "storyUpdates": [ for each storyN above, a rewritten one-sentence (12-22 words) story reflecting the recent state and card. No quotes. ]
+}
+
+Cards needed (${plans.length}):
+${cardSpec}
+
+Story updates needed (${storyTargets.length}):
+${storySpec}
+
+Return ONLY the JSON object.`;
+  const data=await aiJSON(prompt,{retries:4,timeout:75000});
+  if(!data){
+    // graceful degradation - drop everything (no placeholders)
+    return;
+  }
+  if(Array.isArray(data.cards)){
+    data.cards.forEach((reason,i)=>{
+      const p=plans[i];if(!p||!reason)return;
+      p.student.cards.push({color:p.color,reason,week:state.week,by:p.teacher.name});
+      if(p.color==="green")p.student.mood=clamp(p.student.mood+2);
+      if(p.color==="yellow")p.student.mood=clamp(p.student.mood-4);
+      if(p.color==="purple")p.student.mood=clamp(p.student.mood+6);
+      logActivity({type:"card",text:`${p.teacher.name} gave ${p.student.first} a ${p.color} card - "${reason}"`});
+    });
+  }
+  if(typeof data.gossip==="string" && data.gossip.trim()){
+    logActivity({type:"gossip",text:data.gossip.trim()});
+  }
+  if(Array.isArray(data.storyUpdates)){
+    data.storyUpdates.forEach((line,i)=>{
+      const s=storyTargets[i];if(!s||!line)return;
+      s.story=line;s.storyUpdatedWeek=state.week;
+    });
+  }
+
+  // Grades from other teachers - NO AI needed for these (just a score number).
+  const gradesCount=Math.min(notable.length,2);
+  for(let i=0;i<gradesCount;i++){
+    const s=notable[(i+plans.length)%notable.length].s;
+    const teacher=teachers[(i+state.week)%teachers.length];
+    const drift=(Math.random()*20-10);
+    const score=clamp(s.ability*.65+s.effort*.2+s.mood*.15+drift);
+    s.otherGrades=s.otherGrades||[];
+    s.otherGrades.push({subject:teacher.subject,by:teacher.name,score,week:state.week});
+    if(s.otherGrades.length>30)s.otherGrades.shift();
+    logActivity({type:"grade",text:`${teacher.name} returned ${teacher.subject} mark for ${s.first}: ${score.toFixed(0)}`});
+  }
+}
+
+// (legacy) story-driven world simulation kept for any direct caller; unused on day ticks now.
 async function simulateWorld(weekly){
   const teachers=otherTeachers();
   if(!teachers.length)return;
@@ -1809,22 +1937,22 @@ function viewActivity(){
 // TIME
 // ============================================================
 
-async function advanceDay(){
+// Daily tick: ZERO AI. Pure mechanic - mood/effort drift, day++. Instant.
+function advanceDay(){
   state.classes.forEach(c=>c.students.forEach(s=>{
     s.mood=clamp(s.mood+(Math.random()*6-3));
     s.effort=clamp(s.effort+(Math.random()*4-2));
   }));
   state.dayIdx++;
-  const rolled=state.dayIdx>=DAYS.length;
-  if(rolled){state.dayIdx=0;state.week++;await weeklyTick();}
-  const ov=showBusy("The school day rolls on...");
-  await simulateWorld(rolled);
-  await tickPendingReplies();
-  await tickMessages(false);
-  ov.close();
+  if(state.dayIdx>=DAYS.length){
+    state.dayIdx=0;state.week++;
+    // weekly events happen on the day roll-over - kick off async, don't block UI
+    runWeeklyAI();
+  }
   renderHud();buildNav();refreshCurrentView();
   saveGame(false);
 }
+// Weekly tick: ONE combined AI call. Player can keep playing while it resolves.
 async function advanceWeek(){
   for(let i=0;i<5;i++){
     state.classes.forEach(c=>c.students.forEach(s=>{
@@ -1833,14 +1961,22 @@ async function advanceWeek(){
     }));
   }
   state.dayIdx=0;state.week++;
-  const ov=showBusy("A new week begins...");
-  await weeklyTick();
-  await simulateWorld(true);
-  await tickPendingReplies();
-  await tickMessages(true);
-  ov.close();
   renderHud();buildNav();refreshCurrentView();
   saveGame(false);
+  await runWeeklyAI();
+}
+let _weeklyRunning=false;
+async function runWeeklyAI(){
+  if(_weeklyRunning)return;
+  _weeklyRunning=true;
+  try{
+    tickMissions();
+    await simulateWeek();          // one combined call - cards, gossip, story updates
+    await tickPendingReplies();
+    await tickMessages(true);
+    renderHud();buildNav();refreshCurrentView();
+    saveGame(false);
+  }finally{_weeklyRunning=false;}
 }
 async function weeklyTick(){
   tickMissions();
