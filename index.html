@@ -179,6 +179,22 @@
   .mission.done{opacity:.5;border-left-color:var(--green)}
   .mission.failed{opacity:.5;border-left-color:var(--red)}
 
+  /* staffroom feed */
+  .feed{background:var(--panel);border-radius:8px;padding:.4em 1em;max-height:65vh;overflow:auto}
+  .feed .item{padding:.5em 0;border-bottom:1px solid #3a2b20;display:flex;gap:.6em;align-items:flex-start}
+  .feed .when{opacity:.55;font-size:.75em;min-width:5em}
+  .feed .tag{font-size:.7em;padding:.05em .4em;border-radius:3px;background:#3a2b20;
+    letter-spacing:.5px;text-transform:uppercase;margin-right:.3em}
+  .feed .tag.card{background:#5a4028}
+  .feed .tag.grade{background:#2d4a3a}
+  .feed .tag.gossip{background:#3a2b48;color:#ddd}
+
+  /* ticker */
+  .ticker{background:#0e0a07;border-bottom:1px solid var(--accent);
+    padding:.3em 1em;font-size:.85em;font-style:italic;opacity:.85;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ticker b{color:var(--accent);font-style:normal;margin-right:.4em}
+
   .needs li{margin:.3em 0}
 
   .toast{position:fixed;bottom:1em;left:50%;transform:translateX(-50%);
@@ -263,6 +279,7 @@
       <button class="primary" onclick="advanceWeek()">Next Week</button>
     </div>
   </header>
+  <div class="ticker" id="ticker"><b>Hollow Herald:</b> The school year is underway at Rust Hollow #14.</div>
   <main>
     <nav class="side" id="sideNav"></nav>
     <section class="view" id="viewHost"></section>
@@ -426,6 +443,7 @@ function buildNav(){
   }
   html+=navBtn("messages","Messages"+msgBadge);
   html+=navBtn("missions","Missions"+misBadge);
+  html+=navBtn("activity","Staffroom Feed");
   html+=`<div class="sep"></div><button onclick="quitToMenu()">Quit to Menu</button>`;
   nav.innerHTML=html;
 }
@@ -447,6 +465,7 @@ function showView(v){
   else if(v==="grades")host.innerHTML=viewGrades();
   else if(v==="messages")host.innerHTML=viewMessages();
   else if(v==="missions")host.innerHTML=viewMissions();
+  else if(v==="activity")host.innerHTML=viewActivity();
 }
 
 // ============================================================
@@ -538,8 +557,11 @@ function openStudent(id,canAdminister){
     <h3>Card history</h3>
     <ul>${cardHist}</ul>
     ${adminBtns}
-    <h3>Recent grades</h3>
-    <div>${s.grades.slice(-5).map(g=>`<div>Test #${g.testId}: ${g.score.toFixed(0)}</div>`).join("")||"<i>None yet.</i>"}</div>
+    <h3>Recent grades (your tests)</h3>
+    <div>${s.grades.slice(-5).map(g=>`<div>Test #${g.testId}: ${fmtScore(g.score,g.scale||"percent")}</div>`).join("")||"<i>None yet.</i>"}</div>
+    ${(s.otherGrades||[]).length?`<h3>Other subjects</h3>
+      <div>${(s.otherGrades||[]).slice(-6).reverse().map(g=>
+        `<div><small class="muted">Wk ${g.week} · ${esc(g.subject)} (${esc(g.by)}):</small> ${g.score.toFixed(0)}</div>`).join("")}</div>`:""}
     <h3>Private notes</h3>
     <textarea id="noteBox" rows="3">${esc(s.notes||"")}</textarea>
     <div class="row" style="justify-content:flex-end">
@@ -1258,6 +1280,142 @@ function renderMission(m){
 }
 
 // ============================================================
+// LIVING WORLD - other teachers act on students; activity feed
+// ============================================================
+const OTHER_TEACHERS=[
+  {name:"Mr. Hollis",subject:"History",strict:.7},
+  {name:"Ms. Quinn",subject:"Science",strict:.4},
+  {name:"Mr. Bates",subject:"P.E.",strict:.5},
+  {name:"Mrs. Okafor",subject:"English",strict:.55},
+  {name:"Mr. Singh",subject:"Geography",strict:.3},
+  {name:"Ms. Ortega",subject:"Art",strict:.2},
+  {name:"Dr. Reeves",subject:"Mathematics",strict:.8},
+  {name:"Mr. Whitlock",subject:"Music",strict:.35}
+];
+function otherTeachers(){
+  // exclude the player's subject so we don't duplicate
+  return OTHER_TEACHERS.filter(t=>t.subject!==state.subject);
+}
+const REASONS={
+  green:[
+    "Helped a classmate through a tricky problem",
+    "Stayed focused all lesson",
+    "Strong improvement on the quiz",
+    "Volunteered to read aloud",
+    "Asked a thoughtful question",
+    "Cleaned up the lab without being asked",
+    "Made an effort with the homework"
+  ],
+  yellow:[
+    "Late to class twice this week",
+    "Disrupted the lesson chatting",
+    "Did not submit homework",
+    "Used a phone during the lesson",
+    "Talked back when corrected",
+    "Sloppy work, clearly rushed",
+    "Distracted others during a test"
+  ],
+  purple:[
+    "Outstanding presentation today",
+    "Tutored a struggling classmate after class",
+    "Asked a question that sparked the whole lesson",
+    "Wrote an essay far above expectation",
+    "Caught my mistake politely and respectfully",
+    "Brought in extra research on their own"
+  ]
+};
+const GOSSIP=[
+  "PTA meeting got tense over the new uniform policy.",
+  "The photocopier in the staffroom is broken again.",
+  "Principal Vance was overheard mentioning a budget review.",
+  "A pipe burst in B-corridor; cleaners are on it.",
+  "The cafeteria served decent fish today, for once.",
+  "Year 9 has a trip to the museum next month - chaperones wanted.",
+  "Substitute Mr. Fox was here today; the kids ran rings round him.",
+  "Someone's been hiding chairs in the AV cupboard. Mystery ongoing."
+];
+
+// Pick a card color biased by the student's current state and the teacher's strictness.
+function pickCardColor(student,strict){
+  const score=avg(student);
+  const moodScore=(student.mood+student.effort)/2;
+  // base weights
+  let g=10+(moodScore-50)*.4+Math.max(0,score-60)*.2;
+  let y=8+(50-moodScore)*.5+strict*15+Math.max(0,50-score)*.2;
+  let p=Math.max(0,(score-80)*.6+(moodScore-70)*.3);
+  // cap and normalise
+  const arr=[["green",Math.max(0,g)],["yellow",Math.max(0,y)],["purple",Math.max(0,p)]];
+  const total=arr.reduce((a,[,v])=>a+v,0);
+  let r=Math.random()*total;
+  for(const [c,v] of arr){r-=v;if(r<=0)return c;}
+  return "green";
+}
+
+function logActivity(entry){
+  state.activity=state.activity||[];
+  state.activity.unshift({...entry,week:state.week,day:DAYS[state.dayIdx]});
+  if(state.activity.length>200)state.activity.length=200;
+  updateTicker();
+}
+function updateTicker(){
+  const t=document.getElementById("ticker");if(!t)return;
+  const a=(state.activity||[])[0];
+  if(a)t.innerHTML=`<b>Wk ${a.week} ${a.day}:</b> ${esc(a.text)}`;
+}
+
+// Each affected class: roll for activity. Frequency is controlled.
+function simulateWorld(weekly){
+  // collect target classes - for tutors only their form class; for subject teachers, all their classes
+  const targetClasses=state.classes;
+  const teachers=otherTeachers();
+  const cardsBudget=weekly?Math.floor(2+Math.random()*4):(Math.random()<.55?1:0);
+  const gradesBudget=weekly?Math.floor(2+Math.random()*3):(Math.random()<.35?1:0);
+  const gossipBudget=weekly?(Math.random()<.7?1:0):0;
+  // OTHER TEACHERS issuing cards to students in YOUR class
+  for(let i=0;i<cardsBudget;i++){
+    const cls=targetClasses[Math.floor(Math.random()*targetClasses.length)];
+    const s=cls.students[Math.floor(Math.random()*cls.students.length)];
+    const teach=teachers[Math.floor(Math.random()*teachers.length)];
+    const color=pickCardColor(s,teach.strict);
+    const reason=REASONS[color][Math.floor(Math.random()*REASONS[color].length)];
+    s.cards.push({color,reason,week:state.week,by:teach.name});
+    if(color==="green")s.mood=clamp(s.mood+2);
+    if(color==="yellow")s.mood=clamp(s.mood-4);
+    if(color==="purple")s.mood=clamp(s.mood+6);
+    logActivity({type:"card",text:`${teach.name} gave ${s.first} a ${color} card - "${reason}"`});
+  }
+  // OTHER TEACHERS recording grades in their subjects (separate from your test grades)
+  for(let i=0;i<gradesBudget;i++){
+    const cls=targetClasses[Math.floor(Math.random()*targetClasses.length)];
+    const s=cls.students[Math.floor(Math.random()*cls.students.length)];
+    const teach=teachers[Math.floor(Math.random()*teachers.length)];
+    const noise=Math.random()*30-15;
+    const score=clamp(s.ability*.7+s.effort*.2+s.mood*.1+noise);
+    s.otherGrades=s.otherGrades||[];
+    s.otherGrades.push({subject:teach.subject,by:teach.name,score,week:state.week});
+    if(s.otherGrades.length>30)s.otherGrades.shift();
+    logActivity({type:"grade",text:`${teach.name} returned ${teach.subject} grade for ${s.first}: ${score.toFixed(0)}`});
+  }
+  // GOSSIP / staffroom news
+  for(let i=0;i<gossipBudget;i++){
+    const g=GOSSIP[Math.floor(Math.random()*GOSSIP.length)];
+    logActivity({type:"gossip",text:g});
+  }
+}
+
+function viewActivity(){
+  const a=state.activity||[];
+  return `<h2>Staffroom Feed</h2>
+    <p class="muted">What other teachers and the school have been up to. Pulled from the corkboard.</p>
+    <div class="feed">
+      ${a.length?a.map(e=>`<div class="item">
+        <div class="when">Wk ${e.week} ${e.day}</div>
+        <div><span class="tag ${e.type}">${e.type}</span>${esc(e.text)}</div>
+      </div>`).join(""):"<p><i>Nothing yet. Advance time.</i></p>"}
+    </div>`;
+}
+
+// ============================================================
 // TIME
 // ============================================================
 const NEEDS=["seems withdrawn","missed homework","argued with a classmate","asked about extra help","mentioned trouble at home","fell asleep in class","forgot supplies repeatedly"];
@@ -1268,7 +1426,9 @@ async function advanceDay(){
     s.effort=clamp(s.effort+(Math.random()*4-2));
   }));
   state.dayIdx++;
-  if(state.dayIdx>=DAYS.length){state.dayIdx=0;state.week++;weeklyTick();}
+  const rolled=state.dayIdx>=DAYS.length;
+  if(rolled){state.dayIdx=0;state.week++;weeklyTick();}
+  simulateWorld(rolled);
   await tickMessages(false);
   renderHud();buildNav();refreshCurrentView();
 }
@@ -1280,6 +1440,7 @@ async function advanceWeek(){
     }));
   }
   state.dayIdx=0;state.week++;weeklyTick();
+  simulateWorld(true);
   await tickMessages(true);
   renderHud();buildNav();refreshCurrentView();
 }
