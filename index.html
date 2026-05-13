@@ -133,6 +133,52 @@
   .paper.graded .stamp{display:block}
   .paper .total{margin-top:1em;font-size:1.1em;font-weight:bold;color:#7a4a1f}
 
+  /* tier buttons */
+  .tiers{display:flex;flex-wrap:wrap;gap:.25em;margin:.3em 0}
+  .tier{background:#fff;color:#1b1410;border:1px solid #888;border-radius:6px;
+    padding:.25em .6em;font:inherit;cursor:pointer;font-size:.85em}
+  .tier:hover{background:#f3e7d3}
+  .tier.sel{background:#7a4a1f;color:#fff;border-color:#5a3a1f}
+  .tier.t-perfect.sel{background:#2e7d32}
+  .tier.t-strong.sel{background:#558b2f}
+  .tier.t-partial.sel{background:#c9881a}
+  .tier.t-weak.sel{background:#b94a1a}
+  .tier.t-blank.sel{background:#5a1a1a}
+  .reroll{background:#3a2b20;color:var(--ink);border:1px solid #555;padding:.1em .5em;
+    font-size:.75em;border-radius:4px;cursor:pointer;margin-left:.5em}
+  .reroll:hover{background:#4a3828}
+
+  /* messages */
+  .msg-layout{display:grid;grid-template-columns:240px 1fr;gap:1em;height:calc(100vh - 160px)}
+  .contacts-list{background:var(--panel);border-radius:8px;overflow:auto;padding:.3em}
+  .contact-row{padding:.5em;border-bottom:1px solid #3a2b20;cursor:pointer;border-radius:4px}
+  .contact-row:hover{background:#241a14}
+  .contact-row.sel{background:#3a2b20}
+  .contact-row .who{font-weight:bold}
+  .contact-row .preview{font-size:.78em;opacity:.7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .contact-row .dot{display:inline-block;width:8px;height:8px;border-radius:50%;
+    background:var(--accent);margin-right:.3em;vertical-align:middle}
+  .thread{background:var(--panel);border-radius:8px;display:flex;flex-direction:column;overflow:hidden}
+  .thread .head{padding:.6em 1em;border-bottom:1px solid #3a2b20;background:#1b1410}
+  .thread .scroll{flex:1;overflow:auto;padding:.8em}
+  .bubble{max-width:78%;padding:.6em .8em;margin:.4em 0;border-radius:10px;
+    background:#3a2b20;color:var(--ink);white-space:pre-wrap;line-height:1.35}
+  .bubble.mine{background:#5a4028;margin-left:auto}
+  .bubble .sender{font-size:.7em;opacity:.65;margin-bottom:.2em}
+  .bubble.system{background:transparent;border:1px dashed var(--accent);
+    color:var(--accent);text-align:center;max-width:100%;font-size:.85em}
+  .reply-box{border-top:1px solid #3a2b20;padding:.5em;display:flex;gap:.4em;background:#1b1410}
+  .reply-box textarea{flex:1;min-height:48px;resize:vertical}
+  .badge{display:inline-block;background:var(--red);color:#fff;border-radius:10px;
+    padding:0 .4em;font-size:.7em;min-width:1.2em;text-align:center;margin-left:.3em}
+
+  /* missions inline */
+  .mission{background:#241a14;border-left:4px solid var(--accent);padding:.4em .6em;
+    border-radius:4px;margin:.3em 0;font-size:.85em}
+  .mission .title{font-weight:bold;color:var(--accent)}
+  .mission.done{opacity:.5;border-left-color:var(--green)}
+  .mission.failed{opacity:.5;border-left-color:var(--red)}
+
   .needs li{margin:.3em 0}
 
   .toast{position:fixed;bottom:1em;left:50%;transform:translateX(-50%);
@@ -230,17 +276,46 @@
 const FIRST=["Avery","Bren","Cleo","Dax","Eli","Fae","Gus","Hana","Iggy","Jo","Kit","Lex","Mia","Nico","Opal","Pip","Quinn","Rue","Sam","Tess","Una","Vic","Wren","Xan","Yael","Zane"];
 const LAST=["Park","Vega","Cole","Day","Reed","Ash","Lin","Moss","Wren","Holt","Frey","Bain","Ortiz","Kane"];
 const DAYS=["Mon","Tue","Wed","Thu","Fri"];
+
+// Personalities affect how a student writes and reacts.
+const PERSONALITIES=["diligent","lazy","eager","shy","sarcastic","anxious","confident","withdrawn","class-clown","perfectionist"];
+// Writing skill is separate from academic ability - some bright kids write sloppy, etc.
+function rollWriting(){return Math.max(15,Math.min(95,Math.round(30+Math.random()*60)));}
+
+// Parent voice profiles. Keep them grounded - small imperfections, not cartoons.
+const PARENT_VOICES=[
+  {key:"anxious",label:"Anxious",style:"uses short choppy sentences, one or two extra exclamation marks, no greeting, signs with first name only. Slightly worried tone. Realistic - not over the top."},
+  {key:"formal",label:"Formal",style:"addresses you as 'Ms. {teacher}'. Polite, full sentences, one paragraph maximum. Signs with title and surname. Never uses emoji."},
+  {key:"warm",label:"Warm",style:"chatty but brief, uses contractions, occasionally drops a small typo. Signs with first name. Asks how you're doing in passing."},
+  {key:"esl",label:"ESL",style:"non-native English: occasionally drops articles ('the','a'), uses simple present tense, sometimes mixes up word order. Warm and caring. Not a caricature - mostly correct but unmistakably learned-English."},
+  {key:"terse",label:"Terse",style:"one or two short sentences total. No greeting or signoff. Slightly cold but not rude."},
+  {key:"complaining",label:"Complaining",style:"passive-aggressive, asks pointed questions, hints at escalating. Uses polite words but accusing tone."}
+];
+const STUDENT_VOICES=[
+  {key:"shy",label:"Shy",style:"very short, polite, lowercase first letters sometimes, addresses you as 'Ms {teacher}', timid wording like 'sorry to bother'."},
+  {key:"slangy",label:"Slangy",style:"casual, lowercase, no punctuation, uses 'yo' or 'hey miss', drops vowels occasionally ('thx','rly'). Short."},
+  {key:"earnest",label:"Earnest",style:"polite, clear, somewhat formal for their age, asks specific questions. Signs first name."},
+  {key:"sloppy",label:"Sloppy",style:"poor spelling, misses apostrophes ('dont','cant'), runs sentences together. Means well."},
+  {key:"eloquent",label:"Eloquent",style:"surprisingly articulate for a school student. Still age-appropriate - no SAT words. Polite."}
+];
+
 let state=null;
 let selectedRole="tutor";
 
 function makeStudent(id){
+  const first=FIRST[id%FIRST.length];
+  const last=LAST[(id*3+7)%LAST.length];
   return {
     id,
-    name:FIRST[id%FIRST.length]+" "+LAST[(id*3+7)%LAST.length],
-    ability:25+Math.random()*60,    // hidden 0-100
+    name:first+" "+last,
+    first,last,
+    ability:25+Math.random()*60,    // hidden academic ability 0-100
+    writing:rollWriting(),           // hidden writing skill 0-100 (independent)
     mood:45+Math.random()*30,
     effort:40+Math.random()*40,
-    grades:[],                       // {testId,score}
+    personality:PERSONALITIES[Math.floor(Math.random()*PERSONALITIES.length)],
+    voiceKey:STUDENT_VOICES[Math.floor(Math.random()*STUDENT_VOICES.length)].key,
+    grades:[],                       // {testId,score,scale}
     cards:[],                        // {color,reason,week,by}
     notes:"",
     flag:null                        // form-tutor: pending need string
@@ -266,11 +341,28 @@ function newCareer(role,name,subject,className){
     rep:10,rank:"Probationary",
     classes,
     activeClassIdx:0,
-    tests:[],                 // {id,title,questions:[],subject,assignments:{classIdx:{studentId:{answers,scored,score}}}}
-    draftTest:{title:"Unit 1 Quiz",questions:[]},
-    quarterAverages:[null,null,null,null]
+    tests:[],
+    draftTest:{title:"Unit 1 Quiz",questions:[],scale:"percent",weight:1.0},
+    quarterAverages:[null,null,null,null],
+    contacts:[],              // {id,kind,name,voiceKey,studentId,relation,msgCount}
+    messages:[],              // {id,contactId,fromMe,subject,body,week,day,read,missionId}
+    missions:[],              // {id,title,desc,kind,studentId,createdWeek,deadlineWeek,status,reward,sourceMsg}
+    selectedContact:null,
+    lastMsgWeek:0
   };
+  seedContacts();
 }
+
+// Seed an initial contact or two so the inbox isn't empty.
+function seedContacts(){
+  const pool=state.classes.flatMap(c=>c.students);
+  const picks=shuffle(pool.slice()).slice(0,2);
+  picks.forEach(s=>{
+    spawnParentContact(s);
+  });
+  // first message arrives after first day/week advance, not on launch
+}
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
 
 // ============================================================
 // SETUP
@@ -313,6 +405,10 @@ function quitToMenu(){
 function buildNav(){
   const nav=document.getElementById("sideNav");
   const role=state.role;
+  const unread=state.messages.filter(m=>!m.fromMe&&!m.read).length;
+  const openMissions=state.missions.filter(m=>m.status==="open").length;
+  const msgBadge=unread?`<span class="badge">${unread}</span>`:"";
+  const misBadge=openMissions?`<span class="badge" style="background:var(--accent);color:#000">${openMissions}</span>`:"";
   let html="";
   if(role==="tutor"){
     html+=navBtn("formroom","Form Room");
@@ -328,6 +424,8 @@ function buildNav(){
     html+=navBtn("grading","Grading");
     html+=navBtn("grades","Quarterly Grades");
   }
+  html+=navBtn("messages","Messages"+msgBadge);
+  html+=navBtn("missions","Missions"+misBadge);
   html+=`<div class="sep"></div><button onclick="quitToMenu()">Quit to Menu</button>`;
   nav.innerHTML=html;
 }
@@ -347,6 +445,8 @@ function showView(v){
   else if(v==="tests")host.innerHTML=viewTests();
   else if(v==="grading")host.innerHTML=viewGrading();
   else if(v==="grades")host.innerHTML=viewGrades();
+  else if(v==="messages")host.innerHTML=viewMessages();
+  else if(v==="missions")host.innerHTML=viewMissions();
 }
 
 // ============================================================
@@ -468,8 +568,9 @@ function issueCard(id){
   if(color==="green"){s.mood=Math.min(100,s.mood+4);state.rep+=1;}
   if(color==="yellow"){s.mood=Math.max(0,s.mood-6);state.rep-=1;}
   if(color==="purple"){s.mood=Math.min(100,s.mood+10);state.rep+=3;}
+  checkCardMissions(s,color);
   toast(`${color} card issued to ${s.name}`);
-  closeModal();renderHud();showView(state.role==="tutor"?"formroom":"classroom");
+  closeModal();renderHud();buildNav();showView(state.role==="tutor"?"formroom":"classroom");
 }
 function resolveNeed(id){
   const s=findStudent(id);
@@ -522,9 +623,20 @@ function viewNeeds(){
 // TEST BUILDER (subject teacher only)
 // ============================================================
 function viewBuilder(){
+  const d=state.draftTest;
   return `<h2>Test Builder <small class="muted">- drag blocks from the left onto the test</small></h2>
     <div class="row">
-      <label>Title: <input id="testTitle" type="text" value="${esc(state.draftTest.title)}"></label>
+      <label>Title: <input id="testTitle" type="text" value="${esc(d.title)}"></label>
+      <label>Scale:
+        <select onchange="state.draftTest.scale=this.value">
+          ${SCALES.map(s=>`<option value="${s.key}" ${d.scale===s.key?"selected":""}>${s.label}</option>`).join("")}
+        </select>
+      </label>
+      <label>Weight:
+        <select onchange="state.draftTest.weight=parseFloat(this.value)">
+          ${[0.5,1.0,1.5,2.0].map(w=>`<option value="${w}" ${d.weight===w?"selected":""}>${w.toFixed(1)}x</option>`).join("")}
+        </select>
+      </label>
       <button onclick="aiSuggest()">AI Suggest Question</button>
       <button class="primary" onclick="saveTest()">Save Test</button>
     </div>
@@ -612,12 +724,46 @@ function saveTest(){
   state.tests.push({id,
     title:state.draftTest.title||"Untitled Test",
     subject:state.subject,
+    scale:state.draftTest.scale||"percent",
+    weight:state.draftTest.weight||1.0,
     questions:JSON.parse(JSON.stringify(state.draftTest.questions)),
-    assignments:{}    // classIdx -> {studentId -> {answers,scored,score}}
+    assignments:{}
   });
-  state.draftTest={title:"Unit "+(state.tests.length+1)+" Quiz",questions:[]};
+  state.draftTest={title:"Unit "+(state.tests.length+1)+" Quiz",questions:[],scale:"percent",weight:1.0};
   toast("Test saved. Administer it from Tests.");
   showView("tests");
+}
+
+// =============== SCALES =====================
+const SCALES=[
+  {key:"percent",label:"Percentage (0-100)"},
+  {key:"letter",label:"Letter (A+ to F)"},
+  {key:"points10",label:"Points / 10"},
+  {key:"stars",label:"Stars (1-5)"},
+  {key:"passfail",label:"Pass / Fail"}
+];
+// Each tier maps a 0-1 quality to a display string per scale and a percent value (used for averaging).
+const TIERS=[
+  {key:"perfect",label:"Perfect",pct:100},
+  {key:"strong",label:"Strong",pct:82},
+  {key:"partial",label:"Partial",pct:60},
+  {key:"weak",label:"Weak",pct:32},
+  {key:"blank",label:"Blank",pct:0}
+];
+function fmtScore(pct,scale){
+  pct=Math.max(0,Math.min(100,pct));
+  if(scale==="percent")return pct.toFixed(0);
+  if(scale==="points10")return (pct/10).toFixed(1)+" / 10";
+  if(scale==="stars"){const s=Math.max(1,Math.min(5,Math.round(pct/20)));return "*".repeat(s)+" ".repeat(5-s).trim()+" ("+s+"/5)";}
+  if(scale==="passfail")return pct>=60?"PASS":"FAIL";
+  if(scale==="letter"){
+    if(pct>=97)return "A+";if(pct>=93)return "A";if(pct>=90)return "A-";
+    if(pct>=87)return "B+";if(pct>=83)return "B";if(pct>=80)return "B-";
+    if(pct>=77)return "C+";if(pct>=73)return "C";if(pct>=70)return "C-";
+    if(pct>=67)return "D+";if(pct>=63)return "D";if(pct>=60)return "D-";
+    return "F";
+  }
+  return pct.toFixed(0);
 }
 
 // ============================================================
@@ -660,29 +806,49 @@ async function administer(testId){
   showView("grading");
 }
 
-// Student attempts a question. AI is used for written answers; MC/TF use skill probability.
+// Student attempts a question. Realism is the goal: skill drives correctness, voice drives style.
 async function studentAnswer(s,q){
-  const skill=(s.ability*.6 + s.effort*.25 + s.mood*.15)/100; // 0..1
+  const ability=(s.ability*.7 + s.effort*.2 + s.mood*.1)/100; // 0..1 academic
+  const writing=s.writing/100;                                 // 0..1 written style
   if(q.type==="mc"){
-    const idx=Math.random()<skill?q.correct
-      :q.options.map((_,i)=>i).filter(i=>i!==q.correct)[Math.floor(Math.random()*(q.options.length-1))]||0;
+    const idx=Math.random()<ability?q.correct
+      :q.options.map((_,i)=>i).filter(i=>i!==q.correct)[Math.floor(Math.random()*Math.max(1,q.options.length-1))]??0;
     return {pick:idx,text:q.options[idx]||""};
   }
   if(q.type==="tf"){
-    const idx=Math.random()<skill?q.correct:(q.correct===0?1:0);
+    const idx=Math.random()<ability?q.correct:(q.correct===0?1:0);
     return {pick:idx,text:idx===0?"True":"False"};
   }
-  const quality=skill<.35?"a weak, partly incorrect or off-topic":skill<.65?"a partial, somewhat correct":"a strong, mostly correct";
-  const len=q.type==="sa"?"in 1 short sentence":"in 2-3 sentences";
-  const ref=q.answer?` (model answer for reference: "${q.answer}")`:"";
-  const prompt=`You are a school student named ${s.name}. Write ${quality} answer ${len} to this exam question. Reply with just the answer text, no preamble, no quotation marks.\nQuestion: ${q.prompt}${ref}`;
+  return {text:await generateWrittenAnswer(s,q,ability,writing)};
+}
+async function generateWrittenAnswer(s,q,ability,writing){
+  // Correctness bucket from academic ability, with realistic variance.
+  const roll=ability+(Math.random()*.3-.15);
+  const correctness=roll<.3?"mostly wrong or confused (give the wrong answer or miss the point)":
+                    roll<.55?"partially correct (right idea but a clear mistake or gap)":
+                    roll<.8 ?"mostly correct with a minor slip or imprecise phrasing":
+                             "correct and clear";
+  // Writing style hints
+  const v=STUDENT_VOICES.find(v=>v.key===s.voiceKey)||STUDENT_VOICES[0];
+  const writeHint=writing<.35?"Spelling and grammar are weak: drop apostrophes, occasional misspelling, run-on sentences.":
+                  writing<.7 ?"Writing is okay for their age - one small grammar slip is fine.":
+                              "Writing is clean for a school student, but stays age-appropriate (no advanced vocabulary).";
+  const len=q.type==="sa"?"Exactly 1 sentence, no more.":"2 to 3 sentences. Do not exceed.";
+  const prompt=`You are writing a school exam answer in the voice of a real student named ${s.first}. Style: ${v.style}. ${writeHint}\nThe answer must be ${correctness}. ${len}\nDo NOT add quotation marks, headings, or preamble. Just the answer text.\nQuestion: ${q.prompt}${q.answer?`\n(Teacher's model answer, for your reference - do NOT copy it verbatim: ${q.answer})`:""}`;
   try{
     const r=await fetch("https://text.pollinations.ai/"+encodeURIComponent(prompt));
-    const txt=(await r.text()).trim().replace(/^["']|["']$/g,"");
-    return {text:txt.slice(0,400)};
+    const txt=(await r.text()).trim().replace(/^["']|["']$/g,"").replace(/\s+/g," ");
+    return txt.slice(0,400)||"(no answer)";
   }catch(e){
-    return {text:skill>.5?"(plausible attempt - AI unreachable)":"(left mostly blank - AI unreachable)"};
+    return ability>.5?"(plausible attempt - AI unreachable)":"(left mostly blank - AI unreachable)";
   }
+}
+async function rerollAnswer(testId,sid,qi){
+  const t=state.tests.find(x=>x.id===testId);const sub=t.assignments[state.activeClassIdx][sid];
+  const s=findStudent(sid);const q=t.questions[qi];
+  const ov=showBusy(`${s.first} is rewriting answer...`);
+  sub.answers[qi]=await studentAnswer(s,q);
+  ov.close();showView("grading");
 }
 
 // ============================================================
@@ -705,27 +871,33 @@ function viewGrading(){
     const respText=q.type==="mc"||q.type==="tf"?
       `Chose: <i>${esc(ans.text||"(no answer)")}</i>`:esc(ans.text||"(left blank)");
     const cur=sub.perQ[i];
+    const tiers=TIERS.map(tr=>`<button class="tier t-${tr.key} ${cur===tr.pct?"sel":""}"
+      ${sub.scored?"disabled":""}
+      onclick="setQScore(${t.id},${s.id},${i},${tr.pct},true)">${tr.label} <small>(${fmtScore(tr.pct,t.scale)})</small></button>`).join("");
+    const rerollBtn=(q.type==="sa"||q.type==="es")&&!sub.scored?
+      `<button class="reroll" onclick="rerollAnswer(${t.id},${s.id},${i})">reroll answer</button>`:"";
     return `<div class="qp">
-      <div class="prompt">Q${i+1}. ${esc(q.prompt)} <small style="opacity:.6">(${meta[q.type]})</small></div>
+      <div class="prompt">Q${i+1}. ${esc(q.prompt)} <small style="opacity:.6">(${meta[q.type]})</small>${rerollBtn}</div>
       ${q.type==="mc"?`<div style="font-size:.85em;opacity:.7">Options: ${q.options.map((o,j)=>`${j===q.correct?"<b>":""}${esc(o)}${j===q.correct?" (key)</b>":""}`).join(" / ")}</div>`:""}
       ${q.type==="tf"?`<div style="font-size:.85em;opacity:.7">Key: <b>${q.correct===0?"True":"False"}</b></div>`:""}
       ${(q.type==="sa"||q.type==="es")&&q.answer?`<div style="font-size:.85em;opacity:.7">Model: <i>${esc(q.answer)}</i></div>`:""}
       <div class="resp">${respText}</div>
+      <div class="tiers">${tiers}</div>
       <div class="scorer">
-        <label>Mark:</label>
+        <label>Fine-tune:</label>
         <input type="number" min="0" max="100" value="${cur==null?"":cur}"
           ${sub.scored?"disabled":""}
-          oninput="setQScore(${t.id},${s.id},${i},this.value)"
+          oninput="setQScore(${t.id},${s.id},${i},this.value,false)"
           placeholder="0-100">
-        <span class="max">/ 100</span>
+        <span class="max">${t.scale!=="percent"?"= "+fmtScore(cur==null?0:cur,t.scale):"/ 100"}</span>
       </div>
     </div>`;
   }).join("");
   const totalSoFar=sub.perQ.reduce((a,v)=>a+(v==null?0:v),0);
   const marked=sub.perQ.filter(v=>v!=null).length;
   const avgSoFar=marked?(totalSoFar/marked):0;
-  const allMarked=marked===t.questions.length;
-  return `<h2>Grading - "${esc(t.title)}" (${currentClass().name})</h2>
+  return `<h2>Grading - "${esc(t.title)}" (${currentClass().name})
+    <small class="muted">Scale: ${SCALES.find(x=>x.key===t.scale)?.label||t.scale} · Weight: ${t.weight.toFixed(1)}x</small></h2>
     ${classPicker()}
     <p class="muted">Flip through each paper with the arrows. Score every question yourself, then return the test.</p>
     <div class="pager">
@@ -734,11 +906,11 @@ function viewGrading(){
       <button class="arrow" onclick="gradePage(1,${t.id})" ${idx===cls.students.length-1?"disabled":""}>&rarr;</button>
     </div>
     <div class="paper ${sub.scored?"graded":""}">
-      <div class="stamp">RETURNED</div>
+      <div class="stamp">${fmtScore(sub.scored?sub.score:avgSoFar,t.scale)}</div>
       <h3>${esc(t.title)}</h3>
       <div style="opacity:.7;font-size:.9em">Name: <b>${s.name}</b> · Class: ${currentClass().name}</div>
       ${qBlocks}
-      <div class="total">Current average: ${marked?avgSoFar.toFixed(1):"-"} / 100</div>
+      <div class="total">${sub.scored?"Final":"Running"} grade: ${marked||sub.scored?fmtScore(sub.scored?sub.score:avgSoFar,t.scale):"-"}</div>
     </div>
     <div class="row" style="justify-content:space-between;margin-top:1em">
       <div>
@@ -750,32 +922,48 @@ function viewGrading(){
       </div>
     </div>`;
 }
-function setQScore(testId,sid,qi,val){
+function setQScore(testId,sid,qi,val,rerender){
   const t=state.tests.find(x=>x.id===testId);
   const sub=t.assignments[state.activeClassIdx][sid];
-  if(val===""||val==null){sub.perQ[qi]=null;return;}
-  let v=parseInt(val,10);if(isNaN(v))v=0;
-  sub.perQ[qi]=Math.max(0,Math.min(100,v));
+  if(val===""||val==null){sub.perQ[qi]=null;}
+  else{
+    let v=parseFloat(val);if(isNaN(v))v=0;
+    sub.perQ[qi]=Math.max(0,Math.min(100,v));
+  }
+  if(rerender)showView("grading");
 }
 function gradePage(delta,testId){
   const cls=currentClass();
   state.gradingPage=Math.max(0,Math.min(cls.students.length-1,(state.gradingPage||0)+delta));
   showView("grading");
 }
-function returnPaper(testId,sid){
+async function returnPaper(testId,sid){
   const t=state.tests.find(x=>x.id===testId);
   const sub=t.assignments[state.activeClassIdx][sid];
   if(sub.perQ.some(v=>v==null)){toast("Mark every question first.");return;}
   const score=sub.perQ.reduce((a,b)=>a+b,0)/sub.perQ.length;
   sub.scored=true;sub.score=score;
   const s=findStudent(sid);
-  s.grades.push({testId,score});
-  toast(`${s.name}: ${score.toFixed(0)} returned.`);
+  s.grades.push({testId,score,scale:t.scale,weight:t.weight});
+  toast(`${s.name}: ${fmtScore(score,t.scale)} returned.`);
+  // student reaction (best-effort AI)
+  studentReaction(s,score).then(line=>{if(line)toast(`${s.first}: "${line}"`);});
+  // mission check: pass-the-test missions
+  checkTestMissions(s,score);
   // auto-advance to next unscored paper
   const cls=currentClass();
   const next=cls.students.findIndex((st,i)=>i>state.gradingPage && !t.assignments[state.activeClassIdx][st.id].scored);
   if(next>=0)state.gradingPage=next;
   showView("grading");
+}
+async function studentReaction(s,score){
+  const tone=score>=85?"happy and a bit proud":score>=65?"relieved":score>=45?"disappointed":"upset, possibly defensive";
+  const v=STUDENT_VOICES.find(v=>v.key===s.voiceKey)||STUDENT_VOICES[0];
+  const prompt=`In one short sentence, in the voice of a school student called ${s.first} (style: ${v.style}), react to getting back a test with score ${score.toFixed(0)}/100. They feel ${tone}. No quotation marks, no preamble. Keep it under 14 words.`;
+  try{
+    const r=await fetch("https://text.pollinations.ai/"+encodeURIComponent(prompt));
+    return (await r.text()).trim().replace(/^["']|["']$/g,"").slice(0,120);
+  }catch(e){return "";}
 }
 
 // ============================================================
@@ -818,20 +1006,273 @@ function viewGrades(){
 }
 
 // ============================================================
+// MESSAGE CENTER - persistent contacts, AI voice, missions
+// ============================================================
+function spawnParentContact(student){
+  const v=PARENT_VOICES[Math.floor(Math.random()*PARENT_VOICES.length)];
+  const lastName=student.last;
+  // parent honorific roughly varies
+  const honorific=Math.random()<.5?"Mr.":(Math.random()<.5?"Mrs.":"Ms.");
+  const c={id:"c"+Date.now()+Math.floor(Math.random()*1000),
+    kind:"parent",
+    name:`${honorific} ${lastName}`,
+    voiceKey:v.key,
+    studentId:student.id,
+    relation:"Parent of "+student.first,
+    msgCount:0};
+  state.contacts.push(c);
+  return c;
+}
+function spawnStudentContact(student){
+  // pull voice from student
+  const c={id:"c"+Date.now()+Math.floor(Math.random()*1000),
+    kind:"student",
+    name:student.name,
+    voiceKey:student.voiceKey,
+    studentId:student.id,
+    relation:"Student",
+    msgCount:0};
+  state.contacts.push(c);
+  return c;
+}
+
+// Build an AI prompt for a message in the contact's voice.
+async function generateMessage(contact,kind,extra){
+  const student=contact.studentId!=null?findStudent(contact.studentId):null;
+  const voiceList=contact.kind==="parent"?PARENT_VOICES:STUDENT_VOICES;
+  const v=voiceList.find(x=>x.key===contact.voiceKey)||voiceList[0];
+  let intent="";
+  if(kind==="intro")intent=`Introduce yourself politely as ${student?student.first+"'s "+contact.kind:"a contact"} and mention one small thing about how ${student?student.first:"the kid"} is doing or feeling at school. Don't ask for anything specific yet.`;
+  else if(kind==="concern")intent=`Express a brief concern about ${student.first}'s performance or behaviour in ${state.subject||"class"}. Be specific but short.`;
+  else if(kind==="praise")intent=`Thank the teacher because ${student.first} came home happy about something at school.`;
+  else if(kind==="request")intent=`Politely request that the teacher pay a little more attention to ${student.first} this week - they need encouragement.`;
+  else if(kind==="complaint")intent=`Complain (politely or pointedly, in voice) about a recent grade ${student.first} received and ask if it can be reviewed.`;
+  else if(kind==="help")intent=`Ask the teacher for extra help with ${state.subject||"the subject"} - mention one specific topic they're struggling with.`;
+  else if(kind==="thanks")intent=`Briefly thank the teacher for something kind they did recently.`;
+  else if(kind==="absence")intent=`Inform the teacher that ${student.first} will be absent for one or two days for a family reason. Keep it brief.`;
+  else if(kind==="followup")intent=extra?.context?`Send a SHORT follow-up about: ${extra.context}.`:`Send a short follow-up to your last message.`;
+  const target="Ms. "+state.name;
+  const prompt=`Write a short email/message FROM ${contact.name} (${contact.relation}) TO ${target}. Voice: ${v.style}. Goal: ${intent}\nRules:\n- Sound like a real person, not perfect prose. Subtle imperfections fitting the voice.\n- Length: 2 to 4 sentences MAX. No long paragraphs.\n- Do NOT include "Subject:" line.\n- Do NOT use markdown.\n- Sign off in a way that matches the voice (or no signoff if voice is terse).\nReply with ONLY the message body.`;
+  try{
+    const r=await fetch("https://text.pollinations.ai/"+encodeURIComponent(prompt));
+    let txt=(await r.text()).trim().replace(/^["']|["']$/g,"");
+    // sanitize markdown artifacts
+    txt=txt.replace(/^#+\s*/gm,"").replace(/\*\*/g,"");
+    return txt.slice(0,700);
+  }catch(e){
+    return contact.kind==="parent"?
+      `Hi - just checking in about ${student?student.first:"my kid"}. Could you let me know how things are going? Thanks.`:
+      `hey miss, can we talk about the last test? thx`;
+  }
+}
+async function generateSubject(contact,body){
+  const prompt=`Write a SHORT email subject line (max 6 words, lowercase common for casual voices, capitalised for formal) for this message:\n${body.slice(0,300)}\nReply with ONLY the subject line, no quotes.`;
+  try{
+    const r=await fetch("https://text.pollinations.ai/"+encodeURIComponent(prompt));
+    return (await r.text()).trim().replace(/^["']|["']$/g,"").slice(0,60)||"(no subject)";
+  }catch(e){return "(no subject)";}
+}
+
+// Queue an inbound message. Optionally attach a mission.
+async function queueMessage(contact,kind,opts={}){
+  const ov=showBusy(`${contact.name} is writing...`);
+  const body=await generateMessage(contact,kind,opts);
+  const subject=await generateSubject(contact,body);
+  ov.close();
+  const msg={id:"m"+Date.now()+Math.floor(Math.random()*1000),
+    contactId:contact.id,fromMe:false,subject,body,
+    week:state.week,day:DAYS[state.dayIdx],read:false,replyTo:opts.replyTo||null};
+  state.messages.push(msg);
+  contact.msgCount++;
+  // attach a mission for some kinds
+  const missionKind=kind==="request"?"give_card":kind==="help"?"reply":kind==="concern"?"raise_avg":kind==="complaint"?"reply":null;
+  if(missionKind)spawnMission(contact,missionKind,msg);
+  buildNav();
+  toast(`New message: ${contact.name}`);
+}
+
+// ============================================================
+// MISSIONS
+// ============================================================
+function spawnMission(contact,kind,sourceMsg){
+  const s=contact.studentId!=null?findStudent(contact.studentId):null;
+  let title,desc,reward=3,deadline=state.week+2;
+  if(kind==="give_card"&&s){
+    title=`Encourage ${s.first}`;
+    desc=`Issue a green or purple card to ${s.name} within 2 weeks, with a reason ${s.first} would appreciate.`;
+  }else if(kind==="reply"){
+    title=`Reply to ${contact.name}`;
+    desc=`Send a thoughtful reply to ${contact.name} within 1 week.`;
+    deadline=state.week+1;reward=2;
+  }else if(kind==="raise_avg"&&s){
+    title=`Help ${s.first} improve`;
+    desc=`Get ${s.first}'s test average above 70 by next quarter.`;
+    deadline=state.week+9;reward=5;
+  }else return;
+  const m={id:"x"+Date.now()+Math.floor(Math.random()*1000),
+    title,desc,kind,
+    studentId:s?s.id:null,contactId:contact.id,
+    createdWeek:state.week,deadlineWeek:deadline,
+    status:"open",reward,sourceMsg:sourceMsg?sourceMsg.id:null};
+  state.missions.push(m);
+}
+function checkCardMissions(student,color){
+  state.missions.forEach(m=>{
+    if(m.status!=="open"||m.kind!=="give_card")return;
+    if(m.studentId===student.id && (color==="green"||color==="purple")){
+      m.status="done";state.rep+=m.reward;toast(`Mission complete: ${m.title} (+${m.reward} rep)`);
+    }
+  });
+}
+function checkReplyMissions(contactId){
+  state.missions.forEach(m=>{
+    if(m.status!=="open"||m.kind!=="reply"||m.contactId!==contactId)return;
+    m.status="done";state.rep+=m.reward;toast(`Mission complete: ${m.title} (+${m.reward} rep)`);
+  });
+}
+function checkTestMissions(student,score){
+  state.missions.forEach(m=>{
+    if(m.status!=="open"||m.kind!=="raise_avg"||m.studentId!==student.id)return;
+    if(avg(student)>=70){m.status="done";state.rep+=m.reward;toast(`Mission complete: ${m.title} (+${m.reward} rep)`);}
+  });
+}
+function tickMissions(){
+  state.missions.forEach(m=>{
+    if(m.status!=="open")return;
+    if(state.week>m.deadlineWeek){m.status="failed";state.rep=Math.max(0,state.rep-1);toast(`Mission failed: ${m.title} (-1 rep)`);}
+  });
+}
+
+// ============================================================
+// MESSAGE TICK (controlled rate)
+// ============================================================
+async function tickMessages(weekly){
+  // Cap: at most ~3 unread; new contacts only if pool is small.
+  const unread=state.messages.filter(m=>!m.fromMe&&!m.read).length;
+  if(unread>=3)return;
+  // Probability of inbound: weekly ~ 70%, daily ~ 12%
+  const p=weekly?.7:.12;
+  if(Math.random()>p)return;
+  // 70% chance reuse existing contact
+  let contact=null;
+  if(state.contacts.length && Math.random()<.7){
+    contact=state.contacts[Math.floor(Math.random()*state.contacts.length)];
+  }else if(state.contacts.length<6){
+    // spawn new contact from a student we haven't heard from
+    const known=new Set(state.contacts.filter(c=>c.studentId!=null).map(c=>c.studentId));
+    const pool=state.classes.flatMap(c=>c.students).filter(s=>!known.has(s.id));
+    if(!pool.length)return;
+    const stu=pool[Math.floor(Math.random()*pool.length)];
+    contact=Math.random()<.7?spawnParentContact(stu):spawnStudentContact(stu);
+  }
+  if(!contact)return;
+  // Pick message kind weighted by contact history and student state
+  const kinds=contact.msgCount===0?["intro"]:
+    contact.kind==="parent"?["request","concern","praise","complaint","thanks","absence","followup"]:
+                            ["help","thanks","followup"];
+  const kind=kinds[Math.floor(Math.random()*kinds.length)];
+  await queueMessage(contact,kind);
+}
+
+// ============================================================
+// MESSAGES VIEW
+// ============================================================
+function viewMessages(){
+  if(!state.contacts.length){
+    return `<h2>Messages</h2><p class="muted"><i>Inbox empty. People will reach out as the year goes on.</i></p>`;
+  }
+  const sel=state.selectedContact||state.contacts[0].id;
+  state.selectedContact=sel;
+  const contactRows=state.contacts.slice().sort((a,b)=>lastMsgWeek(b)-lastMsgWeek(a)).map(c=>{
+    const last=lastMsgFor(c.id);
+    const unread=state.messages.filter(m=>m.contactId===c.id&&!m.fromMe&&!m.read).length;
+    return `<div class="contact-row ${c.id===sel?"sel":""}" onclick="selectContact('${c.id}')">
+      <div class="who">${unread?'<span class="dot"></span>':""}${esc(c.name)} ${unread?`<span class="badge">${unread}</span>`:""}</div>
+      <div class="preview">${esc(c.relation)} · ${last?esc(last.subject):"-"}</div>
+    </div>`;
+  }).join("");
+  const thread=state.messages.filter(m=>m.contactId===sel).sort((a,b)=>a.week-b.week||DAYS.indexOf(a.day)-DAYS.indexOf(b.day));
+  // mark inbound as read
+  thread.forEach(m=>{if(!m.fromMe)m.read=true;});
+  const c=state.contacts.find(x=>x.id===sel);
+  const linkedMissions=state.missions.filter(m=>m.contactId===sel);
+  const bubbles=thread.map(m=>{
+    return `<div class="bubble ${m.fromMe?"mine":""}">
+      <div class="sender">${m.fromMe?"You":esc(c.name)} · Wk ${m.week} ${m.day}${m.subject?" · "+esc(m.subject):""}</div>
+      ${esc(m.body)}
+    </div>`;
+  }).join("");
+  const missionsHtml=linkedMissions.length?
+    `<div style="padding:.5em 1em;background:#1b1410;border-bottom:1px solid #3a2b20">
+      ${linkedMissions.map(m=>renderMission(m)).join("")}
+    </div>`:"";
+  return `<h2>Messages</h2>
+    <div class="msg-layout">
+      <div class="contacts-list">${contactRows}</div>
+      <div class="thread">
+        <div class="head"><b>${esc(c.name)}</b> <small class="muted">- ${esc(c.relation)}</small></div>
+        ${missionsHtml}
+        <div class="scroll">${bubbles||"<div class='bubble system'>No messages yet.</div>"}</div>
+        <div class="reply-box">
+          <textarea id="replyBody" placeholder="Type your reply..."></textarea>
+          <button class="primary" onclick="sendReply()">Send</button>
+        </div>
+      </div>
+    </div>`;
+}
+function lastMsgFor(cid){const m=state.messages.filter(x=>x.contactId===cid);return m[m.length-1];}
+function lastMsgWeek(c){const m=lastMsgFor(c.id);return m?m.week*10+DAYS.indexOf(m.day):0;}
+function selectContact(id){state.selectedContact=id;showView("messages");buildNav();}
+function sendReply(){
+  const ta=document.getElementById("replyBody");
+  const body=(ta.value||"").trim();
+  if(!body){toast("Type something first.");return;}
+  const cid=state.selectedContact;
+  state.messages.push({id:"m"+Date.now(),contactId:cid,fromMe:true,
+    subject:"(reply)",body,week:state.week,day:DAYS[state.dayIdx],read:true});
+  checkReplyMissions(cid);
+  ta.value="";
+  // contact may follow up in 1-2 weeks
+  showView("messages");buildNav();
+  toast("Reply sent.");
+}
+
+// ============================================================
+// MISSIONS VIEW
+// ============================================================
+function viewMissions(){
+  if(!state.missions.length)return `<h2>Missions</h2><p><i>No missions yet. They arrive with certain messages.</i></p>`;
+  const open=state.missions.filter(m=>m.status==="open");
+  const closed=state.missions.filter(m=>m.status!=="open");
+  return `<h2>Missions</h2>
+    <h3>Open (${open.length})</h3>${open.map(renderMission).join("")||"<p><i>None.</i></p>"}
+    <h3 style="opacity:.7;margin-top:1em">Past</h3>${closed.map(renderMission).join("")||"<p><i>None.</i></p>"}`;
+}
+function renderMission(m){
+  const contact=state.contacts.find(c=>c.id===m.contactId);
+  return `<div class="mission ${m.status}">
+    <div class="title">${esc(m.title)} ${m.status!=="open"?"["+m.status.toUpperCase()+"]":""}</div>
+    <div>${esc(m.desc)}</div>
+    <div style="opacity:.7;font-size:.8em">From ${esc(contact?.name||"?")} · due week ${m.deadlineWeek} · reward +${m.reward} rep</div>
+  </div>`;
+}
+
+// ============================================================
 // TIME
 // ============================================================
 const NEEDS=["seems withdrawn","missed homework","argued with a classmate","asked about extra help","mentioned trouble at home","fell asleep in class","forgot supplies repeatedly"];
 
-function advanceDay(){
+async function advanceDay(){
   state.classes.forEach(c=>c.students.forEach(s=>{
     s.mood=clamp(s.mood+(Math.random()*6-3));
     s.effort=clamp(s.effort+(Math.random()*4-2));
   }));
   state.dayIdx++;
   if(state.dayIdx>=DAYS.length){state.dayIdx=0;state.week++;weeklyTick();}
-  renderHud();refreshCurrentView();
+  await tickMessages(false);
+  renderHud();buildNav();refreshCurrentView();
 }
-function advanceWeek(){
+async function advanceWeek(){
   for(let i=0;i<5;i++){
     state.classes.forEach(c=>c.students.forEach(s=>{
       s.mood=clamp(s.mood+(Math.random()*6-3));
@@ -839,9 +1280,11 @@ function advanceWeek(){
     }));
   }
   state.dayIdx=0;state.week++;weeklyTick();
-  renderHud();refreshCurrentView();
+  await tickMessages(true);
+  renderHud();buildNav();refreshCurrentView();
 }
 function weeklyTick(){
+  tickMissions();
   // form tutors: each week, 0-3 students get a "need"
   if(state.role==="tutor"){
     const cls=state.classes[0];
