@@ -1120,6 +1120,7 @@ function sendTeacherMessage(){
   showView("messages");buildNav();
   toast(`Message to ${teacher.name} sent.`);
   evaluatePlayerMessage(body,c);
+  _trackAction();
 }
 function saveNote(id){
   const s=findStudent(id);
@@ -1135,6 +1136,7 @@ function issueCard(id){
   if(!reason){toast("A card needs a reason.");return;}
   const s=findStudent(id);
   s.cards.push({color,reason,week:state.week,by:"Ms. "+state.name});
+  state.actionsThisWeek=(state.actionsThisWeek||0)+1;
   if(color==="green"){s.mood=Math.min(100,s.mood+4);state.rep+=1;}
   if(color==="yellow"){s.mood=Math.max(0,s.mood-6);state.rep-=1;}
   if(color==="purple"){s.mood=Math.min(100,s.mood+10);state.rep+=3;}
@@ -1154,6 +1156,11 @@ function resolveNeed(id){
 // ROSTER / CARDS / NEEDS
 // ============================================================
 function avg(s){return s.grades.length?s.grades.reduce((a,b)=>a+b.score,0)/s.grades.length:0;}
+// Combined average across all teachers (player's tests + other teachers' grades).
+function combinedAvg(s){
+  const all=[...(s.grades||[]),...(s.otherGrades||[])];
+  return all.length?all.reduce((a,b)=>a+b.score,0)/all.length:0;
+}
 
 function viewRoster(){
   return `<h2>Roster</h2>${classPicker()}
@@ -1344,17 +1351,51 @@ function rmQ(i){state.draftTest.questions.splice(i,1);renderDraft();}
 function saveTest(){
   if(!state.draftTest.questions.length){toast("Add at least one question.");return;}
   const id=state.tests.length+1;
-  state.tests.push({id,
+  const t={id,
     title:state.draftTest.title||"Untitled Test",
     subject:state.subject,
     scale:state.draftTest.scale||"percent",
     weight:state.draftTest.weight||1.0,
     questions:JSON.parse(JSON.stringify(state.draftTest.questions)),
-    assignments:{}
-  });
+    assignments:{},
+    cache:{}     // {classIdx: {studentId: [answers per question]}}
+  };
+  state.tests.push(t);
   state.draftTest={title:"Unit "+(state.tests.length+1)+" Quiz",questions:[],scale:"percent",weight:1.0};
-  toast("Test saved. Administer it from Tests.");
+  toast("Test saved. Students are already getting a head-start...");
   showView("tests");
+  // Kick off background pre-computation for the current class so Administer is instant later.
+  precomputeAnswers(t.id,state.activeClassIdx).catch(()=>{});
+}
+
+// Background pre-compute: generate per-student answers and stash in t.cache.
+async function precomputeAnswers(testId,classIdx){
+  const t=state.tests.find(x=>x.id===testId);if(!t)return;
+  const cls=state.classes[classIdx];if(!cls)return;
+  t.cache[classIdx]=t.cache[classIdx]||{};
+  const bucket=t.cache[classIdx];
+  for(const s of cls.students){
+    if(bucket[s.id])continue;       // already cached
+    bucket[s.id]=[];
+    for(const q of t.questions){
+      let ans;
+      if(q.type==="mc"||q.type==="tf"){
+        const ability=(s.ability*.7+s.effort*.2+s.mood*.1)/100;
+        let idx;
+        if(q.type==="mc"){
+          idx=Math.random()<ability?q.correct
+            :q.options.map((_,i)=>i).filter(i=>i!==q.correct)[Math.floor(Math.random()*Math.max(1,q.options.length-1))]??0;
+        }else{
+          idx=Math.random()<ability?q.correct:(q.correct===0?1:0);
+        }
+        ans={pick:idx,text:q.type==="mc"?(q.options[idx]||""):(idx===0?"True":"False")};
+      }else{
+        const text=await singleWrittenAnswer(s,q);
+        ans={text:text||null};
+      }
+      bucket[s.id].push(ans);
+    }
+  }
 }
 
 // =============== SCALES =====================
@@ -1411,14 +1452,26 @@ async function administer(testId){
   const overlay=showBusy(`Administering "${test.title}"`);
   overlay.sub(cls.name);
   test.assignments[state.activeClassIdx]={};
-  // initialize empty submissions
+  // Check pre-computed cache - we may have most answers ready already.
+  const cached=test.cache?.[state.activeClassIdx]||{};
   cls.students.forEach(s=>{
+    const cachedForStudent=cached[s.id];
     test.assignments[state.activeClassIdx][s.id]={
-      answers:test.questions.map(()=>({text:""})),
+      answers:cachedForStudent?cachedForStudent.slice():test.questions.map(()=>({text:""})),
       perQ:test.questions.map(()=>null),
       scored:false,score:0
     };
   });
+  // If cache had everything we need, skip the generation loop entirely.
+  const fullyCached=cls.students.every(s=>(cached[s.id]||[]).length===test.questions.length);
+  if(fullyCached){
+    overlay.setProgress(100);overlay.sub("All answers ready");
+    overlay.close();
+    toast("Tests collected. Open Grading.");
+    state.gradingPage=0;
+    showView("grading");
+    return;
+  }
   // For each question, one combined AI call for ALL students at once.
   for(let qi=0;qi<test.questions.length;qi++){
     const q=test.questions[qi];
@@ -1439,15 +1492,13 @@ async function administer(testId){
       });
       continue;
     }
-    // Written (sa/es): batch students in groups of 4 (essays) or 8 (short answer)
-    // to keep each response safely under output truncation cap. Per-student fallback
-    // inside classWrittenAnswers handles any missing entries.
-    const groupSize=q.type==="es"?4:8;
+    // Written (sa/es): essays go 1-per-call inside classWrittenAnswers; short answer batches in 8s.
+    const groupSize=q.type==="es"?cls.students.length:8;
     const all=[];
     for(let g=0;g<cls.students.length;g+=groupSize){
       const grp=cls.students.slice(g,g+groupSize);
-      overlay.sub(`Question ${qi+1}, students ${g+1}-${Math.min(g+groupSize,cls.students.length)}`);
-      const answers=await classWrittenAnswers(grp,q);
+      overlay.sub(q.type==="es"?`Essay question ${qi+1}`:`Question ${qi+1}, students ${g+1}-${Math.min(g+groupSize,cls.students.length)}`);
+      const answers=await classWrittenAnswers(grp,q,overlay);
       all.push(...answers);
     }
     cls.students.forEach((s,i)=>{
@@ -1467,40 +1518,57 @@ async function administer(testId){
 // One AI call - up to ~10 students answer one written question. Compact format.
 // Batch class answers using a delimiter format - immune to the multi-line-newline
 // problem that broke JSON parsing for essays. Per-student fallback for any gaps.
-async function classWrittenAnswers(students,q){
+async function classWrittenAnswers(students,q,overlay){
+  // Essays go one-per-student (cleaner output, no delimiter parsing issues).
+  // Short answer can be batched - the output stays small enough to not truncate.
+  if(q.type==="es"){
+    const out=[];
+    for(let i=0;i<students.length;i++){
+      const s=students[i];
+      overlay?.sub(`${s.first} is writing... (${i+1}/${students.length})`);
+      const ans=await singleWrittenAnswer(s,q);
+      out.push(ans||null);
+    }
+    return out;
+  }
+  // Short-answer batching
   const items=students.map((s,i)=>{
     const ability=(s.ability*.7+s.effort*.2+s.mood*.1)/100;
     const correctness=ability<.3?"wrong":ability<.55?"partial":ability<.8?"mostly_right":"correct";
     return `Student ${i+1} (${s.first}): voice=${s.voiceKey}, write_skill=${s.writing<35?"weak":s.writing<70?"ok":"clean"}, target=${correctness}`;
   }).join("\n");
-  const len=q.type==="sa"?"1 short sentence":"2-3 short sentences";
-  const prompt=`Write each student's answer to ONE exam question. Match each student's writing level (weak=drop apostrophes/misspellings; ok=age-appropriate, one slip; clean=good prose, no advanced vocab) AND correctness target (wrong=actually wrong; partial=right idea with a mistake; mostly_right=correct with a small slip; correct=clear and right). ${len} each.
+  const prompt=`Write each student's short answer to ONE exam question. Match writing level (weak/ok/clean) and correctness (wrong/partial/mostly_right/correct). EXACTLY 1 sentence each.
 
-Question: ${q.prompt}${q.answer?`\n(Model answer for reference - do NOT copy: ${q.answer})`:""}
+Question: ${q.prompt}${q.answer?`\n(Model answer: ${q.answer})`:""}
 
 Students:
 ${items}
 
-OUTPUT FORMAT (very important):
-Output a delimiter line and then the answer for each student. Use this EXACT delimiter format:
+OUTPUT FORMAT - VERY IMPORTANT:
+Use this exact format, nothing else. Begin output with the first line being ###1###.
 ###1###
 <answer for student 1>
 ###2###
 <answer for student 2>
-... continue for all ${students.length} students.
-No JSON. No quotes around answers. No preamble. Start the very first line with ###1###.`;
-  const txt=await aiText(prompt,{retries:3,timeout:45000});
+... and so on for all ${students.length} students. NO reasoning, NO commentary, NO preamble.`;
+  const txt=await aiText(prompt,{retries:3,timeout:35000});
   const parsed=parseDelimited(txt,students.length);
-  if(window.console&&parsed.filter(Boolean).length===0)console.warn("[AI] essay batch returned nothing; raw:",txt?.slice(0,300));
+  // Filter out obvious AI-reasoning leakage
+  const cleaned=parsed.map(t=>{
+    if(!t)return null;
+    // strip lines that contain meta-reasoning artifacts
+    const lines=t.split("\n").filter(l=>!/^(student\s+\d+|wait|hmm|note:|we (?:need|should)|maybe|let'?s|provide|now (?:for|for each))/i.test(l.trim()));
+    const cleaned=lines.join(" ").replace(/###\s*\d+\s*###/g,"").replace(/^["']|["']$/g,"").trim();
+    return cleaned.length>10?cleaned:null;
+  });
   const out=[];
-  // Cap per-student fallbacks: if the batch returned nothing useful, fire at most
-  // 3 single calls (the rest stay null - player can reroll if needed).
-  let fbBudget=parsed.filter(Boolean).length>0?students.length:3;
+  let fbBudget=cleaned.filter(Boolean).length>0?students.length:3;
   for(let i=0;i<students.length;i++){
-    if(parsed[i]&&parsed[i].trim()){
-      out.push(parsed[i].slice(0,500));
+    if(cleaned[i]){
+      out.push(cleaned[i].slice(0,500));
     }else if(fbBudget>0){
       fbBudget--;
+      overlay?.sub(`${students[i].first} is writing...`);
       const fb=await singleWrittenAnswer(students[i],q);
       out.push(fb||null);
     }else{
@@ -1527,13 +1595,16 @@ async function singleWrittenAnswer(s,q){
   const ability=(s.ability*.7+s.effort*.2+s.mood*.1)/100;
   const correctness=ability<.3?"wrong":ability<.55?"partial":ability<.8?"mostly_right":"correct";
   const writeTier=s.writing<35?"weak (drop apostrophes, misspellings)":s.writing<70?"ok (one tiny slip)":"clean (no advanced vocab though)";
-  const len=q.type==="sa"?"1 short sentence":"2-3 short sentences";
-  const prompt=`Write ONE school student's exam answer. Voice: ${s.voiceKey}. Writing: ${writeTier}. Target correctness: ${correctness} (wrong=actually wrong; partial=right idea with a mistake; mostly_right=small slip; correct=clear and right). ${len}.
+  // Honor word-count requests in the model answer / rubric.
+  let lenHint=q.type==="sa"?"1 short sentence":"2-3 short sentences";
+  const wmatch=(q.answer||"").match(/(\d{2,3})\s*words/i);
+  if(wmatch && q.type==="es")lenHint=`roughly ${wmatch[1]} words (don't go drastically under)`;
+  const prompt=`Write ONE school student's exam answer. Voice: ${s.voiceKey}. Writing: ${writeTier}. Target correctness: ${correctness}. Length: ${lenHint}.
 
-Question: ${q.prompt}${q.answer?`\n(Model: ${q.answer})`:""}
+Question: ${q.prompt}${q.answer?`\nRubric notes (NOT to copy verbatim): ${q.answer}`:""}
 
-Reply with ONLY the answer text. No quotes. No preamble.`;
-  return await aiLine(prompt,400,{retries:2,timeout:22000});
+Reply with ONLY the answer text. No quotes. No preamble. No "Note:" lines. No reasoning. Just the answer as a student would hand it in.`;
+  return await aiLine(prompt,2400,{retries:2,timeout:35000});
 }
 
 // Student attempts a question. Realism is the goal: skill drives correctness, voice drives style.
@@ -1719,7 +1790,8 @@ Return ONLY a compact JSON object: {"q":"<question text>","options":["a","b","c"
 function viewGrades(){
   const cls=currentClass();
   const studs=cls.students.slice();
-  studs.forEach(s=>s._avg=avg(s));
+  // Quarterly grades now include EVERY teacher's marks, not just yours.
+  studs.forEach(s=>s._avg=combinedAvg(s));
   const overall=studs.reduce((a,s)=>a+s._avg,0)/Math.max(1,studs.length);
   if(state.quarterAverages[state.quarter-1]===null)state.quarterAverages[state.quarter-1]=overall;
   const sorted=studs.filter(s=>s._avg>0).sort((a,b)=>b._avg-a._avg);
@@ -2016,6 +2088,7 @@ function sendReply(){
   toast("Reply sent.");
   // background evaluation (does not block UI)
   evaluatePlayerMessage(body,c);
+  _trackAction();
 }
 
 // Send the player's message text to AI for a professionalism rating.
@@ -2090,6 +2163,7 @@ function ensureStudentContact(student){
   }
   return c;
 }
+function _trackAction(){state.actionsThisWeek=(state.actionsThisWeek||0)+1;}
 function sendStudentMessage(){
   const sid=+document.getElementById("composeStudent").value;
   const subject=(document.getElementById("composeSubject").value||"").trim()||"(no subject)";
@@ -2106,6 +2180,7 @@ function sendStudentMessage(){
   showView("messages");buildNav();
   toast(`Message to ${s.first} sent.`);
   evaluatePlayerMessage(body,c);
+  _trackAction();
 }
 
 // Decide whether the student will reply, based on personality + relationship signals.
@@ -2147,7 +2222,16 @@ async function tickPendingReplies(){
   state.pendingReplies.splice(dueIdx,1);
   const c=state.contacts.find(x=>x.id===r.contactId);if(!c)return;
   let prompt,senderName;
-  if(r.kind==="gradeReaction"){
+  if(r.kind==="nudge"){
+    senderName="Principal Vance";
+    prompt=`Write a SHORT, dry email FROM Principal Vance TO Ms. ${state.name}, gently calling out a week of inactivity. 2 sentences max. Professional but pointed. No quotes, no markdown.`;
+    // Use a synthetic contact if no contacts exist
+    if(!c){
+      const principal={id:"c-principal",kind:"staff",name:"Principal Vance",voiceKey:"staff",relation:"Principal",msgCount:0,teacherSubject:"Administration"};
+      state.contacts.push(principal);
+      r.contactId=principal.id;
+    }
+  }else if(r.kind==="gradeReaction"){
     const s=findStudent(r.studentId);if(!s)return;
     senderName=s.first;
     const tone=r.score>=85?"happy and a little proud":r.score>=65?"relieved":r.score>=45?"disappointed":"upset, possibly defensive";
@@ -2173,10 +2257,12 @@ Rules: 1-3 sentences. May ask a follow-up question or thank/complain - choose wh
   }
   const body=await aiLine(prompt,700);
   if(!body)return;
+  const finalContact=state.contacts.find(x=>x.id===r.contactId)||c;
+  if(!finalContact)return;
   state.messages.push({id:"m"+Date.now()+Math.floor(Math.random()*999),
-    contactId:c.id,fromMe:false,subject:r.subject?"Re: "+r.subject:"",body,
+    contactId:finalContact.id,fromMe:false,subject:r.subject||"",body,
     week:state.week,day:DAYS[state.dayIdx],read:false});
-  c.msgCount++;
+  finalContact.msgCount++;
   toast(`${senderName} replied.`);
   buildNav();
 }
@@ -2254,7 +2340,11 @@ async function generateCardReasons(plans){
 }
 
 async function generateGossipLine(){
-  return await aiLine(`In ONE sentence (8-16 words), write a piece of gossip overheard in the staffroom at a struggling US public school today. Specific and a little dry. No quotation marks. No emojis.`,180);
+  // Hint the model with the player's actual subject + a real student name so gossip
+  // feels grounded in *this* school year, not generic faculty noise.
+  const pool=state.classes.flatMap(c=>c.students);
+  const focus=pool[Math.floor(Math.random()*pool.length)];
+  return await aiLine(`In ONE specific sentence (10-18 words), write a piece of staffroom gossip at a struggling US public school. Reference one of: a student named ${focus?focus.first+" "+focus.last:""}, the ${state.subject||"history"} department, or a recent school incident. Should sound real and a little juicy - not generic. No quotation marks, no emojis.`,200);
 }
 
 async function generateNeed(student){
@@ -2547,16 +2637,31 @@ async function runWeeklyAI(){
 }
 async function weeklyTick(){
   tickMissions();
+  // Inactivity check: if the player didn't do anything notable this week,
+  // someone will reach out and rep takes a hit.
+  if((state.actionsThisWeek||0)===0 && state.week>1){
+    state.rep=Math.max(0,state.rep-2);
+    logActivity({type:"gossip",text:`Quiet week from you. The principal noticed. -2 rep.`});
+    // Surface a nudge message - low cost AI line.
+    state.pendingReplies.push({
+      contactId:state.contacts[0]?.id,
+      studentId:state.contacts[0]?.studentId,
+      fireAtTick:tickCounter()+1,kind:"nudge",
+      inReplyTo:"They've noticed you've been silent for a week and want a quick check-in.",
+      subject:"Just checking in"
+    });
+  }
+  state.actionsThisWeek=0;
   // form tutors: each week, students with notable story drift may surface a need (AI generated).
   if(state.role==="tutor"){
     const cls=state.classes[0];
     const candidates=cls.students.filter(s=>!s.flag).map(s=>({s,score:storySalience(s.story)+(s.mood<40?2:0)})).filter(x=>x.score>0);
     candidates.sort((a,b)=>b.score-a.score);
-    const targets=candidates.slice(0,Math.min(2,candidates.length));
+    const targets=candidates.slice(0,Math.min(3,candidates.length));   // up to 3 needs now
     for(const t of targets){
-      if(Math.random()>.6)continue;
+      if(Math.random()>.55)continue;
       const need=await generateNeed(t.s);
-      if(need)t.s.flag=need;     // no placeholder fallback
+      if(need)t.s.flag=need;
     }
   }
   // quarter / year roll
