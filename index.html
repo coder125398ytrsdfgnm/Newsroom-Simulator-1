@@ -608,13 +608,33 @@ async function _newCareerImpl(role,name,subject,className,ov){
     activity:[],npcTeachers:teachers,pendingReplies:[]
   };
   await seedContacts();
+  ov.setProgress(94);ov.update("Planning the first week");
+  // Wait for the first week's plan so Monday actually has events.
+  // Use a hard cap so a slow AI can't trap us here.
+  try{
+    await Promise.race([
+      planWeek(),
+      new Promise(r=>setTimeout(r,18000))
+    ]);
+  }catch(e){if(window.console)console.warn("[planWeek] first failed:",e);}
+  // Kick off PRE-PLANNING of week 2 in the background while you play week 1.
+  preplanNextWeek();
   ov.setProgress(100);
   ov.close();
-  // Plan the first week in the background - user can start clicking around immediately.
-  // We seed an empty plan so releaseDayEvents doesn't break if user advances before AI returns.
-  state.weekPlan=[[],[],[],[],[]];
-  planWeek().catch(e=>{if(window.console)console.warn("[AI] initial planWeek failed:",e);});
   return true;
+}
+
+// Background prep of the week AFTER the current one. By the time the current
+// week rolls over, the next week's plan is already waiting in state.nextWeekPlan.
+function preplanNextWeek(){
+  if(state._preplanning)return;
+  state._preplanning=true;
+  planWeekData().then(plan=>{
+    state.nextWeekPlan=plan;
+    if(window.console)console.log("[preplan] week",state.week+1,"ready with",plan.reduce((a,d)=>a+d.length,0),"events");
+  }).catch(e=>{
+    if(window.console)console.warn("[preplan] failed:",e);
+  }).finally(()=>{state._preplanning=false;});
 }
 
 // Seed two parent contacts (pick first two students; stories may be empty - fine).
@@ -2176,9 +2196,19 @@ function updateTicker(){
   t.classList.remove("bump");void t.offsetWidth;t.classList.add("bump");
 }
 
-// Plans the upcoming week in ONE AI call, then distributes results across the 5 days.
-// Days then release their events as the player advances through the week.
+// Plans the upcoming week and installs it as state.weekPlan.
 async function planWeek(){
+  const plan=await planWeekData();
+  state.weekPlan=plan;
+  if(window.console){
+    const n=plan.reduce((a,d)=>a+d.length,0);
+    console.log("[planWeek] installed",n,"events across",plan.filter(d=>d.length).length,"days");
+  }
+  refreshCurrentView();
+}
+
+// Generates a week-plan structure (5 days of events) without mutating state.weekPlan.
+async function planWeekData(){
   const teachers=otherTeachers();
   if(!teachers.length)return;
   const notable=pickNotableStudents(6);
@@ -2220,40 +2250,38 @@ Story updates needed (${storyTargets.length}):
 ${storySpec}
 
 Return ONLY the JSON object.`;
-  const data=await aiJSON(prompt,{retries:4,timeout:75000});
-  // Initialize a fresh 5-day plan. Even on partial failure, populate what we can.
-  state.weekPlan=[[],[],[],[],[]];
-  // Distribute card events across random days of the week.
+  const data=await aiJSON(prompt,{retries:3,timeout:50000});
+  const plan=[[],[],[],[],[]];
+  // Cards (AI reasons) - distributed across random days
   if(data && Array.isArray(data.cards)){
     data.cards.forEach((reason,i)=>{
       const p=plans[i];if(!p||!reason)return;
       const day=Math.floor(Math.random()*5);
-      state.weekPlan[day].push({type:"card",studentId:p.student.id,color:p.color,reason,by:p.teacher.name});
+      plan[day].push({type:"card",studentId:p.student.id,color:p.color,reason,by:p.teacher.name});
     });
   }
-  // Gossip - usually mid-week.
+  // Gossip - mid-week
   if(data && typeof data.gossip==="string" && data.gossip.trim()){
-    state.weekPlan[1+Math.floor(Math.random()*3)].push({type:"gossip",text:data.gossip.trim()});
+    plan[1+Math.floor(Math.random()*3)].push({type:"gossip",text:data.gossip.trim()});
   }
-  // Story updates - usually Friday.
+  // Story updates - end of week
   if(data && Array.isArray(data.storyUpdates)){
     data.storyUpdates.forEach((line,i)=>{
       const s=storyTargets[i];if(!s||!line)return;
-      state.weekPlan[4].push({type:"story",studentId:s.id,story:line});
+      plan[4].push({type:"story",studentId:s.id,story:line});
     });
   }
-  // Grades from other teachers - no AI needed, spread across the week.
-  const gradesCount=Math.min(notable.length,2);
+  // Grades from other teachers - NO AI, ALWAYS scheduled even if the AI call above failed
+  const gradesCount=Math.min(notable.length,3);
   for(let i=0;i<gradesCount;i++){
     const s=notable[(i+plans.length)%notable.length].s;
     const teacher=teachers[(i+state.week)%teachers.length];
     const drift=(Math.random()*20-10);
     const score=clamp(s.ability*.65+s.effort*.2+s.mood*.15+drift);
     const day=Math.floor(Math.random()*5);
-    state.weekPlan[day].push({type:"grade",studentId:s.id,subject:teacher.subject,by:teacher.name,score});
+    plan[day].push({type:"grade",studentId:s.id,subject:teacher.subject,by:teacher.name,score});
   }
-  // If TODAY (dayIdx) already passed when AI returned, release its events now.
-  if(state.dayIdx>0)releaseDayEvents(0);   // first day events apply since week just started
+  return plan;
 }
 
 // (legacy) story-driven world simulation kept for any direct caller; unused on day ticks now.
@@ -2420,7 +2448,17 @@ async function runWeeklyAI(){
   _weeklyRunning=true;
   try{
     tickMissions();
-    await planWeek();              // ONE combined call - results are spread across days
+    // Install the pre-planned week if it's ready; otherwise plan now.
+    if(state.nextWeekPlan){
+      state.weekPlan=state.nextWeekPlan;
+      state.nextWeekPlan=null;
+      if(window.console)console.log("[runWeeklyAI] installed pre-planned week");
+      refreshCurrentView();
+    }else{
+      await planWeek();
+    }
+    // Kick off the NEXT week's plan in the background so it's ready next time.
+    preplanNextWeek();
     await tickPendingReplies();
     await tickMessages(true);
     checkFireConditions();
