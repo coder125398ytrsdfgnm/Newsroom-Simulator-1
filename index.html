@@ -355,23 +355,17 @@ function aiEnqueue(task){
   return run;
 }
 async function _aiOnce(prompt,opts={}){
+  // GET-only. Pollinations' POST endpoint doesn't handle browser CORS preflight,
+  // so POST works in node/curl but fails silently in the browser. GET is reliable.
   const model=opts.model||"openai";
+  const url="https://text.pollinations.ai/"+encodeURIComponent(prompt)+
+    "?model="+encodeURIComponent(model)+"&seed="+Math.floor(Math.random()*1e6)+
+    (opts.jsonMode?"&json=true":"");
   const ctrl=new AbortController();
   const to=setTimeout(()=>ctrl.abort(),opts.timeout||60000);
   let resp;
   try{
-    resp=await fetch("https://text.pollinations.ai/",{
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({
-        messages:[{role:"user",content:prompt}],
-        model,
-        seed:Math.floor(Math.random()*1e6),
-        private:true,
-        jsonMode:!!opts.jsonMode
-      }),
-      signal:ctrl.signal
-    });
+    resp=await fetch(url,{signal:ctrl.signal});
   }finally{clearTimeout(to);}
   const txt=await resp.text();
   if(!resp.ok){
@@ -379,8 +373,8 @@ async function _aiOnce(prompt,opts={}){
     err.status=resp.status;err.body=txt.slice(0,200);
     throw err;
   }
-  if(/Queue full|"error"\s*:/i.test(txt)){
-    const err=new Error("ai_queue");err.status=429;throw err;
+  if(/Queue full/i.test(txt) || (/^\s*\{[^{]*"error"\s*:/i.test(txt))){
+    const err=new Error("ai_queue");err.status=429;err.body=txt.slice(0,200);throw err;
   }
   return txt.trim().replace(/^```(?:json)?\s*/i,"").replace(/```$/,"").trim()||null;
 }
