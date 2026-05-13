@@ -358,11 +358,12 @@ function aiEnqueue(task){
   return run;
 }
 async function _aiOnce(prompt,opts={}){
+  // `json=true` is unreliable on Pollinations - it sometimes wraps the response.
+  // We just ask for JSON in the prompt and extract via regex.
   const url="https://text.pollinations.ai/"+encodeURIComponent(prompt)+
-    "?model="+AI_MODEL+"&seed="+Math.floor(Math.random()*1e6)+
-    (opts.jsonMode?"&json=true":"");
+    "?model="+AI_MODEL+"&seed="+Math.floor(Math.random()*1e6);
   const ctrl=new AbortController();
-  const to=setTimeout(()=>ctrl.abort(),opts.timeout||45000);
+  const to=setTimeout(()=>ctrl.abort(),opts.timeout||40000);
   let resp;
   try{resp=await fetch(url,{signal:ctrl.signal});}
   finally{clearTimeout(to);}
@@ -404,8 +405,8 @@ function isCompleteJSON(s){
   return c==="]"||c==="}";
 }
 async function aiJSON(prompt,opts={}){
-  const t=await aiText(prompt+"\n\nReply with ONLY valid JSON. No prose. No markdown fences.",{...opts,jsonMode:true});
-  if(!t)return null;
+  const t=await aiText(prompt+"\n\nReply with ONLY valid JSON. No prose. No markdown fences.",opts);
+  if(!t||!isCompleteJSON(t))return null;
   const m=t.match(/[\[{][\s\S]*[\]}]/);
   if(!m)return null;
   try{return JSON.parse(m[0]);}catch(e){
@@ -466,100 +467,92 @@ function makeStudent(id,data){
 }
 
 // Ask the AI for a class roster. Parallel batches for speed + reliability.
-// Compact array format to keep responses well under any truncation limit.
-// One batch of 10 students fits in ~400 chars - safely under output token caps.
-async function generateStudentBatch(n){
+// One tight compact call: students + teachers as ultra-compact arrays.
+// 22 students + 7 teachers = ~1100 chars total, well under truncation.
+async function generateBootBundle(studentCount,teacherCount,excludeSubject){
   const pers=PERSONALITIES.join("|");
   const voices=STUDENT_VOICES.map(v=>v.key).join("|");
-  const prompt=`Make ${n} fictional school students. Return ONLY a JSON array of compact arrays: [["FirstName","LastName","personality","voiceKey"], ...].
-- personality is one of: ${pers}
-- voiceKey is one of: ${voices}
-- ${n} entries exactly.
-- Diverse cultural names (white, Black, Hispanic, Asian, Middle Eastern, South Asian).
-- No prose, no markdown.`;
-  const txt=await aiText(prompt,{retries:3,jsonMode:true,timeout:35000});
-  if(!txt||!isCompleteJSON(txt))return [];
-  const m=txt.match(/\[[\s\S]*\]/);if(!m)return [];
-  let arr;try{arr=JSON.parse(m[0]);}catch(e){return [];}
-  if(!Array.isArray(arr))return [];
-  return arr.filter(x=>Array.isArray(x)&&x.length>=4).map(x=>({
+  const subjects=["Mathematics","English","Science","History","Geography","Art","Music","P.E.","Drama","Computer Science"].filter(s=>s!==excludeSubject);
+  const prompt=`Return ONLY a JSON object in this exact compact shape:
+{"s":[ ${studentCount} entries of ["First","Last","personality","voiceKey"] ],"t":[ ${teacherCount} entries of ["Mr./Ms./Dr. Surname","subject",strictness,"short style phrase"] ]}
+Rules:
+- personality MUST be one of: ${pers}
+- voiceKey MUST be one of: ${voices}
+- teacher subject MUST be a unique pick from: ${subjects.join("|")}
+- strictness is a number between 0.1 and 0.9
+- Diverse cultural names (white, Black, Hispanic, Asian, Middle Eastern, South Asian)
+- Each style phrase under 8 words
+- No markdown. No prose. JSON object only.`;
+  const txt=await aiText(prompt,{retries:4,timeout:55000});
+  if(!txt||!isCompleteJSON(txt))return null;
+  const m=txt.match(/\{[\s\S]*\}/);if(!m)return null;
+  let obj;
+  try{obj=JSON.parse(m[0]);}
+  catch(e){
+    try{obj=JSON.parse(m[0].replace(/,\s*([}\]])/g,"$1"));}catch(_){return null;}
+  }
+  if(!obj||!Array.isArray(obj.s)||!Array.isArray(obj.t))return null;
+  const students=obj.s.filter(x=>Array.isArray(x)&&x.length>=4).map(x=>({
     first:String(x[0]||"").trim(),last:String(x[1]||"").trim(),
     personality:String(x[2]||"").trim(),voiceKey:String(x[3]||"").trim()
   })).filter(d=>d.first&&d.last&&d.personality&&d.voiceKey);
-}
-async function generateTeacherBatch(count,excludeSubject){
-  const subjects=["Mathematics","English","Science","History","Geography","Art","Music","P.E.","Drama","Computer Science"].filter(s=>s!==excludeSubject);
-  const prompt=`Make ${count} school teachers. Return ONLY a JSON array of compact arrays: [["Mr./Ms./Dr. Surname","subject",strict_0_to_1,"short style phrase"], ...].
-- subject is one of: ${subjects.join("|")} (each used at most once).
-- ${count} entries exactly.
-- Varied cultural surnames.
-- No prose.`;
-  const txt=await aiText(prompt,{retries:3,jsonMode:true,timeout:25000});
-  if(!txt||!isCompleteJSON(txt))return [];
-  const m=txt.match(/\[[\s\S]*\]/);if(!m)return [];
-  let arr;try{arr=JSON.parse(m[0]);}catch(e){return [];}
-  if(!Array.isArray(arr))return [];
-  return arr.filter(x=>Array.isArray(x)&&x.length>=4).map(x=>({
+  const teachers=obj.t.filter(x=>Array.isArray(x)&&x.length>=4).map(x=>({
     name:String(x[0]||"").trim(),subject:String(x[1]||"").trim(),
     strict:Math.max(0.1,Math.min(0.9,parseFloat(x[2])||0.5)),
     style:String(x[3]||"").trim()
   })).filter(t=>t.name&&t.subject);
+  return {students,teachers};
 }
 
 async function newCareer(role,name,subject,className){
   const ov=showBusy("Starting the school year...");
-  ov.setProgress(2);
-  const totalStudents=role==="tutor"?22:60;
-  // Split into batches of 10 - safely under any output truncation.
-  const batchSize=10;
-  const studentBatches=Math.ceil(totalStudents/batchSize);
+  ov.setProgress(5);
+  // For subject teachers we need 60 students - that's too many for one call's output cap.
+  // Form tutor: 22 in one call. Subject teacher: 22 + 22 + 22 = three calls (one per class).
+  const perClass=role==="tutor"?22:22;
+  const wantedClasses=role==="tutor"?1:3;
   const teacherCount=7;
-  // Total work units: studentBatches + 1 (teachers)
-  const total=studentBatches+1;
-  let done=0;
-  const tick=(label,sub)=>{
-    ov.update(label);ov.sub(sub||"");
-    ov.setProgress(Math.round((done/total)*100));
-  };
-  tick(`Building roster (1/${total})`,"Class list, first names, voices");
-  const studentsData=[];
-  for(let b=0;b<studentBatches;b++){
-    const n=Math.min(batchSize,totalStudents-b*batchSize);
-    let arr=await generateStudentBatch(n);
-    // one retry on empty
-    if(!arr.length)arr=await generateStudentBatch(n);
-    studentsData.push(...arr);
-    done++;
-    tick(`Building roster (${Math.min(done+1,total)}/${total})`,`${studentsData.length} students so far`);
-  }
-  // dedupe by full name
-  const seen=new Set();
-  const uniqueStudents=studentsData.filter(s=>{const k=(s.first+" "+s.last).toLowerCase();if(seen.has(k))return false;seen.add(k);return true;});
-  if(!uniqueStudents.length){
-    ov.close();alert("AI is having a rough patch. Wait a minute, then try New Career again.");return false;
-  }
-  tick(`Hiring faculty (${total}/${total})`,"");
-  let teachers=await generateTeacherBatch(teacherCount,subject);
-  if(!teachers.length)teachers=await generateTeacherBatch(teacherCount,subject);
-  done++;
-  if(!teachers.length){
-    ov.close();alert("Faculty couldn't load. Try New Career again in a moment.");return false;
-  }
-  // Seat into classes
+  ov.update("Building the school");
+  ov.sub(`Roster + faculty in ${wantedClasses===1?"one call":wantedClasses+" calls"}`);
+
+  let teachers=null;
   const classes=[];
   let idx=0;
-  if(role==="tutor"){
-    const studs=uniqueStudents.slice(0,22).map((d,i)=>makeStudent(idx++*97+i,d)).filter(Boolean);
-    classes.push({name:className||"7A",students:studs});
-  }else{
-    const classNames=["7A","8B","9A"];
-    for(let i=0;i<3;i++){
-      const slice=uniqueStudents.slice(i*20,i*20+20);
-      const studs=slice.map((d,j)=>makeStudent(idx++*97+j,d)).filter(Boolean);
-      if(studs.length)classes.push({name:classNames[i],students:studs});
+  for(let i=0;i<wantedClasses;i++){
+    ov.setProgress(10+Math.round((i/wantedClasses)*80));
+    ov.update(`Class ${i+1} of ${wantedClasses}`);
+    // Only ask for teachers on the FIRST call to save tokens.
+    const wantTeachers=i===0?teacherCount:0;
+    let bundle=await generateBootBundle(perClass,wantTeachers,subject);
+    if(!bundle||!bundle.students.length){
+      // one retry
+      bundle=await generateBootBundle(perClass,wantTeachers,subject);
     }
+    if(!bundle||!bundle.students.length){
+      ov.close();
+      alert("The AI service is having a rough moment. Wait 20-30 seconds and click New Career again.");
+      return false;
+    }
+    if(i===0){
+      teachers=bundle.teachers;
+      if(!teachers||!teachers.length){
+        // try once more for teachers alone
+        const t2=await generateBootBundle(0,teacherCount,subject);
+        teachers=t2?.teachers||[];
+      }
+    }
+    // dedupe by name
+    const seen=new Set();
+    const uniq=bundle.students.filter(s=>{const k=(s.first+" "+s.last).toLowerCase();if(seen.has(k))return false;seen.add(k);return true;});
+    const cname=role==="tutor"?(className||"7A"):(["7A","8B","9A"][i]);
+    const studs=uniq.slice(0,perClass).map((d,j)=>makeStudent(idx++*97+j,d)).filter(Boolean);
+    if(studs.length)classes.push({name:cname,students:studs});
   }
-  if(!classes.length){ov.close();alert("Couldn't seat classes. Try again.");return false;}
+  if(!classes.length){ov.close();alert("Couldn't load classes. Try again.");return false;}
+  if(!teachers||!teachers.length){
+    ov.close();alert("Couldn't load colleagues. Try again.");return false;
+  }
+  ov.setProgress(95);ov.update("Final setup");
   state={
     role,name,subject:role==="subject"?subject:null,
     formClass:role==="tutor"?className:null,
@@ -573,8 +566,8 @@ async function newCareer(role,name,subject,className){
     selectedContact:null,lastMsgWeek:0,
     activity:[],npcTeachers:teachers,pendingReplies:[]
   };
+  await seedContacts();
   ov.setProgress(100);
-  await seedContacts();   // no AI here - just spawns two parent records
   ov.close();
   return true;
 }
@@ -1214,11 +1207,21 @@ async function administer(testId){
       });
       continue;
     }
-    // Written (sa/es): one AI call for the whole class
-    const answers=await classWrittenAnswers(cls.students,q);
+    // Written (sa/es): batch students in groups of 6 (essays) or 10 (short answer)
+    // to keep each response well under output truncation cap.
+    const groupSize=q.type==="es"?6:10;
+    const all=[];
+    for(let g=0;g<cls.students.length;g+=groupSize){
+      const grp=cls.students.slice(g,g+groupSize);
+      overlay.sub(`Question ${qi+1}, students ${g+1}-${Math.min(g+groupSize,cls.students.length)}`);
+      const answers=await classWrittenAnswers(grp,q);
+      all.push(...answers);
+    }
     cls.students.forEach((s,i)=>{
-      const text=answers[i];
-      test.assignments[state.activeClassIdx][s.id].answers[qi]={text:text||"(left blank)"};
+      const text=all[i];
+      test.assignments[state.activeClassIdx][s.id].answers[qi]={
+        text:text||"(left blank)"
+      };
     });
   }
   overlay.setProgress(100);
@@ -1228,25 +1231,32 @@ async function administer(testId){
   showView("grading");
 }
 
-// One AI call - all students answer one written question. Saves N round-trips.
+// One AI call - up to ~10 students answer one written question. Compact format.
 async function classWrittenAnswers(students,q){
   const items=students.map((s,i)=>{
     const ability=(s.ability*.7+s.effort*.2+s.mood*.1)/100;
-    const correctness=ability<.3?"mostly wrong":ability<.55?"partial":ability<.8?"mostly correct with small slip":"correct and clear";
-    return `#${i+1} ${s.first} ${s.last}: voice=${s.voiceKey}, writing=${s.writing}/100, target=${correctness}`;
+    const correctness=ability<.3?"wrong":ability<.55?"partial":ability<.8?"mostly_right":"correct";
+    return `${i+1}. ${s.first}: voice=${s.voiceKey}, write_skill=${s.writing<35?"weak":s.writing<70?"ok":"clean"}, target=${correctness}`;
   }).join("\n");
-  const len=q.type==="sa"?"1 sentence":"2-3 sentences";
-  const prompt=`For each student below, write their answer to the exam question. Each answer must match that student's writing level (drop apostrophes for weak writers, clean prose for strong writers - never advanced vocabulary, these are school kids) and the target correctness (wrong answers should actually be wrong, partial = right idea but a slip, etc.). ${len} max each. No quotation marks, no preamble.
+  const len=q.type==="sa"?"1 short sentence":"2-3 short sentences";
+  const prompt=`Write ${students.length} student answers to ONE exam question. Each must match that student's writing level (weak = drop apostrophes, misspellings; ok = age-appropriate prose with one slip; clean = good prose, never advanced vocab) and correctness target (wrong = actually wrong answer; partial = right idea with a clear mistake; mostly_right = answer correct but a small slip; correct = right and clear). ${len} each.
 
-Question: ${q.prompt}${q.answer?`\n(Teacher's model answer for your reference - do NOT copy it: ${q.answer})`:""}
+Question: ${q.prompt}${q.answer?`\n(Model answer for reference - do NOT copy: ${q.answer})`:""}
 
 Students:
 ${items}
 
-Reply as a JSON array of exactly ${students.length} answer strings, in the same order as the numbered students.`;
-  const data=await aiJSON(prompt,{retries:3,timeout:60000});
-  if(Array.isArray(data))return data.map(x=>typeof x==="string"?x.slice(0,400):null);
-  return students.map(()=>null);
+Return ONLY a JSON array of exactly ${students.length} answer strings, in order. No keys, no preamble.`;
+  const txt=await aiText(prompt,{retries:3,timeout:45000});
+  if(!txt||!isCompleteJSON(txt))return students.map(()=>null);
+  const m=txt.match(/\[[\s\S]*\]/);if(!m)return students.map(()=>null);
+  let arr;
+  try{arr=JSON.parse(m[0]);}
+  catch(e){
+    try{arr=JSON.parse(m[0].replace(/,\s*\]/g,"]"));}catch(_){return students.map(()=>null);}
+  }
+  if(!Array.isArray(arr))return students.map(()=>null);
+  return students.map((_,i)=>typeof arr[i]==="string"?arr[i].slice(0,400):null);
 }
 
 // Student attempts a question. Realism is the goal: skill drives correctness, voice drives style.
