@@ -315,6 +315,9 @@
   </header>
   <div class="ticker" id="ticker">&nbsp;</div>
   <div class="msg-light" id="msgLight" onclick="showView('messages')">New message</div>
+  <div id="aiBusy" style="position:fixed;bottom:18px;left:18px;background:#0e0a07;color:var(--accent);padding:.3em .7em;border-radius:14px;font-size:.78em;border:1px solid var(--accent);z-index:90;display:none">
+    <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent);margin-right:.4em;animation:pulse-red 1.4s infinite"></span>AI working...
+  </div>
   <main>
     <nav class="side" id="sideNav"></nav>
     <section class="view" id="viewHost"></section>
@@ -352,8 +355,14 @@ const SAVE_KEY="chalkdust:save";
 //   - Cloudflare in front of them occasionally returns 5xx -> retry with backoff
 const AI_MODEL="openai";
 let _aiChain=Promise.resolve();
+let _aiInFlight=0;
+function _aiBusyUpdate(){
+  const el=document.getElementById("aiBusy");if(!el)return;
+  el.style.display=_aiInFlight>0?"block":"none";
+}
 function aiEnqueue(task){
-  const run=_aiChain.then(task,task);
+  _aiInFlight++;_aiBusyUpdate();
+  const run=_aiChain.then(task,task).finally(()=>{_aiInFlight--;_aiBusyUpdate();});
   _aiChain=run.catch(()=>{});
   return run;
 }
@@ -520,6 +529,18 @@ async function generateTeachers(count,excludeSubject){
 
 async function newCareer(role,name,subject,className){
   const ov=showBusy("Starting the school year...");
+  try{
+    return await _newCareerImpl(role,name,subject,className,ov);
+  }catch(e){
+    if(window.console)console.error("[newCareer] crashed:",e);
+    alert("Something went wrong starting the year. Refresh the page and try again.");
+    return false;
+  }finally{
+    // Belt and braces - if implementation forgot to close, do it here.
+    setTimeout(()=>{try{ov.close();}catch(_){}},200);
+  }
+}
+async function _newCareerImpl(role,name,subject,className,ov){
   ov.setProgress(3);
   const perClass=role==="tutor"?22:20;
   const wantedClasses=role==="tutor"?1:3;
@@ -587,10 +608,12 @@ async function newCareer(role,name,subject,className){
     activity:[],npcTeachers:teachers,pendingReplies:[]
   };
   await seedContacts();
-  ov.setProgress(98);ov.update("Planning the first week");
-  await planWeek();    // populate state.weekPlan so Monday actually has events
   ov.setProgress(100);
   ov.close();
+  // Plan the first week in the background - user can start clicking around immediately.
+  // We seed an empty plan so releaseDayEvents doesn't break if user advances before AI returns.
+  state.weekPlan=[[],[],[],[],[]];
+  planWeek().catch(e=>{if(window.console)console.warn("[AI] initial planWeek failed:",e);});
   return true;
 }
 
@@ -1397,12 +1420,18 @@ No JSON. No quotes around answers. No preamble. Start the very first line with #
   const parsed=parseDelimited(txt,students.length);
   if(window.console&&parsed.filter(Boolean).length===0)console.warn("[AI] essay batch returned nothing; raw:",txt?.slice(0,300));
   const out=[];
+  // Cap per-student fallbacks: if the batch returned nothing useful, fire at most
+  // 3 single calls (the rest stay null - player can reroll if needed).
+  let fbBudget=parsed.filter(Boolean).length>0?students.length:3;
   for(let i=0;i<students.length;i++){
     if(parsed[i]&&parsed[i].trim()){
       out.push(parsed[i].slice(0,500));
-    }else{
+    }else if(fbBudget>0){
+      fbBudget--;
       const fb=await singleWrittenAnswer(students[i],q);
       out.push(fb||null);
+    }else{
+      out.push(null);
     }
   }
   return out;
@@ -2335,10 +2364,12 @@ async function advanceDay(){
   }
   renderHud();buildNav();refreshCurrentView();
   saveGame(false);
-  // Tick replies and inbound messages on every day, not only weekly.
-  tickPendingReplies().catch(()=>{});
-  // Daily inbound message has a low chance - throttled by tickMessages itself.
-  tickMessages(false).catch(()=>{});
+  // Tick replies and inbound messages in the background. Skip if AI queue is busy
+  // so spamming Next Day doesn't pile up dozens of pending calls.
+  if(_aiInFlight<2){
+    tickPendingReplies().catch(()=>{});
+    tickMessages(false).catch(()=>{});
+  }
 }
 async function advanceWeek(){
   // Skip to end of current week, then start the new week.
