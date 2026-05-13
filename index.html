@@ -342,56 +342,77 @@ const VERSION="0.6";
 const SAVE_KEY="chalkdust:save";
 
 // ============ AI helpers (single point for the no-placeholder rule) ============
-// Pollinations rate-limits anonymous traffic to ONE in-flight request per IP.
-// All AI calls go through a serial queue. 429s trigger a backoff retry.
+// Pollinations is flaky: anonymous IPs queue at 1 in-flight (429) AND the upstream
+// proxies return 502/503/504 frequently. Strategy:
+//   - All calls go through one serial queue (avoid 429)
+//   - Use POST endpoint with messages array (more reliable for long prompts)
+//   - On 5xx/network failure: aggressive backoff + cycle through model fallbacks
+const AI_MODELS=["openai","openai-fast","mistral","llama"];
 let _aiChain=Promise.resolve();
 function aiEnqueue(task){
   const run=_aiChain.then(task,task);
-  _aiChain=run.catch(()=>{});  // never break the chain
+  _aiChain=run.catch(()=>{});
   return run;
 }
 async function _aiOnce(prompt,opts={}){
-  const url="https://text.pollinations.ai/"+encodeURIComponent(prompt)+"?model=openai&seed="+(Math.floor(Math.random()*1e6));
+  const model=opts.model||"openai";
   const ctrl=new AbortController();
-  const to=setTimeout(()=>ctrl.abort(),opts.timeout||45000);
+  const to=setTimeout(()=>ctrl.abort(),opts.timeout||60000);
   let resp;
-  try{resp=await fetch(url,{signal:ctrl.signal});}
-  finally{clearTimeout(to);}
+  try{
+    resp=await fetch("https://text.pollinations.ai/",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({
+        messages:[{role:"user",content:prompt}],
+        model,
+        seed:Math.floor(Math.random()*1e6),
+        private:true,
+        jsonMode:!!opts.jsonMode
+      }),
+      signal:ctrl.signal
+    });
+  }finally{clearTimeout(to);}
   const txt=await resp.text();
-  if(!resp.ok || /"error"\s*:|Queue full/i.test(txt)){
+  if(!resp.ok){
     const err=new Error("ai_http_"+resp.status);
-    err.status=resp.status;err.body=txt;
+    err.status=resp.status;err.body=txt.slice(0,200);
     throw err;
   }
-  let t=txt.trim().replace(/^```(?:json)?\s*/i,"").replace(/```$/,"").trim();
-  return t||null;
+  if(/Queue full|"error"\s*:/i.test(txt)){
+    const err=new Error("ai_queue");err.status=429;throw err;
+  }
+  return txt.trim().replace(/^```(?:json)?\s*/i,"").replace(/```$/,"").trim()||null;
 }
 async function aiText(prompt,opts={}){
-  const tries=opts.retries??3;
+  const tries=opts.retries??5;
   return aiEnqueue(async ()=>{
     let lastErr=null;
     for(let i=0;i<=tries;i++){
+      const model=AI_MODELS[i%AI_MODELS.length];
       try{
-        const t=await _aiOnce(prompt,opts);
+        const t=await _aiOnce(prompt,{...opts,model});
         if(t)return t;
+        // null response - treat as retryable
+        await new Promise(r=>setTimeout(r,800+i*500));
       }catch(e){
         lastErr=e;
-        // 429 / queue full: wait longer between tries
-        const wait=e.status===429?2500+i*1500:600+i*900;
+        const code=e.status||0;
+        // 429: queue full, longest wait. 5xx: upstream flap. 0/abort: network.
+        const wait=code===429?3500+i*1500:code>=500?2200+i*1200:1200+i*900;
         await new Promise(r=>setTimeout(r,wait));
       }
     }
-    if(lastErr&&window.console)console.warn("ai_text failed",lastErr.status,lastErr.message);
+    if(window.console)console.warn("[AI] gave up:",lastErr?.status,lastErr?.message,lastErr?.body);
     return null;
   });
 }
 async function aiJSON(prompt,opts={}){
-  const t=await aiText(prompt+"\n\nReply with ONLY valid JSON. No prose. No markdown fences.",opts);
+  const t=await aiText(prompt+"\n\nReply with ONLY valid JSON. No prose. No markdown fences.",{...opts,jsonMode:true});
   if(!t)return null;
   const m=t.match(/[\[{][\s\S]*[\]}]/);
   if(!m)return null;
   try{return JSON.parse(m[0]);}catch(e){
-    // try to repair trailing commas
     try{return JSON.parse(m[0].replace(/,\s*([}\]])/g,"$1"));}catch(_){return null;}
   }
 }
@@ -400,7 +421,6 @@ async function aiLine(prompt,maxLen=200,opts={}){
   if(!t)return null;
   return t.replace(/^["']|["']$/g,"").replace(/\s+/g," ").slice(0,maxLen);
 }
-
 // Personalities affect how a student writes and reacts.
 const PERSONALITIES=["diligent","lazy","eager","shy","sarcastic","anxious","confident","withdrawn","class-clown","perfectionist"];
 // Writing skill is separate from academic ability - some bright kids write sloppy, etc.
@@ -492,10 +512,15 @@ async function generateClassName(){
 
 async function buildClass(size,onProgress){
   let roster=await generateStudentRoster(size,onProgress);
-  if(!roster||roster.length<Math.floor(size*.6)){
-    // top-up with one more batch if undersized
-    const extra=await generateStudentRoster(size-roster.length,onProgress);
-    if(extra&&extra.length)roster=roster.concat(extra);
+  // top up once if undersized
+  if(!roster||roster.length<Math.floor(size*.5)){
+    const extra=await generateStudentRoster(size-(roster?.length||0),onProgress);
+    if(extra&&extra.length)roster=(roster||[]).concat(extra);
+  }
+  // if everything failed, try one more time with a smaller batch (more likely to succeed)
+  if(!roster||roster.length===0){
+    const small=await generateStudentRoster(Math.min(10,size),onProgress);
+    if(small&&small.length)roster=small;
   }
   if(!roster||!roster.length)return null;
   const name=await generateClassName()||"7A";
