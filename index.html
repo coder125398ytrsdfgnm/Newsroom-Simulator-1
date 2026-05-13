@@ -1194,20 +1194,23 @@ function viewNeeds(){
 // ============================================================
 function viewBuilder(){
   const d=state.draftTest;
-  return `<h2>Test Builder <small class="muted">- drag blocks from the left onto the test</small></h2>
+  const n=d.questions.length;
+  return `<h2>Test Builder <small class="muted">- ${n} question${n===1?"":"s"} · scale: ${SCALES.find(x=>x.key===d.scale)?.label||"Percentage"} · weight: ${d.weight.toFixed(1)}x</small></h2>
     <div class="row">
-      <label>Title: <input id="testTitle" type="text" value="${esc(d.title)}"></label>
+      <label>Title: <input id="testTitle" type="text" value="${esc(d.title)}" style="min-width:200px"></label>
       <label>Scale:
-        <select onchange="state.draftTest.scale=this.value">
+        <select onchange="state.draftTest.scale=this.value;showView('builder')">
           ${SCALES.map(s=>`<option value="${s.key}" ${d.scale===s.key?"selected":""}>${s.label}</option>`).join("")}
         </select>
       </label>
       <label>Weight:
-        <select onchange="state.draftTest.weight=parseFloat(this.value)">
+        <select onchange="state.draftTest.weight=parseFloat(this.value);showView('builder')">
           ${[0.5,1.0,1.5,2.0].map(w=>`<option value="${w}" ${d.weight===w?"selected":""}>${w.toFixed(1)}x</option>`).join("")}
         </select>
       </label>
       <button onclick="aiSuggest()">AI Suggest Question</button>
+      <button onclick="previewTest()">Preview</button>
+      <button onclick="clearDraft()" style="background:#3a1a14">Clear</button>
       <button class="primary" onclick="saveTest()">Save Test</button>
     </div>
     <div class="builder">
@@ -1280,9 +1283,59 @@ function renderDraft(){
       body+=`<textarea rows="2" placeholder="Essay rubric / model points" oninput="upd(${i},'answer',this.value)">${esc(q.answer)}</textarea>`;
     }
     return `<div class="qitem">
-      <button class="rm" onclick="rmQ(${i})">x</button>
+      <div style="float:right">
+        <button class="reroll" onclick="moveQ(${i},-1)" ${i===0?"disabled":""}>up</button>
+        <button class="reroll" onclick="moveQ(${i},1)" ${i===state.draftTest.questions.length-1?"disabled":""}>down</button>
+        <button class="reroll" onclick="dupQ(${i})">duplicate</button>
+        <button class="rm" onclick="rmQ(${i})">x</button>
+      </div>
       <div class="meta">Q${i+1} · ${meta}</div>${body}</div>`;
   }).join("");
+}
+function moveQ(i,dir){
+  const arr=state.draftTest.questions;
+  const j=i+dir;if(j<0||j>=arr.length)return;
+  [arr[i],arr[j]]=[arr[j],arr[i]];
+  renderDraft();
+}
+function dupQ(i){
+  const q=JSON.parse(JSON.stringify(state.draftTest.questions[i]));
+  state.draftTest.questions.splice(i+1,0,q);
+  renderDraft();
+}
+function clearDraft(){
+  if(!state.draftTest.questions.length)return;
+  if(!confirm("Clear all questions from this draft?"))return;
+  state.draftTest.questions=[];
+  renderDraft();
+}
+function previewTest(){
+  const d=state.draftTest;
+  if(!d.questions.length){toast("No questions to preview.");return;}
+  const meta={mc:"Multiple Choice",tf:"True/False",sa:"Short Answer",es:"Essay"};
+  const body=d.questions.map((q,i)=>{
+    let inner=`<div class="prompt">Q${i+1}. ${esc(q.prompt||"(no prompt)")} <small style="opacity:.6">(${meta[q.type]})</small></div>`;
+    if(q.type==="mc"){
+      inner+="<ol type='A' style='margin:.2em 0'>"+q.options.map(o=>`<li>${esc(o||"(blank)")}</li>`).join("")+"</ol>";
+    }else if(q.type==="tf"){
+      inner+="<div>True / False</div>";
+    }else{
+      inner+="<div class='resp' style='min-height:2.5em'></div>";
+    }
+    return `<div class="qp">${inner}</div>`;
+  }).join("");
+  const m=document.createElement("div");m.className="modal";
+  m.innerHTML=`<div class="box" style="max-width:680px">
+    <h2>Preview: ${esc(d.title)}</h2>
+    <div class="paper"><h3>${esc(d.title)}</h3>
+      <div style="opacity:.7;font-size:.9em">Scale: ${SCALES.find(x=>x.key===d.scale)?.label} · Weight: ${d.weight.toFixed(1)}x</div>
+      ${body}
+    </div>
+    <div class="row" style="justify-content:flex-end;margin-top:.6em">
+      <button class="primary" onclick="closeModal()">Close</button>
+    </div></div>`;
+  document.body.appendChild(m);
+  m.onclick=e=>{if(e.target===m)closeModal();};
 }
 function esc(s){return String(s==null?"":s).replace(/[<>"&]/g,c=>({"<":"&lt;",">":"&gt;",'"':"&quot;","&":"&amp;"}[c]));}
 function upd(i,k,v){state.draftTest.questions[i][k]=v;}
@@ -1555,10 +1608,23 @@ function viewGrading(){
   const totalSoFar=sub.perQ.reduce((a,v)=>a+(v==null?0:v),0);
   const marked=sub.perQ.filter(v=>v!=null).length;
   const avgSoFar=marked?(totalSoFar/marked):0;
-  return `<h2>Grading - "${esc(t.title)}" (${currentClass().name})
-    <small class="muted">Scale: ${SCALES.find(x=>x.key===t.scale)?.label||t.scale} · Weight: ${t.weight.toFixed(1)}x</small></h2>
+  // class progress so far
+  const classScored=cls.students.filter(st=>asn[st.id].scored);
+  const classAvg=classScored.length?classScored.reduce((a,st)=>a+asn[st.id].score,0)/classScored.length:0;
+  // Jumper - mini buttons per student showing scored/unscored
+  const jumper=cls.students.map((st,i)=>{
+    const ss=asn[st.id];
+    const isHere=i===idx;
+    const cls2=ss.scored?"primary":"";
+    const dot=ss.scored?"":(ss.perQ.some(v=>v!=null)?" ·":" ");
+    return `<button class="${cls2}" style="padding:.2em .4em;${isHere?'outline:2px solid var(--accent);':''}font-size:.78em;min-width:2em"
+      onclick="state.gradingPage=${i};showView('grading')" title="${esc(st.name)}${ss.scored?' - '+fmtScore(ss.score,t.scale):''}">${i+1}${dot}</button>`;
+  }).join("");
+  return `<h2>Grading - "${esc(t.title)}" (${cls.name})
+    <small class="muted">Scale: ${SCALES.find(x=>x.key===t.scale)?.label||t.scale} · Weight: ${t.weight.toFixed(1)}x · Class avg so far: ${classScored.length?fmtScore(classAvg,t.scale):"-"} (${classScored.length}/${cls.students.length} returned)</small></h2>
     ${classPicker()}
-    <p class="muted">Flip through each paper with the arrows. Score every question yourself, then return the test.</p>
+    <p class="muted">Flip through each paper with the arrows, or jump using the buttons below. Score every question, then return the test.</p>
+    <div style="display:flex;flex-wrap:wrap;gap:.2em;margin:.4em 0;padding:.4em;background:#1b1410;border-radius:6px">${jumper}</div>
     <div class="pager">
       <button class="arrow" onclick="gradePage(-1,${t.id})" ${idx===0?"disabled":""}>&larr;</button>
       <div><b>Paper ${idx+1} / ${cls.students.length}</b> · ${s.name} ${sub.scored?`<small style="color:var(--green)">(returned: ${sub.score.toFixed(0)})</small>`:`<small class="muted">(${marked}/${t.questions.length} marked)</small>`}</div>
@@ -1605,24 +1671,26 @@ async function returnPaper(testId,sid){
   const s=findStudent(sid);
   s.grades.push({testId,score,scale:t.scale,weight:t.weight});
   toast(`${s.name}: ${fmtScore(score,t.scale)} returned.`);
-  // student reaction (best-effort AI)
-  studentReaction(s,score).then(line=>{if(line)toast(`${s.first}: "${line}"`);});
-  // mission check: pass-the-test missions
+  // Reaction comes LATER as a message in the inbox, not as a toast during grading.
+  queueGradeReaction(s,score,t);
   checkTestMissions(s,score);
-  // auto-advance to next unscored paper
   const cls=currentClass();
   const next=cls.students.findIndex((st,i)=>i>state.gradingPage && !t.assignments[state.activeClassIdx][st.id].scored);
   if(next>=0)state.gradingPage=next;
   showView("grading");
 }
-async function studentReaction(s,score){
-  const tone=score>=85?"happy and a bit proud":score>=65?"relieved":score>=45?"disappointed":"upset, possibly defensive";
-  const v=STUDENT_VOICES.find(v=>v.key===s.voiceKey)||STUDENT_VOICES[0];
-  const prompt=`In one short sentence, in the voice of a school student called ${s.first} (style: ${v.style}), react to getting back a test with score ${score.toFixed(0)}/100. They feel ${tone}. No quotation marks, no preamble. Keep it under 14 words.`;
-  try{
-    const r=await fetch("https://text.pollinations.ai/"+encodeURIComponent(prompt));
-    return (await r.text()).trim().replace(/^["']|["']$/g,"").slice(0,120);
-  }catch(e){return "";}
+
+// Queue a student message reaction to a returned grade. Lands as a message 1-3 days later.
+function queueGradeReaction(student,score,test){
+  const c=ensureStudentContact(student);
+  state.pendingReplies.push({
+    contactId:c.id,studentId:student.id,
+    fireAtTick:tickCounter()+1+Math.floor(Math.random()*3),
+    kind:"gradeReaction",
+    score,scale:test.scale,testTitle:test.title,
+    inReplyTo:`Their ${test.title} came back with a grade of ${fmtScore(score,test.scale)} (${score.toFixed(0)}/100).`,
+    subject:`Re: ${test.title}`
+  });
 }
 
 // ============================================================
@@ -2079,7 +2147,18 @@ async function tickPendingReplies(){
   state.pendingReplies.splice(dueIdx,1);
   const c=state.contacts.find(x=>x.id===r.contactId);if(!c)return;
   let prompt,senderName;
-  if(r.kind==="staff"){
+  if(r.kind==="gradeReaction"){
+    const s=findStudent(r.studentId);if(!s)return;
+    senderName=s.first;
+    const tone=r.score>=85?"happy and a little proud":r.score>=65?"relieved":r.score>=45?"disappointed":"upset, possibly defensive";
+    const v=STUDENT_VOICES.find(v=>v.key===s.voiceKey)||STUDENT_VOICES[0];
+    const writeHint=s.writing<35?"Bad spelling, drops apostrophes, run-on sentences.":
+                    s.writing<70?"OK writing for their age - one tiny slip is fine.":
+                                  "Clean for a student - still age-appropriate.";
+    prompt=`Write a SHORT email FROM ${s.first} (a school student, personality: ${s.personality}) TO Ms. ${state.name}, reacting to getting their ${r.testTitle} back with a grade of ${fmtScore(r.score,r.scale)} (${r.score.toFixed(0)}/100). They feel ${tone}.
+Voice: ${v.style}. ${writeHint}
+Rules: 1-3 sentences. May ask a follow-up question or thank/complain - choose what fits the personality. No markdown, no quotation marks around the whole thing. Just the body.`;
+  }else if(r.kind==="staff"){
     const t=state.npcTeachers[r.teacherIdx];if(!t)return;
     senderName=t.name;
     prompt=`Write a SHORT reply FROM ${t.name} (${t.subject} teacher, style: ${t.style}, strictness ${t.strict?.toFixed?.(1)||0.5}) TO Ms. ${state.name}, in response to:\n"""${r.inReplyTo}"""\nRules: 1-3 sentences. Professional but with personality matching the style. No markdown. No quotation marks. Just the message body.`;
