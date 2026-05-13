@@ -238,6 +238,7 @@
   .pill.g{background:var(--green);color:#000}
   .pill.y{background:var(--yellow);color:#000}
   .pill.p{background:var(--purple);color:#fff}
+  .pill.r{background:var(--red);color:#fff}
 </style>
 </head>
 <body>
@@ -305,6 +306,7 @@
       <span>Week <b id="week">1</b></span>
       <span>Day <b id="day">Mon</b></span>
       <span>Reputation <b id="rep">10</b></span>
+      <span>Rating <span id="ratingHud"></span></span>
     </div>
     <div>
       <button onclick="advanceDay()">Next Day</button>
@@ -711,6 +713,10 @@ function renderHud(){
   document.getElementById("day").textContent=DAYS[state.dayIdx];
   document.getElementById("rep").textContent=state.rep;
   document.getElementById("rank").textContent=state.rank;
+  const r=computeRating();state.rating=r;
+  const lab=ratingLabel(r);
+  const el=document.getElementById("ratingHud");
+  if(el)el.innerHTML=`<span class="pill ${lab.cls}">${r.toFixed(0)} · ${lab.label}</span>`;
 }
 
 // ============================================================
@@ -764,9 +770,12 @@ function viewClassroom(){
 function openStudent(id,canAdminister){
   const c=currentClass();
   const s=c.students.find(x=>x.id===id);
-  const cardHist=s.cards.length?s.cards.slice().reverse().map(c=>
-    `<li><span class="pill ${c.color[0]}">${c.color}</span> wk ${c.week} - <i>${esc(c.reason)}</i> <small class="muted">by ${esc(c.by)}</small></li>`
-  ).join(""):"<li><i>No cards yet.</i></li>";
+  const canRevoke=state.role==="tutor";
+  const cardHist=s.cards.length?s.cards.map((c,i)=>({c,i})).reverse().map(({c,i})=>{
+    const isMine=c.by==="Ms. "+state.name;
+    const revoke=canRevoke&&!isMine?`<button class="reroll" onclick="revokeCard(${id},${i})">revoke</button>`:"";
+    return `<li><span class="pill ${c.color[0]}">${c.color}</span> wk ${c.week} - <i>${esc(c.reason)}</i> <small class="muted">by ${esc(c.by)}</small> ${revoke}</li>`;
+  }).join(""):"<li><i>No cards yet.</i></li>";
   const adminBtns=canAdminister?`
     <h3>Issue a card</h3>
     <div class="row">
@@ -813,6 +822,142 @@ function messageStudent(id){
   setTimeout(()=>{const sel=document.getElementById("composeStudent");if(sel)sel.value=id;},10);
 }
 function closeModal(){document.querySelectorAll(".modal").forEach(m=>m.remove());}
+
+// ============================================================
+// CARD REVOCATION (form tutor only)
+// ============================================================
+function revokeCard(studentId,cardIdx){
+  if(state.role!=="tutor"){toast("Only form tutors can revoke cards.");return;}
+  const s=findStudent(studentId);if(!s)return;
+  const c=s.cards[cardIdx];if(!c)return;
+  if(c.by==="Ms. "+state.name){toast("Can't revoke your own card.");return;}
+  if(!confirm(`Revoke ${c.by}'s ${c.color} card on ${s.first} ("${c.reason}")? It will annoy them and cost reputation.`))return;
+  // restore the mood impact
+  if(c.color==="green")s.mood=clamp(s.mood-2);
+  if(c.color==="yellow")s.mood=clamp(s.mood+4);
+  if(c.color==="purple")s.mood=clamp(s.mood-6);
+  s.cards.splice(cardIdx,1);
+  state.rep=Math.max(0,state.rep-2);
+  state.revokedCount=(state.revokedCount||0)+1;
+  logActivity({type:"gossip",text:`You revoked a ${c.color} card ${c.by} gave ${s.first}. Word will get around.`});
+  toast(`Card revoked. -2 rep.`);
+  closeModal();renderHud();buildNav();refreshCurrentView();
+  saveGame(false);
+}
+
+// ============================================================
+// RATING / FIRING
+// ============================================================
+function computeRating(){
+  if(!state)return 50;
+  let r=50;
+  r+=Math.min(30,state.rep*.5);
+  // class average across all classes
+  const allStudents=state.classes.flatMap(c=>c.students);
+  const avgs=allStudents.map(s=>avg(s)).filter(v=>v>0);
+  const classAvg=avgs.length?avgs.reduce((a,b)=>a+b,0)/avgs.length:0;
+  if(classAvg)r+=(classAvg-60)*.4;
+  // missions
+  const done=state.missions.filter(m=>m.status==="done").length;
+  const failed=state.missions.filter(m=>m.status==="failed").length;
+  r+=done*2-failed*3;
+  // unread punishment - ignoring parents is bad
+  const unread=state.messages.filter(m=>!m.fromMe&&!m.read).length;
+  r-=unread*2;
+  // revocations - overriding colleagues is bad
+  r-=(state.revokedCount||0)*1.5;
+  return Math.max(0,Math.min(100,r));
+}
+function ratingLabel(r){
+  if(r>=85)return {label:"Exemplary",cls:"g"};
+  if(r>=70)return {label:"Strong",cls:"g"};
+  if(r>=55)return {label:"Acceptable",cls:""};
+  if(r>=40)return {label:"At Risk",cls:"y"};
+  if(r>=25)return {label:"On Notice",cls:"y"};
+  return {label:"Termination Likely",cls:"r"};
+}
+function checkFireConditions(){
+  const r=computeRating();
+  state.rating=r;
+  // formal warning at 25
+  if(r<25 && !state.warned){
+    state.warned=true;
+    toast("Principal: 'A word in my office, please.'");
+    logActivity({type:"gossip",text:`Principal sent for you - performance review on the desk.`});
+  }
+  // fire at 10 or rep 0 for 3+ weeks
+  if(r<10){
+    fireMe("Your rating has bottomed out. The principal hands you a cardboard box.");
+  }
+}
+function fireMe(reason){
+  saveGame(false);
+  alert("YOU'VE BEEN FIRED\n\n"+reason+"\n\nReturning to main menu.");
+  state=null;
+  try{localStorage.removeItem(SAVE_KEY);}catch(e){}
+  document.getElementById("game").classList.remove("active");
+  document.getElementById("menu").classList.remove("hidden");
+  refreshContinueButton();
+}
+
+// ============================================================
+// MESSAGING OTHER TEACHERS
+// ============================================================
+function ensureTeacherContact(teacher){
+  let c=state.contacts.find(x=>x.kind==="staff"&&x.name===teacher.name);
+  if(!c){
+    c={id:"c"+Date.now()+Math.floor(Math.random()*999),
+      kind:"staff",name:teacher.name,voiceKey:"staff",
+      teacherSubject:teacher.subject,teacherStrict:teacher.strict,teacherStyle:teacher.style,
+      relation:teacher.subject+" teacher",msgCount:0};
+    state.contacts.push(c);
+  }
+  return c;
+}
+function openComposeTeacher(){
+  const teachers=(state.npcTeachers||[]).slice();
+  if(!teachers.length){toast("No colleagues to write to yet.");return;}
+  const m=document.createElement("div");m.className="modal";
+  m.innerHTML=`<div class="box">
+    <h2>Write to a Colleague</h2>
+    <p class="muted">Other teachers will reply if they have time and you're not being unreasonable.</p>
+    <label>Teacher:
+      <select id="composeTeacher">
+        ${teachers.map((t,i)=>`<option value="${i}">${esc(t.name)} (${esc(t.subject)}) - ${esc(t.style||"")}</option>`).join("")}
+      </select>
+    </label>
+    <div class="row"><label style="flex:1">Subject: <input id="composeSubject" type="text" placeholder="Subject" style="width:100%"></label></div>
+    <textarea id="composeBody" rows="5" placeholder="Write your message..." style="width:100%"></textarea>
+    <div class="row" style="justify-content:flex-end">
+      <button onclick="closeModal()">Cancel</button>
+      <button class="primary" onclick="sendTeacherMessage()">Send</button>
+    </div>
+  </div>`;
+  document.body.appendChild(m);
+  m.onclick=e=>{if(e.target===m)closeModal();};
+}
+function sendTeacherMessage(){
+  const idx=+document.getElementById("composeTeacher").value;
+  const teacher=state.npcTeachers[idx];if(!teacher)return;
+  const subject=(document.getElementById("composeSubject").value||"").trim()||"(no subject)";
+  const body=(document.getElementById("composeBody").value||"").trim();
+  if(!body){toast("Write something first.");return;}
+  const c=ensureTeacherContact(teacher);
+  state.messages.push({id:"m"+Date.now(),contactId:c.id,fromMe:true,subject,body,
+    week:state.week,day:DAYS[state.dayIdx],read:true});
+  // schedule reply - other teachers usually reply (60-80%)
+  if(Math.random()<.7){
+    state.pendingReplies.push({
+      contactId:c.id,teacherIdx:idx,
+      fireAtTick:tickCounter()+1+Math.floor(Math.random()*3),
+      inReplyTo:body.slice(0,300),subject,kind:"staff"
+    });
+  }
+  closeModal();
+  state.selectedContact=c.id;
+  showView("messages");buildNav();
+  toast(`Message to ${teacher.name} sent.`);
+}
 function saveNote(id){
   const s=findStudent(id);
   s.notes=document.getElementById("noteBox").value;
@@ -1522,7 +1667,10 @@ function viewMessages(){
     `<div style="padding:.5em 1em;background:#1b1410;border-bottom:1px solid #3a2b20">
       ${linkedMissions.map(m=>renderMission(m)).join("")}
     </div>`:"";
-  return `<h2>Messages <button onclick="openComposeStudent()" style="float:right">Compose to Student</button></h2>
+  return `<h2>Messages
+    <button onclick="openComposeStudent()" style="float:right;margin-left:.3em">Compose to Student</button>
+    <button onclick="openComposeTeacher()" style="float:right">Compose to Colleague</button>
+    </h2>
     <div class="msg-layout">
       <div class="contacts-list">${contactRows}</div>
       <div class="thread">
@@ -1639,27 +1787,33 @@ function maybeScheduleStudentReply(student,contact,originalMsg){
 function tickCounter(){return state.week*5+state.dayIdx;}
 async function tickPendingReplies(){
   const now=tickCounter();
-  // Process at most 1 reply per tick to keep AI bandwidth for cards/messages.
   const dueIdx=state.pendingReplies.findIndex(r=>r.fireAtTick<=now);
   if(dueIdx<0)return;
-  const due=[state.pendingReplies[dueIdx]];
+  const r=state.pendingReplies[dueIdx];
   state.pendingReplies.splice(dueIdx,1);
-  for(const r of due){
-    const s=findStudent(r.studentId);const c=state.contacts.find(x=>x.id===r.contactId);
-    if(!s||!c)continue;
+  const c=state.contacts.find(x=>x.id===r.contactId);if(!c)return;
+  let prompt,senderName;
+  if(r.kind==="staff"){
+    const t=state.npcTeachers[r.teacherIdx];if(!t)return;
+    senderName=t.name;
+    prompt=`Write a SHORT reply FROM ${t.name} (${t.subject} teacher, style: ${t.style}, strictness ${t.strict?.toFixed?.(1)||0.5}) TO Ms. ${state.name}, in response to:\n"""${r.inReplyTo}"""\nRules: 1-3 sentences. Professional but with personality matching the style. No markdown. No quotation marks. Just the message body.`;
+  }else{
+    const s=findStudent(r.studentId);if(!s)return;
+    senderName=s.first;
     const v=STUDENT_VOICES.find(v=>v.key===s.voiceKey)||STUDENT_VOICES[0];
     const writeHint=s.writing<35?"Bad spelling, drops apostrophes, run-on sentences.":
                     s.writing<70?"OK writing for their age - one tiny slip is fine.":
                                   "Clean for a student - still age-appropriate.";
-    const prompt=`Write a SHORT reply email/message FROM ${s.first} (a school student) TO their teacher Ms. ${state.name}, in response to this message they received:\n"""${r.inReplyTo}"""\nVoice: ${v.style}. ${writeHint}. Personality: ${s.personality}. Story context: ${s.story}.\nRules: 1-3 sentences MAX. Sound real, not perfect. No markdown. No quotation marks around the whole thing. Just the message body.`;
-    const body=await aiLine(prompt,700);
-    if(!body)continue;     // no placeholder
-    state.messages.push({id:"m"+Date.now()+Math.floor(Math.random()*999),
-      contactId:c.id,fromMe:false,subject:r.subject?"Re: "+r.subject:"",body,
-      week:state.week,day:DAYS[state.dayIdx],read:false});
-    c.msgCount++;
-    toast(`${s.first} replied.`);
+    prompt=`Write a SHORT reply FROM ${s.first} (a school student) TO Ms. ${state.name}, in response to:\n"""${r.inReplyTo}"""\nVoice: ${v.style}. ${writeHint}. Personality: ${s.personality}. ${s.story?`Story context: ${s.story}`:""}\nRules: 1-3 sentences MAX. No markdown. No quotation marks around the whole thing.`;
   }
+  const body=await aiLine(prompt,700);
+  if(!body)return;
+  state.messages.push({id:"m"+Date.now()+Math.floor(Math.random()*999),
+    contactId:c.id,fromMe:false,subject:r.subject?"Re: "+r.subject:"",body,
+    week:state.week,day:DAYS[state.dayIdx],read:false});
+  c.msgCount++;
+  toast(`${senderName} replied.`);
+  buildNav();
 }
 
 // ============================================================
@@ -1965,9 +2119,10 @@ async function runWeeklyAI(){
   _weeklyRunning=true;
   try{
     tickMissions();
-    await simulateWeek();          // one combined call - cards, gossip, story updates
+    await simulateWeek();
     await tickPendingReplies();
     await tickMessages(true);
+    checkFireConditions();
     renderHud();buildNav();refreshCurrentView();
     saveGame(false);
   }finally{_weeklyRunning=false;}
