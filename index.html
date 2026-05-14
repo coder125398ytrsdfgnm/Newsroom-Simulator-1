@@ -374,6 +374,39 @@ const SAVE_KEY="chalkdust:save";
 //   - Long responses get truncated at the model's output token limit -> keep calls small
 //   - Cloudflare in front of them occasionally returns 5xx -> retry with backoff
 const AI_MODEL="openai";
+const AI_CACHE_KEY="chalkdust:aicache";
+const AI_CACHE_TTL=24*60*60*1000;
+
+let _aiCacheMap=null;
+function _aiCacheLoad(){
+  if(_aiCacheMap)return _aiCacheMap;
+  try{const raw=localStorage.getItem(AI_CACHE_KEY);_aiCacheMap=raw?new Map(JSON.parse(raw)):new Map();}
+  catch(e){_aiCacheMap=new Map();}
+  return _aiCacheMap;
+}
+function _aiCachePersist(){
+  try{
+    const arr=[..._aiCacheLoad().entries()];
+    if(arr.length>250)arr.splice(0,arr.length-250);
+    localStorage.setItem(AI_CACHE_KEY,JSON.stringify(arr));
+  }catch(e){}
+}
+function _aiCacheKey(prompt){
+  let h=2166136261;
+  for(let i=0;i<prompt.length;i++){h^=prompt.charCodeAt(i);h=Math.imul(h,16777619);}
+  return (h>>>0).toString(36);
+}
+function aiCacheGet(prompt){
+  const e=_aiCacheLoad().get(_aiCacheKey(prompt));
+  if(!e||Date.now()-e.t>AI_CACHE_TTL)return null;
+  return e.v;
+}
+function aiCacheSet(prompt,value){
+  if(!value)return;
+  _aiCacheLoad().set(_aiCacheKey(prompt),{t:Date.now(),v:value});
+  _aiCachePersist();
+}
+
 let _criticalWork=0;
 let _criticalTask="";
 function beginCritical(task){_criticalWork++;_criticalTask=task||"AI catching up";updateCriticalUI();}
@@ -456,6 +489,11 @@ async function _aiOnce(prompt,opts={}){
   return txt.trim().replace(/^```(?:json)?\s*/i,"").replace(/```$/,"").trim()||null;
 }
 async function aiText(prompt,opts={},extras={}){
+  // Cache shortcut - same prompt within 24h returns instantly without hitting Pollinations.
+  if(opts.cache!==false){
+    const cached=aiCacheGet(prompt);
+    if(cached)return cached;
+  }
   const tries=opts.retries??3;
   return aiEnqueue(async ()=>{
     let lastErr=null;
@@ -463,7 +501,7 @@ async function aiText(prompt,opts={},extras={}){
       try{
         const t=await _aiOnce(prompt,opts);
         if(t){
-          // If the gate is open, briefly show the response in the live panel.
+          if(opts.cache!==false)aiCacheSet(prompt,t);
           if(_criticalWork>0)gateLiveShow(t);
           return t;
         }
@@ -699,19 +737,14 @@ async function _newCareerImpl(role,name,subject,className,ov){
     activity:[],npcTeachers:teachers,pendingReplies:[]
   };
   await seedContacts();
-  ov.setProgress(94);ov.update("Planning the first week");
-  // Wait for the first week's plan so Monday actually has events.
-  // Use a hard cap so a slow AI can't trap us here.
-  try{
-    await Promise.race([
-      planWeek(),
-      new Promise(r=>setTimeout(r,18000))
-    ]);
-  }catch(e){if(window.console)console.warn("[planWeek] first failed:",e);}
-  // Kick off PRE-PLANNING of week 2 in the background while you play week 1.
-  preplanNextWeek();
   ov.setProgress(100);
   ov.close();
+  // Seed an empty plan so Monday clicks don't break before AI returns.
+  state.weekPlan=[[],[],[],[],[]];
+  // Plan week 1 in the BACKGROUND. Game opens immediately - events fill in as you play.
+  planWeek().catch(e=>{if(window.console)console.warn("[planWeek] failed:",e);});
+  // Pre-plan week 2 also in background.
+  preplanNextWeek();
   return true;
 }
 
@@ -1899,20 +1932,24 @@ async function _streamFillAnswersImpl(testId,classIdx,test,cls,asn){
     });
   }
   refreshIfGrading();
-  // Written questions: ONE AI call per question returns three archetype answers.
-  // Each student is assigned an archetype based on their ability bucket.
-  // This collapses 22 sequential calls down to 1 per question - 20x faster.
-  for(let qi=0;qi<test.questions.length;qi++){
-    const q=test.questions[qi];
-    if(q.type!=="sa"&&q.type!=="es"&&q.type!=="fib")continue;
-    // Mark all pending students as "thinking" for this question
-    cls.students.forEach(s=>{
-      if(asn[s.id].absent)return;
+  // Written questions: ONE AI call for THE WHOLE TEST returns archetypes for every written question.
+  const writtenIdxs=test.questions.map((q,i)=>(q.type==="sa"||q.type==="es"||q.type==="fib")?i:-1).filter(i=>i>=0);
+  if(!writtenIdxs.length)return;
+  // Mark all pending as thinking
+  cls.students.forEach(s=>{
+    if(asn[s.id].absent)return;
+    writtenIdxs.forEach(qi=>{
       const ans=asn[s.id].answers[qi];
       if(ans.pending)asn[s.id].answers[qi]={text:null,pending:true,writing:true};
     });
-    refreshIfGrading();
-    const arch=await archetypeAnswers(q);
+  });
+  refreshIfGrading();
+  // Single combined call for all written questions in this test.
+  const allArchs=await archetypeAnswersForTest(test,writtenIdxs);
+  for(let qi=0;qi<test.questions.length;qi++){
+    const q=test.questions[qi];
+    if(q.type!=="sa"&&q.type!=="es"&&q.type!=="fib")continue;
+    const arch=allArchs?.[qi];
     if(!arch){
       // AI failure - leave them pending; user can reroll individually.
       cls.students.forEach(s=>{
@@ -1948,8 +1985,56 @@ async function _streamFillAnswersImpl(testId,classIdx,test,cls,asn){
   }
 }
 
-// ONE call per question - returns SIX distinct student answers across the skill spectrum.
-// Each student gets a unique-feeling answer. Variety with one round-trip.
+// ONE call for the WHOLE TEST - returns archetypes for every written question at once.
+// Returns array indexed by question position, each entry {wrong:[],partial:[],correct:[]}.
+async function archetypeAnswersForTest(test,writtenIdxs){
+  const subj=state.subject||"the subject";
+  const blocks=writtenIdxs.map((qi,i)=>{
+    const q=test.questions[qi];
+    const wmatch=(q.answer||"").match(/(\d{2,3})\s*words/i);
+    const len=q.type==="sa"?"1 short sentence":q.type==="fib"?"a brief phrase":(q.type==="es"&&wmatch?`~${wmatch[1]} words`:"2-3 sentences");
+    return `Q${i+1} (${q.type.toUpperCase()}, ${len}): ${q.prompt}${q.answer?` | rubric: ${q.answer}`:""}`;
+  }).join("\n");
+  const prompt=`Write student archetype answers for a ${subj} test. For EACH question below, give FOUR distinct student answers at different skill levels (two wrong, two partial, two correct).
+
+${blocks}
+
+Output EXACTLY this format - one block per question, in order:
+===Q1===
+###WRONG-A### <wrong answer in voice 1>
+###WRONG-B### <distinct wrong answer voice 2>
+###PARTIAL-A### <partial voice 3>
+###PARTIAL-B### <partial voice 4>
+###CORRECT-A### <correct voice 5>
+###CORRECT-B### <correct voice 6>
+===Q2===
+... and so on for each question.
+
+No JSON. No preamble. Begin output with ===Q1===.`;
+  const txt=await aiText(prompt,{retries:3,timeout:60000});
+  if(!txt)return null;
+  const out=new Array(test.questions.length).fill(null);
+  writtenIdxs.forEach((qi,i)=>{
+    const re=new RegExp(`===Q${i+1}===([\\s\\S]*?)(?====Q${i+2}===|$)`,"i");
+    const m=txt.match(re);
+    if(!m)return;
+    const block=m[1];
+    const get=(tag)=>{const mm=block.match(new RegExp(`###${tag}###\\s*([\\s\\S]*?)(?=###[A-Z]+-[A-Z]###|$)`,"i"));return (mm?.[1]||"").trim();};
+    const wrong=[get("WRONG-A"),get("WRONG-B")].filter(Boolean);
+    const partial=[get("PARTIAL-A"),get("PARTIAL-B")].filter(Boolean);
+    const correct=[get("CORRECT-A"),get("CORRECT-B")].filter(Boolean);
+    if(wrong.length||partial.length||correct.length){
+      out[qi]={
+        wrong:wrong.length?wrong:["(answer pending)"],
+        partial:partial.length?partial:["(answer pending)"],
+        correct:correct.length?correct:["(answer pending)"]
+      };
+    }
+  });
+  return out;
+}
+
+// Per-question call (used by reroll button).
 async function archetypeAnswers(q){
   const subj=state.subject||"the subject";
   const len=q.type==="sa"?"1 short sentence":q.type==="fib"?"a brief phrase or sentence containing the answer":"2-3 short sentences";
