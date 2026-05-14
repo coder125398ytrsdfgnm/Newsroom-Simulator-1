@@ -906,43 +906,64 @@ function viewFormRoom(){
     <p class="muted">As Form Tutor you cannot administer cards but you have these tools. ${pending} pending need(s) this week.</p>`;
 }
 
-async function callAssembly(){
-  const ov=showBusy("Calling assembly");beginCritical("Drafting assembly remarks");
+function callAssembly(){
+  openComposer({title:"Call Assembly",placeholder:"What will you say to your form class? They're all listening...",
+    onSendName:"applyAssembly"});
+}
+async function applyAssembly(text){
   const cls=currentClass();
-  const prompt=`Write 3-4 sentences of a school assembly speech that the form tutor Ms. ${state.name} would give to her form class ${cls.name}. Tone: warm, motivating, brief. End with a single uplifting line. No markdown. No quotes around the body.`;
-  const txt=await aiLine(prompt,800);
+  state.actionsThisWeek=(state.actionsThisWeek||0)+1;
+  const ov=showBusy("Class is reacting");beginCritical("Class reacts to your speech");
+  const prompt=`A school form tutor named Ms. ${state.name} just delivered THIS assembly speech to her class ${cls.name}:\n"""${text.slice(0,2000)}"""\n\nRate this speech for impact, tone, and appropriateness on a scale from -3 (disastrous, demoralizing or wildly inappropriate) to +3 (truly uplifting). Also write ONE short sentence describing how the class reacted, in observable terms.\n\nReply with ONLY a JSON object: {"score":<integer>,"reaction":"<one sentence>"}`;
+  const data=await aiJSON(prompt,{retries:2,timeout:25000});
   ov.close();endCritical();
-  if(!txt){toast("Assembly drafting failed - try again.");return;}
-  cls.students.forEach(s=>{s.mood=clamp(s.mood+5);s.ability=clamp(s.ability+0.4);});
-  state.rep+=2;state.actionsThisWeek=(state.actionsThisWeek||0)+1;
-  logActivity({type:"gossip",text:`You called an assembly. The class left in better spirits.`});
-  const m=document.createElement("div");m.className="modal";
-  m.innerHTML=`<div class="box"><h2>Assembly remarks</h2>
-    <div style="background:#f7efd9;color:#1b1410;padding:1em;border-radius:6px;font-family:Georgia,serif;white-space:pre-wrap">${esc(txt)}</div>
-    <p class="muted">+5 mood across class · +2 rep</p>
-    <div class="row" style="justify-content:flex-end"><button class="primary" onclick="closeModal()">Done</button></div></div>`;
-  document.body.appendChild(m);m.onclick=e=>{if(e.target===m)closeModal();};
+  const score=data&&typeof data.score==="number"?Math.max(-3,Math.min(3,Math.round(data.score))):1;
+  const reaction=data?.reaction||(score>0?"Class left in better spirits.":"Class shuffled out, unconvinced.");
+  cls.students.forEach(s=>{s.mood=clamp(s.mood+score*3);s.ability=clamp(s.ability+Math.max(0,score)*0.4);});
+  state.rep+=score;
+  logActivity({type:"gossip",text:`Assembly: ${reaction}`});
+  toast(`Assembly: ${score>=0?"+":""}${score} rep · ${reaction}`);
   renderHud();buildNav();saveGame(false);
 }
 
-async function emailAllParents(){
-  const ov=showBusy("Drafting parent newsletter");beginCritical("Drafting parent newsletter");
+function emailAllParents(){
+  openComposer({title:"Email All Parents",placeholder:"Write the message you'll send to every parent in this class...",
+    onSendName:"applyParentEmail"});
+}
+function applyParentEmail(text){
   const cls=currentClass();
-  const overall=cls.students.reduce((a,s)=>a+combinedAvg(s),0)/cls.students.length;
-  const prompt=`Write a SHORT (4-6 sentences) parent newsletter from form tutor Ms. ${state.name} to all parents of ${cls.name}. Mention the class is doing well overall (avg ${overall.toFixed(0)}/100). End with one practical reminder. Plain prose, no markdown.`;
-  const txt=await aiLine(prompt,1000);
-  ov.close();endCritical();
-  if(!txt){toast("Couldn't draft.");return;}
-  // Send to every existing parent contact
+  state.actionsThisWeek=(state.actionsThisWeek||0)+1;
   const parents=state.contacts.filter(c=>c.kind==="parent");
+  if(!parents.length){toast("No parent contacts yet to email.");return;}
   parents.forEach(p=>{
     state.messages.push({id:"m"+Date.now()+Math.floor(Math.random()*999),contactId:p.id,fromMe:true,
-      subject:`Newsletter - ${cls.name}`,body:txt,
+      subject:`Note from Ms. ${state.name}`,body:text,
       week:state.week,day:DAYS[state.dayIdx],read:true});
+    scheduleFollowupFromContact(p,text);
   });
-  state.rep+=3;state.actionsThisWeek=(state.actionsThisWeek||0)+1;
-  toast(`Newsletter sent to ${parents.length} parents. +3 rep.`);
-  renderHud();buildNav();saveGame(false);
+  evaluatePlayerMessage(text,parents[0]);
+  toast(`Sent to ${parents.length} parent${parents.length===1?"":"s"}. Reactions incoming.`);
+  renderHud();buildNav();showView("messages");saveGame(false);
+}
+
+// Generic composer modal for player-written class actions.
+function openComposer({title,placeholder,onSendName}){
+  const m=document.createElement("div");m.className="modal";
+  m.innerHTML=`<div class="box" style="max-width:560px">
+    <h2>${esc(title)}</h2>
+    <p class="muted">This will be evaluated for tone and impact - say what you actually mean.</p>
+    <textarea id="composerBody" rows="6" style="width:100%" placeholder="${esc(placeholder||"")}"></textarea>
+    <div class="row" style="justify-content:flex-end">
+      <button onclick="closeModal()">Cancel</button>
+      <button class="primary" onclick="submitComposer('${onSendName}')">Send</button>
+    </div></div>`;
+  document.body.appendChild(m);m.onclick=e=>{if(e.target===m)closeModal();};
+}
+function submitComposer(fnName){
+  const t=document.getElementById("composerBody")?.value.trim();
+  if(!t){toast("Type something first.");return;}
+  closeModal();
+  const fn=window[fnName];if(typeof fn==="function")fn(t);
 }
 
 function issueClassCommendation(){
@@ -1375,7 +1396,7 @@ function viewRoster(){
       ${!taken?`<button class="primary" onclick="submitAttendance()">Submit</button>`:""}
     </div>
     <table style="margin-top:.5em">
-      <thead><tr><th>Name</th><th>Recent</th><th>Today</th><th>Avg</th><th>Mood/Effort</th><th>Cards (G/Y/P)</th><th>Signal</th></tr></thead>
+      <thead><tr><th>Name</th><th>Recent</th><th>Likely</th><th>Today</th><th>Avg</th><th>Mood/Effort</th><th>Cards (G/Y/P)</th><th>Signal</th></tr></thead>
       <tbody>${cls.students.map(s=>{
         const cc={green:0,yellow:0,purple:0};s.cards.forEach(c=>cc[c.color]++);
         const cur=att[s.id]||"";
@@ -1388,6 +1409,7 @@ function viewRoster(){
         </select>`;
         const noteBtn=`<button class="reroll" onclick="editAttendanceNote(${s.id})" title="${esc(note||'add note')}">${note?"✎":"+"} note</button>`;
         const recent=recentAttendance(s.id,cls.name,5);
+        const likely=predictAttendance(s,recent);
         const recentStrip=recent.map(v=>{
           if(v==="present")return `<span title="present" style="display:inline-block;width:14px;height:14px;background:var(--green);border:1px solid #000;margin-right:1px"></span>`;
           if(v==="late")return `<span title="late" style="display:inline-block;width:14px;height:14px;background:var(--yellow);border:1px solid #000;margin-right:1px"></span>`;
@@ -1398,6 +1420,7 @@ function viewRoster(){
         return `<tr>
           <td class="clickable" onclick="openStudent(${s.id},${state.role==='subject'})">${s.name}</td>
           <td>${recentStrip}</td>
+          <td><small style="color:${likely.color}">${esc(likely.text)}</small></td>
           <td>${sel} ${noteBtn}${note?`<div style="font-size:.75em;opacity:.7;margin-top:.2em">${esc(note)}</div>`:""}</td>
           <td>${combinedAvg(s).toFixed(1)}</td>
           <td><small>${s.mood.toFixed(0)} / ${s.effort.toFixed(0)}</small></td>
@@ -1421,6 +1444,19 @@ function recentAttendance(sid,clsName,n){
     d--;
   }
   return out;
+}
+
+// Predict whether a student is likely to be present today, based on recent attendance and state.
+function predictAttendance(s,recent){
+  const absents=recent.filter(v=>v==="absent").length;
+  const lates=recent.filter(v=>v==="late").length;
+  const excuses=recent.filter(v=>v==="excused").length;
+  if(absents>=3)return {text:"likely absent again",color:"#e26464"};
+  if(s.mood<25)return {text:"might skip - low mood",color:"#e26464"};
+  if(excuses>=2)return {text:"recently excused",color:"#9b59ff"};
+  if(lates>=2)return {text:"running late lately",color:"#f7c948"};
+  if(s.effort>70&&s.mood>60)return {text:"reliable - here",color:"#4caf50"};
+  return {text:"probably here",color:"#888"};
 }
 
 // Tiny signal hint - tells the player what to watch for, derived from real state.
@@ -2430,7 +2466,7 @@ ${brief}
 Rules:
 - Sound like a real person. Subtle imperfections fitting the voice.
 - Length: 2 to 4 sentences MAX.
-- Reference one of the recent facts above if relevant (do NOT invent new ones).
+- ONLY reference facts from the "Recent facts" section above. Do NOT invent homework, projects, assignments, field trips, school events, or anything else that isn't in those facts. If you have no specific fact to reference, keep the message vague.
 - No markdown.
 
 Return ONLY a compact JSON object: {"subject":"<short subject line, max 6 words>","body":"<the message body>"}`;
@@ -2635,6 +2671,20 @@ Reply with ONLY a compact JSON object: {"score":<integer -3..3>,"note":"<6-12 wo
   const data=await aiJSON(prompt,{retries:2,timeout:25000});
   if(!data||typeof data.score!=="number")return;
   const score=Math.max(-3,Math.min(3,Math.round(data.score)));
+  if(data.score<=-3){
+    // Terminable offense - immediate fire after one warning, or instant if pattern
+    state.badMessageCount=(state.badMessageCount||0)+1;
+    if(state.badMessageCount===1){
+      queueDeptWarning("HR",`URGENT: A message you sent to ${audience} was flagged as a fireable offense. One more and you are out. Reason: ${data.note||"serious misconduct"}.`);
+      state.rep=Math.max(0,state.rep-10);
+      toast(`SERIOUS WARNING from HR (-10 rep). One more and you're out.`);
+    }else{
+      // Already warned - fire immediately
+      fireMe(`A message you sent to ${audience} contained: "${data.note||'serious misconduct'}". After a prior warning, this is the end of the road.`);
+    }
+    renderHud();buildNav();saveGame(false);
+    return;
+  }
   if(score===0)return;
   state.rep=Math.max(0,state.rep+score);
   // If the message was to a STUDENT and was kind, nudge their ability up; if cruel, nudge down.
@@ -3270,21 +3320,41 @@ async function weeklyTick(){
       if(need)t.s.flag=need;
     }
   }
-  // quarter / year roll
+  // quarter / year roll (9 weeks per quarter, 4 quarters per year = 36-week school year)
   const newQuarter=Math.floor((state.week-1)/9)+1;
   if(newQuarter>state.quarter){
     const cls=currentClass();
     state.quarterAverages[state.quarter-1]=
-      cls.students.reduce((a,s)=>a+avg(s),0)/cls.students.length||0;
+      cls.students.reduce((a,s)=>a+combinedAvg(s),0)/cls.students.length||0;
+    const finishedQuarter=state.quarter;
     state.quarter=newQuarter;
     if(state.quarter>4){
-      toast(`Year ${state.year} complete.`);
+      // Year complete - show a full year-end summary
+      const yearAvg=state.quarterAverages.filter(v=>v!==null).reduce((a,b)=>a+b,0)/state.quarterAverages.filter(v=>v!==null).length||0;
+      showQuarterCeremony({year:state.year,quarter:null,classAvg:yearAvg,isYear:true});
       state.year++;state.quarter=1;state.week=1;
       state.quarterAverages=[null,null,null,null];
       state.classes.forEach(c=>c.students.forEach(s=>s.grades=[]));
-    }else toast(`Quarter ${state.quarter} begins.`);
+    }else{
+      showQuarterCeremony({year:state.year,quarter:finishedQuarter,classAvg:state.quarterAverages[finishedQuarter-1]||0,isYear:false});
+    }
   }
   applyPromotions();
+}
+
+function showQuarterCeremony(info){
+  const cls=currentClass();
+  const top=cls.students.slice().sort((a,b)=>combinedAvg(b)-combinedAvg(a)).filter(s=>combinedAvg(s)>0).slice(0,3);
+  const m=document.createElement("div");m.className="modal";
+  m.innerHTML=`<div class="box" style="max-width:600px;text-align:center">
+    <h2 style="color:var(--accent)">${info.isYear?`Year ${info.year} Complete`:`Quarter ${info.quarter} Complete`}</h2>
+    <p style="font-size:1.2em">Class average: <b>${info.classAvg.toFixed(1)}</b></p>
+    ${top.length?`<h3>Top performers</h3>
+      <ol style="text-align:left;max-width:300px;margin:0 auto">${top.map(s=>`<li>${esc(s.name)} - ${combinedAvg(s).toFixed(1)}</li>`).join("")}</ol>`:""}
+    <p class="muted" style="margin-top:1em">${info.isYear?`A new school year begins. Grades reset, the students mature, you carry your reputation forward.`:`The bell rings. Quarter ${info.quarter+1} begins.`}</p>
+    <button class="primary" onclick="closeModal()">Onward</button>
+  </div>`;
+  document.body.appendChild(m);m.onclick=e=>{if(e.target===m)closeModal();};
 }
 function clamp(v){return Math.max(0,Math.min(100,v));}
 function refreshCurrentView(){
