@@ -235,6 +235,12 @@
   @keyframes card-flick{0%{transform:translateY(-12px) rotate(-10deg);opacity:0}100%{transform:translateY(0) rotate(0);opacity:1}}
   .cstrip i{animation:card-flick .35s ease-out}
 
+  /* typewriter caret */
+  .typing-target.typing:after,
+  .typing::after{content:"|";color:#7a4a1f;animation:caret-blink .9s steps(2) infinite;margin-left:1px}
+  @keyframes caret-blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+  .typing-target{font-family:"Comic Sans MS","Bradley Hand",cursive;color:#222}
+
   .pill{display:inline-block;padding:.1em .5em;border-radius:10px;font-size:.75em;
     border:1px solid #000;margin-right:.3em}
   .pill.g{background:var(--green);color:#000}
@@ -1636,6 +1642,26 @@ async function administer(testId){
   return;
 }
 
+// Typewriter effect: types `text` into a DOM element. Returns when done.
+async function typewriterInto(el,text){
+  if(!el||!text)return;
+  el.textContent="";
+  el.classList.add("typing");
+  // Hide the caret while idle text; show during typing.
+  let i=0;
+  const total=text.length;
+  while(i<total){
+    // Vary per-tick chars and delay to feel like a real student writing.
+    const burst=2+Math.floor(Math.random()*5);
+    i=Math.min(i+burst,total);
+    el.textContent=text.slice(0,i);
+    // Pause longer at sentence ends.
+    const last=text[i-1];
+    const delay=last==="."||last==="?"||last==="!"?80+Math.random()*60:12+Math.random()*30;
+    await new Promise(r=>setTimeout(r,delay));
+  }
+  el.classList.remove("typing");
+}
 async function streamFillAnswers(testId,classIdx){
   const test=state.tests.find(x=>x.id===testId);if(!test)return;
   const cls=state.classes[classIdx];if(!cls)return;
@@ -1667,8 +1693,16 @@ async function streamFillAnswers(testId,classIdx){
       const ans=asn[s.id].answers[qi];
       if(!ans.pending)continue;
       if(q.type==="sa"||q.type==="es"||q.type==="fib"){
+        // Mark which student is "actively writing" so the UI can highlight them.
+        asn[s.id].answers[qi]={text:null,pending:true,writing:true};
+        refreshIfGrading();
         const txt=await singleWrittenAnswer(s,q);
         asn[s.id].answers[qi]={text:txt||null,pending:false};
+        // If grading view is open on THIS student, typewriter the answer in.
+        const target=document.querySelector(`[data-ans="${testId}-${s.id}-${qi}"]`);
+        if(target && txt){
+          await typewriterInto(target,txt);
+        }
         refreshIfGrading();
       }
     }
@@ -1816,12 +1850,20 @@ function viewGrading(){
   const qBlocks=t.questions.map((q,i)=>{
     const ans=sub.answers[i]||{};
     const isPending=ans.pending && !sub.absent;
-    const respText=sub.absent?
-      `<i style="color:var(--red)">Absent - did not sit the test</i>`:
-      isPending?
-      `<i style="color:var(--accent)">Still writing... <span style="display:inline-block;animation:pulse-red 1.4s infinite;width:6px;height:6px;border-radius:50%;background:var(--accent);vertical-align:middle"></span></i>`:
-      q.type==="mc"||q.type==="tf"?
-      `Chose: <i>${esc(ans.text||"(no answer)")}</i>`:esc(ans.text||"(left blank)");
+    const isWriting=ans.writing && !ans.text;
+    let respText;
+    if(sub.absent){
+      respText=`<i style="color:var(--red)">Absent - did not sit the test</i>`;
+    }else if(q.type==="mc"||q.type==="tf"){
+      respText=`Chose: <i>${esc(ans.text||"(no answer)")}</i>`;
+    }else if(isWriting){
+      // Student is actively writing - empty hook for typewriter to fill in.
+      respText=`<span data-ans="${t.id}-${s.id}-${i}" class="typing-target">${esc(s.first)} is writing...</span>`;
+    }else if(isPending){
+      respText=`<span data-ans="${t.id}-${s.id}-${i}" class="typing-target">${esc(s.first)} is thinking...</span>`;
+    }else{
+      respText=`<span data-ans="${t.id}-${s.id}-${i}">${esc(ans.text||"(left blank)")}</span>`;
+    }
     const cur=sub.perQ[i];
     const tiers=TIERS.map(tr=>`<button class="tier t-${tr.key} ${cur===tr.pct?"sel":""}"
       ${sub.scored?"disabled":""}
@@ -1864,6 +1906,14 @@ function viewGrading(){
     <small class="muted">Scale: ${SCALES.find(x=>x.key===t.scale)?.label||t.scale} · Weight: ${t.weight.toFixed(1)}x · Class avg so far: ${classScored.length?fmtScore(classAvg,t.scale):"-"} (${classScored.length}/${cls.students.length} returned)</small></h2>
     ${classPicker()}
     <p class="muted">Flip through each paper with the arrows, or jump using the buttons below. Score every question, then return the test.</p>
+    ${(()=>{
+      const writers=cls.students.filter(st=>{const a=asn[st.id];return a&&a.answers.some(x=>x.writing);}).slice(0,3);
+      if(!writers.length)return "";
+      return `<div style="background:#241a14;border-left:3px solid var(--accent);padding:.35em .7em;margin-bottom:.5em;font-size:.85em">
+        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent);margin-right:.4em;animation:caret-blink 1s infinite"></span>
+        <b>Live:</b> ${writers.map(w=>esc(w.first)).join(", ")}${writers.length===3?" and others":""} writing now
+      </div>`;
+    })()}
     <div style="display:flex;flex-wrap:wrap;gap:.2em;margin:.4em 0;padding:.4em;background:#1b1410;border-radius:6px">${jumper}</div>
     <div class="pager">
       <button class="arrow" onclick="gradePage(-1,${t.id})" ${idx===0?"disabled":""}>&larr;</button>
