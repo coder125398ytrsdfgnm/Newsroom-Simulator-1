@@ -913,7 +913,7 @@ async function callAssembly(){
   const txt=await aiLine(prompt,800);
   ov.close();endCritical();
   if(!txt){toast("Assembly drafting failed - try again.");return;}
-  cls.students.forEach(s=>s.mood=clamp(s.mood+5));
+  cls.students.forEach(s=>{s.mood=clamp(s.mood+5);s.ability=clamp(s.ability+0.4);});
   state.rep+=2;state.actionsThisWeek=(state.actionsThisWeek||0)+1;
   logActivity({type:"gossip",text:`You called an assembly. The class left in better spirits.`});
   const m=document.createElement("div");m.className="modal";
@@ -951,7 +951,7 @@ function issueClassCommendation(){
   if(!top.length){toast("No grades yet to commend.");return;}
   top.forEach(s=>{
     s.cards.push({color:"green",reason:"Class commendation - top performer this period",week:state.week,by:"Ms. "+state.name});
-    s.mood=clamp(s.mood+6);
+    s.mood=clamp(s.mood+6);s.ability=clamp(s.ability+1.0);
   });
   state.rep+=2;state.actionsThisWeek=(state.actionsThisWeek||0)+1;
   logActivity({type:"gossip",text:`You commended ${top.map(s=>s.first).join(", ")} for outstanding work.`});
@@ -1106,7 +1106,8 @@ async function scheduleDetention(studentId){
   if(!reason||!reason.trim()){toast("Detention needs a reason.");return;}
   s.cards.push({color:"yellow",reason:"DETENTION: "+reason.trim(),week:state.week,by:"Ms. "+state.name});
   s.mood=clamp(s.mood-10);
-  s.effort=clamp(s.effort+5);   // mixed effect - shapes up effort
+  s.effort=clamp(s.effort+8);   // shapes up effort over time
+  s.ability=clamp(s.ability+0.3);   // discipline modestly boosts ability later
   state.rep+=2;
   logActivity({type:"card",text:`You put ${s.first} in detention - "${reason.trim()}"`});
   toast(`${s.first} has detention. +2 rep.`);
@@ -1129,6 +1130,8 @@ async function recommendHonors(studentId){
   const s=findStudent(studentId);if(!s)return;
   s.cards.push({color:"purple",reason:"HONORS recommendation",week:state.week,by:"Ms. "+state.name});
   s.mood=clamp(s.mood+12);
+  s.ability=clamp(s.ability+2.5);     // serious recognition raises the ceiling
+  s.effort=clamp(s.effort+3);
   state.rep+=4;
   logActivity({type:"gossip",text:`You nominated ${s.first} for honors.`});
   toast(`${s.first} recommended for honors. +4 rep.`);
@@ -1330,17 +1333,19 @@ function issueCard(id){
   const s=findStudent(id);
   s.cards.push({color,reason,week:state.week,by:"Ms. "+state.name});
   state.actionsThisWeek=(state.actionsThisWeek||0)+1;
-  if(color==="green"){s.mood=Math.min(100,s.mood+4);state.rep+=1;}
-  if(color==="yellow"){s.mood=Math.max(0,s.mood-6);state.rep-=1;}
-  if(color==="purple"){s.mood=Math.min(100,s.mood+10);state.rep+=3;}
+  // Mood + LONG-TERM ability shift. Investment in a student actually moves the needle.
+  if(color==="green"){s.mood=clamp(s.mood+4);s.ability=clamp(s.ability+0.6);state.rep+=1;}
+  if(color==="yellow"){s.mood=clamp(s.mood-6);s.ability=clamp(s.ability-0.3);state.rep-=1;}
+  if(color==="purple"){s.mood=clamp(s.mood+10);s.ability=clamp(s.ability+1.4);s.effort=clamp(s.effort+1);state.rep+=3;}
   checkCardMissions(s,color);
   toast(`${color} card issued to ${s.name}`);
   closeModal();renderHud();buildNav();showView(state.role==="tutor"?"formroom":"classroom");
 }
 function resolveNeed(id){
   const s=findStudent(id);
-  s.flag=null;s.mood=Math.min(100,s.mood+8);state.rep+=1;
-  toast("Need addressed.");
+  s.flag=null;s.mood=clamp(s.mood+8);s.ability=clamp(s.ability+0.8);s.effort=clamp(s.effort+2);
+  state.rep+=1;state.actionsThisWeek=(state.actionsThisWeek||0)+1;
+  toast(`Need addressed. ${s.first} feels seen.`);
   closeModal();renderHud();
   showView("needs");
 }
@@ -1473,8 +1478,8 @@ function submitAttendance(){
     if(v==="absent"){
       s.effort=clamp(s.effort-3);
       s._absentDays=(s._absentDays||0)+1;
+      s.ability=clamp(s.ability-0.4);     // missing class costs ability over time
       if(s._absentDays>=3 && state.role!=="tutor"){
-        // Auto-yellow card after 3 absences (only from your subject view)
         s.cards.push({color:"yellow",reason:"Repeated absence ("+s._absentDays+" days)",week:state.week,by:"Ms. "+state.name});
         s._absentDays=0;
         logActivity({type:"card",text:`You issued ${s.first} a yellow card - repeated absence`});
@@ -2632,6 +2637,14 @@ Reply with ONLY a compact JSON object: {"score":<integer -3..3>,"note":"<6-12 wo
   const score=Math.max(-3,Math.min(3,Math.round(data.score)));
   if(score===0)return;
   state.rep=Math.max(0,state.rep+score);
+  // If the message was to a STUDENT and was kind, nudge their ability up; if cruel, nudge down.
+  if(contact?.kind==="student"&&contact.studentId!=null){
+    const s=findStudent(contact.studentId);
+    if(s){
+      if(score>=2){s.ability=clamp(s.ability+0.5);s.mood=clamp(s.mood+4);}
+      else if(score<=-2){s.ability=clamp(s.ability-0.4);s.mood=clamp(s.mood-5);}
+    }
+  }
   // Track bad messages for HR escalation.
   if(score<=-2){
     state.badMessageCount=(state.badMessageCount||0)+1;
@@ -3232,7 +3245,9 @@ async function weeklyTick(){
   // someone will reach out and rep takes a hit.
   if((state.actionsThisWeek||0)===0 && state.week>1){
     state.rep=Math.max(0,state.rep-2);
-    logActivity({type:"gossip",text:`Quiet week from you. The principal noticed. -2 rep.`});
+    // Class atrophies when you're not engaged.
+    state.classes.forEach(c=>c.students.forEach(s=>{s.ability=clamp(s.ability-0.5);s.effort=clamp(s.effort-1);}));
+    logActivity({type:"gossip",text:`Quiet week from you. The class is drifting. -2 rep.`});
     // Surface a nudge message - low cost AI line.
     state.pendingReplies.push({
       contactId:state.contacts[0]?.id,
