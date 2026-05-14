@@ -1163,15 +1163,82 @@ function combinedAvg(s){
 }
 
 function viewRoster(){
-  return `<h2>Roster</h2>${classPicker()}
-    <table><thead><tr><th>Name</th><th>Avg</th><th>G</th><th>Y</th><th>P</th><th>Notes</th></tr></thead>
-    <tbody>${currentClass().students.map(s=>{
-      const cc={green:0,yellow:0,purple:0};s.cards.forEach(c=>cc[c.color]++);
-      return `<tr class="clickable" onclick="openStudent(${s.id},${state.role==='subject'})">
-        <td>${s.name}</td><td>${avg(s).toFixed(1)}</td>
-        <td>${cc.green}</td><td>${cc.yellow}</td><td>${cc.purple}</td>
-        <td>${esc((s.notes||"").slice(0,40))}</td></tr>`;
-    }).join("")}</tbody></table>`;
+  const cls=currentClass();
+  const att=attendanceFor(state.week,state.dayIdx,cls.name);
+  const taken=cls.students.every(s=>att[s.id]);
+  const present=cls.students.filter(s=>att[s.id]==="present").length;
+  const absent=cls.students.filter(s=>att[s.id]==="absent").length;
+  const late=cls.students.filter(s=>att[s.id]==="late").length;
+  return `<h2>Roster - ${cls.name}</h2>${classPicker()}
+    <div class="row" style="background:#1b1410;padding:.6em;border-radius:6px;border-left:3px solid var(--accent)">
+      <b>Take the register</b> · Week ${state.week} · ${DAYS[state.dayIdx]}
+      ${taken?`<span class="muted">Taken - ${present} present, ${absent} absent, ${late} late</span>`:`<span class="muted">Pending</span>`}
+      <button onclick="markAllAttendance('present')" style="margin-left:auto">All present</button>
+      ${!taken?`<button class="primary" onclick="submitAttendance()">Submit</button>`:""}
+    </div>
+    <table style="margin-top:.5em">
+      <thead><tr><th>Name</th><th>Attendance</th><th>Avg</th><th>G</th><th>Y</th><th>P</th></tr></thead>
+      <tbody>${cls.students.map(s=>{
+        const cc={green:0,yellow:0,purple:0};s.cards.forEach(c=>cc[c.color]++);
+        const cur=att[s.id]||"";
+        const opt=(v,lbl,clr)=>`<button class="reroll" style="${cur===v?'background:'+clr+';color:#000;font-weight:bold':''}" onclick="setAttendance(${s.id},'${v}')">${lbl}</button>`;
+        return `<tr>
+          <td class="clickable" onclick="openStudent(${s.id},${state.role==='subject'})">${s.name}</td>
+          <td>${opt("present","P","var(--green)")} ${opt("late","L","var(--yellow)")} ${opt("absent","A","var(--red)")}</td>
+          <td>${combinedAvg(s).toFixed(1)}</td>
+          <td>${cc.green}</td><td>${cc.yellow}</td><td>${cc.purple}</td>
+        </tr>`;
+      }).join("")}</tbody></table>`;
+}
+
+// Attendance store: state.attendance[`${week}.${dayIdx}.${className}`][studentId]
+function attendanceFor(week,dayIdx,clsName){
+  state.attendance=state.attendance||{};
+  const key=`${week}.${dayIdx}.${clsName}`;
+  state.attendance[key]=state.attendance[key]||{};
+  return state.attendance[key];
+}
+function setAttendance(sid,val){
+  const att=attendanceFor(state.week,state.dayIdx,currentClass().name);
+  att[sid]=val;
+  // Light immediate feedback - mood shifts subtly
+  const s=findStudent(sid);
+  if(s){
+    if(val==="absent")s.effort=clamp(s.effort-1);
+    if(val==="late")s.effort=clamp(s.effort-0.5);
+  }
+  showView("roster");
+}
+function markAllAttendance(val){
+  const cls=currentClass();
+  const att=attendanceFor(state.week,state.dayIdx,cls.name);
+  cls.students.forEach(s=>att[s.id]=val);
+  showView("roster");
+}
+function submitAttendance(){
+  const cls=currentClass();
+  const att=attendanceFor(state.week,state.dayIdx,cls.name);
+  // Apply consequences: absent students drift down in effort, persistent absence triggers a card.
+  cls.students.forEach(s=>{
+    const v=att[s.id];
+    if(v==="absent"){
+      s.effort=clamp(s.effort-3);
+      s._absentDays=(s._absentDays||0)+1;
+      if(s._absentDays>=3 && state.role!=="tutor"){
+        // Auto-yellow card after 3 absences (only from your subject view)
+        s.cards.push({color:"yellow",reason:"Repeated absence ("+s._absentDays+" days)",week:state.week,by:"Ms. "+state.name});
+        s._absentDays=0;
+        logActivity({type:"card",text:`You issued ${s.first} a yellow card - repeated absence`});
+      }
+    }else if(v==="present"){
+      s.effort=clamp(s.effort+1);
+      s._absentDays=0;
+    }
+  });
+  state.actionsThisWeek=(state.actionsThisWeek||0)+1;
+  state.rep+=1;
+  toast("Register submitted. +1 rep.");
+  renderHud();showView("roster");saveGame(false);
 }
 function viewCardRecord(){
   const all=[];
@@ -1215,16 +1282,23 @@ function viewBuilder(){
           ${[0.5,1.0,1.5,2.0].map(w=>`<option value="${w}" ${d.weight===w?"selected":""}>${w.toFixed(1)}x</option>`).join("")}
         </select>
       </label>
+      <label>Type:
+        <select onchange="state.draftTest.kind=this.value;showView('builder')">
+          <option value="quiz" ${(d.kind||"test")==="quiz"?"selected":""}>Quiz (low stakes)</option>
+          <option value="test" ${(d.kind||"test")==="test"?"selected":""}>Test (full weight)</option>
+        </select>
+      </label>
       <button onclick="aiSuggest()">AI Suggest Question</button>
       <button onclick="previewTest()">Preview</button>
       <button onclick="clearDraft()" style="background:#3a1a14">Clear</button>
-      <button class="primary" onclick="saveTest()">Save Test</button>
+      <button class="primary" onclick="saveTest()">Save</button>
     </div>
     <div class="builder">
       <div class="palette"><h3>Question Blocks</h3>
         <div class="block" draggable="true" data-type="mc">Multiple Choice</div>
         <div class="block" draggable="true" data-type="tf">True / False</div>
         <div class="block" draggable="true" data-type="sa">Short Answer</div>
+        <div class="block" draggable="true" data-type="fib">Fill-in-the-Blank</div>
         <div class="block" draggable="true" data-type="es">Essay</div>
       </div>
       <div class="canvas">
@@ -1272,7 +1346,7 @@ function renderDraft(){
     drop.innerHTML='<p class="muted">Drop question blocks here...</p>';return;
   }
   drop.innerHTML=state.draftTest.questions.map((q,i)=>{
-    const meta={mc:"Multiple Choice",tf:"True/False",sa:"Short Answer",es:"Essay"}[q.type];
+    const meta={mc:"Multiple Choice",tf:"True/False",sa:"Short Answer",fib:"Fill-in-the-Blank",es:"Essay"}[q.type];
     let body=`<input type="text" placeholder="Question prompt..." value="${esc(q.prompt)}" oninput="upd(${i},'prompt',this.value)">`;
     if(q.type==="mc"){
       body+=`<div class="opts">`+q.options.map((o,j)=>`
@@ -1286,6 +1360,9 @@ function renderDraft(){
         <label><input type="radio" name="c${i}" ${q.correct===1?"checked":""} onchange="upd(${i},'correct',1)"> False</label></div>`;
     } else if(q.type==="sa"){
       body+=`<input type="text" placeholder="Expected answer (used as model answer)" value="${esc(q.answer)}" oninput="upd(${i},'answer',this.value)">`;
+    } else if(q.type==="fib"){
+      body+=`<input type="text" placeholder="Use ___ where the blank goes (e.g. 'The Berlin Wall fell in ___.')" value="${esc(q.prompt)}" oninput="upd(${i},'prompt',this.value)" style="margin-top:.2em">
+        <input type="text" placeholder="Correct answer for the blank" value="${esc(q.answer)}" oninput="upd(${i},'answer',this.value)" style="margin-top:.2em">`;
     } else {
       body+=`<textarea rows="2" placeholder="Essay rubric / model points" oninput="upd(${i},'answer',this.value)">${esc(q.answer)}</textarea>`;
     }
@@ -1319,7 +1396,7 @@ function clearDraft(){
 function previewTest(){
   const d=state.draftTest;
   if(!d.questions.length){toast("No questions to preview.");return;}
-  const meta={mc:"Multiple Choice",tf:"True/False",sa:"Short Answer",es:"Essay"};
+  const meta={mc:"Multiple Choice",tf:"True/False",sa:"Short Answer",fib:"Fill-in-the-Blank",es:"Essay"};
   const body=d.questions.map((q,i)=>{
     let inner=`<div class="prompt">Q${i+1}. ${esc(q.prompt||"(no prompt)")} <small style="opacity:.6">(${meta[q.type]})</small></div>`;
     if(q.type==="mc"){
@@ -1355,13 +1432,14 @@ function saveTest(){
     title:state.draftTest.title||"Untitled Test",
     subject:state.subject,
     scale:state.draftTest.scale||"percent",
-    weight:state.draftTest.weight||1.0,
+    weight:(state.draftTest.kind==="quiz"?0.5:1.0)*(state.draftTest.weight||1.0),
+    kind:state.draftTest.kind||"test",
     questions:JSON.parse(JSON.stringify(state.draftTest.questions)),
     assignments:{},
     cache:{}     // {classIdx: {studentId: [answers per question]}}
   };
   state.tests.push(t);
-  state.draftTest={title:"Unit "+(state.tests.length+1)+" Quiz",questions:[],scale:"percent",weight:1.0};
+  state.draftTest={title:"Unit "+(state.tests.length+1)+" Test",questions:[],scale:"percent",weight:1.0,kind:"test"};
   toast("Test saved. Students are already getting a head-start...");
   showView("tests");
   // Kick off background pre-computation for the current class so Administer is instant later.
@@ -1436,11 +1514,12 @@ function fmtScore(pct,scale){
 function viewTests(){
   if(!state.tests.length)return `<h2>Tests</h2><p><i>No tests built. Open Test Builder.</i></p>`;
   return `<h2>Tests</h2>${classPicker()}
-    <table><thead><tr><th>Title</th><th>Questions</th><th>Status</th><th></th></tr></thead>
+    <table><thead><tr><th>Title</th><th>Type</th><th>Questions</th><th>Weight</th><th>Status</th><th></th></tr></thead>
     <tbody>${state.tests.map(t=>{
       const a=t.assignments[state.activeClassIdx];
       const status=!a?"Not given":Object.values(a).every(x=>x.scored)?"Graded":"Awaiting grading";
-      return `<tr><td>${esc(t.title)}</td><td>${t.questions.length}</td><td>${status}</td>
+      const kind=(t.kind||"test")==="quiz"?"<span class='pill g'>Quiz</span>":"<span class='pill p'>Test</span>";
+      return `<tr><td>${esc(t.title)}</td><td>${kind}</td><td>${t.questions.length}</td><td>${t.weight.toFixed(1)}x</td><td>${status}</td>
         <td>${!a?`<button class="primary" onclick="administer(${t.id})">Administer to ${currentClass().name}</button>`:
           status==="Awaiting grading"?`<button class="primary" onclick="showView('grading')">Grade</button>`:`<small class="muted">done</small>`}</td></tr>`;
     }).join("")}</tbody></table>`;
@@ -1449,37 +1528,39 @@ function viewTests(){
 async function administer(testId){
   const test=state.tests.find(t=>t.id===testId);
   const cls=currentClass();
-  const overlay=showBusy(`Administering "${test.title}"`);
-  overlay.sub(cls.name);
   test.assignments[state.activeClassIdx]={};
-  // Check pre-computed cache - we may have most answers ready already.
   const cached=test.cache?.[state.activeClassIdx]||{};
+  const attKey=`${state.week}.${state.dayIdx}.${cls.name}`;
+  const att=state.attendance?.[attKey]||{};
   cls.students.forEach(s=>{
     const cachedForStudent=cached[s.id];
+    const isAbsent=att[s.id]==="absent";
     test.assignments[state.activeClassIdx][s.id]={
-      answers:cachedForStudent?cachedForStudent.slice():test.questions.map(()=>({text:""})),
-      perQ:test.questions.map(()=>null),
-      scored:false,score:0
+      answers:cachedForStudent?cachedForStudent.slice():test.questions.map(q=>({text:isAbsent?"(absent - did not sit the test)":null,pending:!isAbsent})),
+      perQ:test.questions.map(()=>isAbsent?0:null),
+      scored:false,score:0,
+      absent:isAbsent
     };
   });
-  // If cache had everything we need, skip the generation loop entirely.
-  const fullyCached=cls.students.every(s=>(cached[s.id]||[]).length===test.questions.length);
-  if(fullyCached){
-    overlay.setProgress(100);overlay.sub("All answers ready");
-    overlay.close();
-    toast("Tests collected. Open Grading.");
-    state.gradingPage=0;
-    showView("grading");
-    return;
-  }
-  // For each question, one combined AI call for ALL students at once.
-  for(let qi=0;qi<test.questions.length;qi++){
-    const q=test.questions[qi];
-    overlay.setProgress((qi/test.questions.length)*100);
-    overlay.update(`Question ${qi+1} of ${test.questions.length}`);
-    if(q.type==="mc"||q.type==="tf"){
-      // No AI needed - picks based on ability probability.
-      cls.students.forEach(s=>{
+  state.actionsThisWeek=(state.actionsThisWeek||0)+1;
+  state.gradingPage=0;
+  toast("Test administered. Open Grading - answers will fill in as students finish.");
+  showView("grading");
+  // Stream-fill in background. Do NOT block UI.
+  streamFillAnswers(testId,state.activeClassIdx);
+  return;
+}
+
+async function streamFillAnswers(testId,classIdx){
+  const test=state.tests.find(x=>x.id===testId);if(!test)return;
+  const cls=state.classes[classIdx];if(!cls)return;
+  const asn=test.assignments[classIdx];
+  // First MC/TF (instant, no AI)
+  for(const s of cls.students){
+    if(asn[s.id].absent)continue;
+    test.questions.forEach((q,qi)=>{
+      const ans=asn[s.id].answers[qi];
+      if(ans.pending && (q.type==="mc"||q.type==="tf")){
         const ability=(s.ability*.7+s.effort*.2+s.mood*.1)/100;
         let idx;
         if(q.type==="mc"){
@@ -1488,31 +1569,29 @@ async function administer(testId){
         }else{
           idx=Math.random()<ability?q.correct:(q.correct===0?1:0);
         }
-        test.assignments[state.activeClassIdx][s.id].answers[qi]={pick:idx,text:q.type==="mc"?(q.options[idx]||""):(idx===0?"True":"False")};
-      });
-      continue;
-    }
-    // Written (sa/es): essays go 1-per-call inside classWrittenAnswers; short answer batches in 8s.
-    const groupSize=q.type==="es"?cls.students.length:8;
-    const all=[];
-    for(let g=0;g<cls.students.length;g+=groupSize){
-      const grp=cls.students.slice(g,g+groupSize);
-      overlay.sub(q.type==="es"?`Essay question ${qi+1}`:`Question ${qi+1}, students ${g+1}-${Math.min(g+groupSize,cls.students.length)}`);
-      const answers=await classWrittenAnswers(grp,q,overlay);
-      all.push(...answers);
-    }
-    cls.students.forEach((s,i)=>{
-      const text=all[i];
-      test.assignments[state.activeClassIdx][s.id].answers[qi]={
-        text:text||"(left blank)"
-      };
+        asn[s.id].answers[qi]={pick:idx,text:q.type==="mc"?(q.options[idx]||""):(idx===0?"True":"False"),pending:false};
+      }
     });
   }
-  overlay.setProgress(100);
-  overlay.close();
-  toast("Tests collected. Open Grading.");
-  state.gradingPage=0;
-  showView("grading");
+  refreshIfGrading();
+  // Now written - one student at a time. Refresh after each.
+  for(const s of cls.students){
+    if(asn[s.id].absent)continue;
+    for(let qi=0;qi<test.questions.length;qi++){
+      const q=test.questions[qi];
+      const ans=asn[s.id].answers[qi];
+      if(!ans.pending)continue;
+      if(q.type==="sa"||q.type==="es"||q.type==="fib"){
+        const txt=await singleWrittenAnswer(s,q);
+        asn[s.id].answers[qi]={text:txt||null,pending:false};
+        refreshIfGrading();
+      }
+    }
+  }
+}
+function refreshIfGrading(){
+  const on=document.querySelector("nav.side button.on");
+  if(on?.dataset.view==="grading")showView("grading");
 }
 
 // One AI call - up to ~10 students answer one written question. Compact format.
@@ -1648,16 +1727,21 @@ function viewGrading(){
   const idx=state.gradingPage;
   const s=cls.students[idx];
   const sub=asn[s.id];
-  const meta={mc:"Multiple Choice",tf:"True/False",sa:"Short Answer",es:"Essay"};
+  const meta={mc:"Multiple Choice",tf:"True/False",sa:"Short Answer",fib:"Fill-in-the-Blank",es:"Essay"};
   const qBlocks=t.questions.map((q,i)=>{
     const ans=sub.answers[i]||{};
-    const respText=q.type==="mc"||q.type==="tf"?
+    const isPending=ans.pending && !sub.absent;
+    const respText=sub.absent?
+      `<i style="color:var(--red)">Absent - did not sit the test</i>`:
+      isPending?
+      `<i style="color:var(--accent)">Still writing... <span style="display:inline-block;animation:pulse-red 1.4s infinite;width:6px;height:6px;border-radius:50%;background:var(--accent);vertical-align:middle"></span></i>`:
+      q.type==="mc"||q.type==="tf"?
       `Chose: <i>${esc(ans.text||"(no answer)")}</i>`:esc(ans.text||"(left blank)");
     const cur=sub.perQ[i];
     const tiers=TIERS.map(tr=>`<button class="tier t-${tr.key} ${cur===tr.pct?"sel":""}"
       ${sub.scored?"disabled":""}
       onclick="setQScore(${t.id},${s.id},${i},${tr.pct},true)">${tr.label} <small>(${fmtScore(tr.pct,t.scale)})</small></button>`).join("");
-    const rerollBtn=(q.type==="sa"||q.type==="es")&&!sub.scored?
+    const rerollBtn=(q.type==="sa"||q.type==="es"||q.type==="fib")&&!sub.scored?
       `<button class="reroll" onclick="rerollAnswer(${t.id},${s.id},${i})">reroll answer</button>`:"";
     return `<div class="qp">
       <div class="prompt">Q${i+1}. ${esc(q.prompt)} <small style="opacity:.6">(${meta[q.type]})</small>${rerollBtn}</div>
@@ -2114,6 +2198,23 @@ Reply with ONLY a compact JSON object: {"score":<integer -3..3>,"note":"<6-12 wo
   const score=Math.max(-3,Math.min(3,Math.round(data.score)));
   if(score===0)return;
   state.rep=Math.max(0,state.rep+score);
+  // Track bad messages for HR escalation.
+  if(score<=-2){
+    state.badMessageCount=(state.badMessageCount||0)+1;
+    if(state.badMessageCount===2){
+      queueDeptWarning("HR","A pattern of unprofessional communication has been flagged.");
+    }else if(state.badMessageCount>=4){
+      queueDeptWarning("Principal","Final written warning. Another incident triggers review for termination.");
+      state.rep=Math.max(0,state.rep-5);
+    }
+  }
+  if(score>=2){
+    state.goodMessageCount=(state.goodMessageCount||0)+1;
+    if(state.goodMessageCount===5){
+      queueDeptWarning("Principal","Recognition: parents and colleagues have written in praise of your communication.","praise");
+      state.rep+=4;
+    }
+  }
   const verb=score>0?"+":"";
   toast(`${audience.split(" ")[0]==="a"?"That message":"Your message"}: ${verb}${score} rep (${data.note||"noted"}).`);
   if(score<=-2){
@@ -2164,6 +2265,24 @@ function ensureStudentContact(student){
   return c;
 }
 function _trackAction(){state.actionsThisWeek=(state.actionsThisWeek||0)+1;}
+
+// Send a formal email from a school department (HR / Principal). Always lands in inbox.
+function queueDeptWarning(dept,blurb,kind){
+  const senderName=dept==="HR"?"HR Office":"Principal Vance";
+  const cId="c-"+dept.toLowerCase().replace(/\s/g,"");
+  let c=state.contacts.find(x=>x.id===cId);
+  if(!c){
+    c={id:cId,kind:"staff",name:senderName,voiceKey:"staff",
+      relation:dept==="HR"?"Human Resources":"Principal",msgCount:0,
+      teacherSubject:"Administration"};
+    state.contacts.push(c);
+  }
+  state.pendingReplies.push({
+    contactId:c.id,fireAtTick:tickCounter()+1,kind:"deptWarning",
+    dept,blurb,praise:kind==="praise",
+    inReplyTo:blurb,subject:kind==="praise"?"A note of recognition":"Formal note - please read"
+  });
+}
 function sendStudentMessage(){
   const sid=+document.getElementById("composeStudent").value;
   const subject=(document.getElementById("composeSubject").value||"").trim()||"(no subject)";
@@ -2222,7 +2341,16 @@ async function tickPendingReplies(){
   state.pendingReplies.splice(dueIdx,1);
   const c=state.contacts.find(x=>x.id===r.contactId);if(!c)return;
   let prompt,senderName;
-  if(r.kind==="nudge"){
+  if(r.kind==="deptWarning"){
+    senderName=r.dept==="HR"?"HR Office":"Principal Vance";
+    const tone=r.praise?"warm and brief":"formal and pointed";
+    prompt=`Write a SHORT (2-4 sentence) ${tone} email FROM ${senderName} TO Ms. ${state.name} at a US public school. Context: ${r.blurb} Sign off as ${senderName}. No markdown. No quotes around the body.`;
+    if(!c){
+      const cId="c-"+r.dept.toLowerCase().replace(/\s/g,"");
+      c=state.contacts.find(x=>x.id===cId);
+      if(c)r.contactId=c.id;
+    }
+  }else if(r.kind==="nudge"){
     senderName="Principal Vance";
     prompt=`Write a SHORT, dry email FROM Principal Vance TO Ms. ${state.name}, gently calling out a week of inactivity. 2 sentences max. Professional but pointed. No quotes, no markdown.`;
     // Use a synthetic contact if no contacts exist
@@ -2561,10 +2689,10 @@ async function advanceDay(){
   }
   renderHud();buildNav();refreshCurrentView();
   saveGame(false);
-  // Tick replies and inbound messages in the background. Skip if AI queue is busy
-  // so spamming Next Day doesn't pile up dozens of pending calls.
+  // Pending replies should ALWAYS fire when due - don't throttle them.
+  tickPendingReplies().catch(()=>{});
+  // New inbound messages can be throttled if the queue is busy.
   if(_aiInFlight<2){
-    tickPendingReplies().catch(()=>{});
     tickMessages(false).catch(()=>{});
   }
 }
