@@ -345,7 +345,7 @@
 // STATE
 // ============================================================
 const DAYS=["Mon","Tue","Wed","Thu","Fri"];
-const VERSION="0.6";
+const VERSION="0.7";
 const SAVE_KEY="chalkdust:save";
 
 // ============ AI helpers (single point for the no-placeholder rule) ============
@@ -1222,18 +1222,58 @@ function viewRoster(){
       ${!taken?`<button class="primary" onclick="submitAttendance()">Submit</button>`:""}
     </div>
     <table style="margin-top:.5em">
-      <thead><tr><th>Name</th><th>Attendance</th><th>Avg</th><th>G</th><th>Y</th><th>P</th></tr></thead>
+      <thead><tr><th>Name</th><th>Recent</th><th>Today</th><th>Avg</th><th>Mood/Effort</th><th>Cards (G/Y/P)</th><th>Signal</th></tr></thead>
       <tbody>${cls.students.map(s=>{
         const cc={green:0,yellow:0,purple:0};s.cards.forEach(c=>cc[c.color]++);
         const cur=att[s.id]||"";
         const opt=(v,lbl,clr)=>`<button class="reroll" style="${cur===v?'background:'+clr+';color:#000;font-weight:bold':''}" onclick="setAttendance(${s.id},'${v}')">${lbl}</button>`;
+        const recent=recentAttendance(s.id,cls.name,5);
+        const recentStrip=recent.map(v=>{
+          if(v==="present")return `<span title="present" style="display:inline-block;width:14px;height:14px;background:var(--green);border:1px solid #000;margin-right:1px"></span>`;
+          if(v==="late")return `<span title="late" style="display:inline-block;width:14px;height:14px;background:var(--yellow);border:1px solid #000;margin-right:1px"></span>`;
+          if(v==="absent")return `<span title="absent" style="display:inline-block;width:14px;height:14px;background:var(--red);border:1px solid #000;margin-right:1px"></span>`;
+          return `<span title="no record" style="display:inline-block;width:14px;height:14px;background:#333;border:1px solid #000;margin-right:1px"></span>`;
+        }).join("");
+        const signal=studentSignal(s);
         return `<tr>
           <td class="clickable" onclick="openStudent(${s.id},${state.role==='subject'})">${s.name}</td>
+          <td>${recentStrip}</td>
           <td>${opt("present","P","var(--green)")} ${opt("late","L","var(--yellow)")} ${opt("absent","A","var(--red)")}</td>
           <td>${combinedAvg(s).toFixed(1)}</td>
-          <td>${cc.green}</td><td>${cc.yellow}</td><td>${cc.purple}</td>
+          <td><small>${s.mood.toFixed(0)} / ${s.effort.toFixed(0)}</small></td>
+          <td>${cc.green}/${cc.yellow}/${cc.purple}</td>
+          <td><small style="color:${signal.color}">${esc(signal.text)}</small></td>
         </tr>`;
       }).join("")}</tbody></table>`;
+}
+
+// Last N days of attendance for this student in this class (oldest to newest).
+function recentAttendance(sid,clsName,n){
+  const out=[];
+  let w=state.week,d=state.dayIdx-1;
+  let safety=0;
+  while(out.length<n && safety++<30){
+    if(d<0){d=DAYS.length-1;w--;if(w<1)break;}
+    const key=`${w}.${d}.${clsName}`;
+    const att=state.attendance?.[key];
+    if(att&&att[sid]!==undefined)out.unshift(att[sid]||"none");
+    else out.unshift("none");
+    d--;
+  }
+  return out;
+}
+
+// Tiny signal hint - tells the player what to watch for, derived from real state.
+function studentSignal(s){
+  const recentCard=s.cards.slice(-1)[0];
+  if(s.mood<30)return {text:"low mood - check in",color:"#e26464"};
+  if(s.effort<30)return {text:"slack effort",color:"#e26464"};
+  if(combinedAvg(s)>0 && combinedAvg(s)<45)return {text:"struggling academically",color:"#f7c948"};
+  if(recentCard?.color==="yellow")return {text:"recent yellow card",color:"#f7c948"};
+  if(recentCard?.color==="purple")return {text:"on a roll",color:"#9b59ff"};
+  if(combinedAvg(s)>85)return {text:"top tier",color:"#4caf50"};
+  if(s.mood>75&&s.effort>70)return {text:"engaged",color:"#4caf50"};
+  return {text:"steady",color:"#888"};
 }
 
 // Attendance store: state.attendance[`${week}.${dayIdx}.${className}`][studentId]
@@ -2042,10 +2082,40 @@ async function queueMessage(contact,kind,opts={}){
   toast(`New message: ${contact.name}`);
 }
 
+// Build a short factual brief of what's recently happened to a student.
+// The AI uses this so messages reference REAL events, not made-up ones.
+function studentContextBrief(s){
+  if(!s)return "";
+  const lines=[];
+  // recent grades from your tests
+  const lastGrade=(s.grades||[]).slice(-1)[0];
+  if(lastGrade)lines.push(`Last ${state.subject||"test"} grade: ${lastGrade.score.toFixed(0)}/100.`);
+  // other-teacher grades
+  const lastOther=(s.otherGrades||[]).slice(-1)[0];
+  if(lastOther)lines.push(`${lastOther.subject} grade from ${lastOther.by}: ${lastOther.score.toFixed(0)}/100.`);
+  // cards
+  const recentCards=s.cards.slice(-2);
+  recentCards.forEach(c=>lines.push(`${c.color.toUpperCase()} card from ${c.by} week ${c.week}: "${c.reason}".`));
+  // attendance pattern - look at last 5 days across any class with this student
+  const classes=state.classes.filter(c=>c.students.find(x=>x.id===s.id));
+  if(classes.length){
+    const att=recentAttendance(s.id,classes[0].name,5);
+    const absents=att.filter(v=>v==="absent").length;
+    const lates=att.filter(v=>v==="late").length;
+    if(absents>=2)lines.push(`Has been absent ${absents} of the last 5 school days.`);
+    else if(lates>=2)lines.push(`Has been late ${lates} times recently.`);
+  }
+  // mood/effort observable signals (translated to parent-relatable)
+  if(s.mood<35)lines.push(`Seems low-spirited at school.`);
+  else if(s.mood>75)lines.push(`Seems cheerful at school.`);
+  if(s.effort<35)lines.push(`Effort has been slack in class.`);
+  return lines.length?`Recent facts (use these, do not invent new ones):\n- `+lines.join("\n- "):"";
+}
 async function generateMessagePair(contact,kind,opts={}){
   const student=contact.studentId!=null?findStudent(contact.studentId):null;
   const voiceList=contact.kind==="parent"?PARENT_VOICES:STUDENT_VOICES;
   const v=voiceList.find(x=>x.key===contact.voiceKey)||voiceList[0];
+  const brief=studentContextBrief(student);
   let intent="";
   if(kind==="intro")intent=`Introduce yourself politely as ${student?student.first+"'s "+contact.kind:"a contact"} and mention one small thing about how ${student?student.first:"the kid"} is doing.`;
   else if(kind==="concern")intent=`Express a brief concern about ${student?.first||"the student"}'s performance or behaviour. Specific but short.`;
@@ -2056,10 +2126,14 @@ async function generateMessagePair(contact,kind,opts={}){
   else if(kind==="thanks")intent=`Briefly thank the teacher for something kind they did recently.`;
   else if(kind==="absence")intent=`Inform the teacher of a 1-2 day absence for a family reason.`;
   else intent=`Send a short follow-up.`;
+  const subjectLine=state.subject?`The teacher teaches ${state.subject}.`:"";
   const prompt=`Write ONE email/message FROM ${contact.name} (${contact.relation}) TO Ms. ${state.name}. Voice: ${v.style}. Goal: ${intent}
+${subjectLine}
+${brief}
 Rules:
 - Sound like a real person. Subtle imperfections fitting the voice.
 - Length: 2 to 4 sentences MAX.
+- Reference one of the recent facts above if relevant (do NOT invent new ones).
 - No markdown.
 
 Return ONLY a compact JSON object: {"subject":"<short subject line, max 6 words>","body":"<the message body>"}`;
@@ -2426,7 +2500,8 @@ Rules: 1-3 sentences. May ask a follow-up question or thank/complain - choose wh
     const writeHint=s.writing<35?"Bad spelling, drops apostrophes, run-on sentences.":
                     s.writing<70?"OK writing for their age - one tiny slip is fine.":
                                   "Clean for a student - still age-appropriate.";
-    prompt=`Write a SHORT reply FROM ${s.first} (a school student) TO Ms. ${state.name}, in response to:\n"""${r.inReplyTo}"""\nVoice: ${v.style}. ${writeHint}. Personality: ${s.personality}. ${s.story?`Story context: ${s.story}`:""}\nRules: 1-3 sentences MAX. No markdown. No quotation marks around the whole thing.`;
+    const brief=studentContextBrief(s);
+    prompt=`Write a SHORT reply FROM ${s.first} (a school student) TO Ms. ${state.name}, in response to:\n"""${r.inReplyTo}"""\nVoice: ${v.style}. ${writeHint}. Personality: ${s.personality}. ${s.story?`Story context: ${s.story}`:""}\n${brief}\nRules: 1-3 sentences MAX. Reference a real recent fact if it fits naturally. No markdown. No quotation marks around the whole thing.`;
   }
   const body=await aiLine(prompt,700);
   if(!body)return;
