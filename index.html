@@ -1543,11 +1543,18 @@ async function precomputeAnswers(testId,classIdx){
   const cls=state.classes[classIdx];if(!cls)return;
   t.cache[classIdx]=t.cache[classIdx]||{};
   const bucket=t.cache[classIdx];
+  // For each question: 1 AI call (archetypes) if written, instant otherwise.
+  const archs=[];
+  for(let qi=0;qi<t.questions.length;qi++){
+    const q=t.questions[qi];
+    if(q.type==="sa"||q.type==="es"||q.type==="fib"){
+      archs[qi]=await archetypeAnswers(q);
+    }else archs[qi]=null;
+  }
+  // Now assign every student
   for(const s of cls.students){
-    if(bucket[s.id])continue;       // already cached
-    bucket[s.id]=[];
-    for(const q of t.questions){
-      let ans;
+    if(bucket[s.id])continue;
+    bucket[s.id]=t.questions.map((q,qi)=>{
       if(q.type==="mc"||q.type==="tf"){
         const ability=(s.ability*.7+s.effort*.2+s.mood*.1)/100;
         let idx;
@@ -1557,13 +1564,14 @@ async function precomputeAnswers(testId,classIdx){
         }else{
           idx=Math.random()<ability?q.correct:(q.correct===0?1:0);
         }
-        ans={pick:idx,text:q.type==="mc"?(q.options[idx]||""):(idx===0?"True":"False")};
-      }else{
-        const text=await singleWrittenAnswer(s,q);
-        ans={text:text||null};
+        return {pick:idx,text:q.type==="mc"?(q.options[idx]||""):(idx===0?"True":"False")};
       }
-      bucket[s.id].push(ans);
-    }
+      const a=archs[qi];if(!a)return {text:null};
+      const ability=(s.ability*.7+s.effort*.2+s.mood*.1)/100;
+      const roll=ability+(Math.random()*.3-.15);
+      const pick=roll<.35?a.wrong:roll<.65?a.partial:a.correct;
+      return {text:pick};
+    });
   }
 }
 
@@ -1685,28 +1693,87 @@ async function streamFillAnswers(testId,classIdx){
     });
   }
   refreshIfGrading();
-  // Now written - one student at a time. Refresh after each.
-  for(const s of cls.students){
-    if(asn[s.id].absent)continue;
-    for(let qi=0;qi<test.questions.length;qi++){
-      const q=test.questions[qi];
+  // Written questions: ONE AI call per question returns three archetype answers.
+  // Each student is assigned an archetype based on their ability bucket.
+  // This collapses 22 sequential calls down to 1 per question - 20x faster.
+  for(let qi=0;qi<test.questions.length;qi++){
+    const q=test.questions[qi];
+    if(q.type!=="sa"&&q.type!=="es"&&q.type!=="fib")continue;
+    // Mark all pending students as "thinking" for this question
+    cls.students.forEach(s=>{
+      if(asn[s.id].absent)return;
       const ans=asn[s.id].answers[qi];
-      if(!ans.pending)continue;
-      if(q.type==="sa"||q.type==="es"||q.type==="fib"){
-        // Mark which student is "actively writing" so the UI can highlight them.
-        asn[s.id].answers[qi]={text:null,pending:true,writing:true};
-        refreshIfGrading();
-        const txt=await singleWrittenAnswer(s,q);
-        asn[s.id].answers[qi]={text:txt||null,pending:false};
-        // If grading view is open on THIS student, typewriter the answer in.
-        const target=document.querySelector(`[data-ans="${testId}-${s.id}-${qi}"]`);
-        if(target && txt){
-          await typewriterInto(target,txt);
-        }
-        refreshIfGrading();
+      if(ans.pending)asn[s.id].answers[qi]={text:null,pending:true,writing:true};
+    });
+    refreshIfGrading();
+    const arch=await archetypeAnswers(q);
+    if(!arch){
+      // AI failure - leave them pending; user can reroll individually.
+      cls.students.forEach(s=>{
+        if(asn[s.id].absent)return;
+        const ans=asn[s.id].answers[qi];
+        if(ans.pending)asn[s.id].answers[qi]={text:null,pending:false};
+      });
+      refreshIfGrading();continue;
+    }
+    // Assign archetypes to students by ability + tiny variation per student.
+    for(const s of cls.students){
+      if(asn[s.id].absent)continue;
+      const ans=asn[s.id].answers[qi];
+      if(!ans.pending && !ans.writing)continue;
+      const ability=(s.ability*.7+s.effort*.2+s.mood*.1)/100;
+      let pick;
+      const roll=ability+(Math.random()*.3-.15);
+      if(roll<.35)pick=arch.wrong;
+      else if(roll<.65)pick=arch.partial;
+      else pick=arch.correct;
+      // Apply a small writing-skill flavor: weak writers drop apostrophes.
+      let txt=pick;
+      if(s.writing<35){
+        txt=txt.replace(/'/g,"").replace(/\b(do|does|did|is|are|was|were|will|would|could|should|cant|wont|dont)not\b/gi,(m)=>m.toLowerCase().replace("not","nt"));
+      }
+      asn[s.id].answers[qi]={text:txt||null,pending:false};
+      // Typewriter into the DOM if this student's paper is currently visible.
+      const target=document.querySelector(`[data-ans="${testId}-${s.id}-${qi}"]`);
+      if(target && txt){
+        // Don't await - let them all typewriter in parallel for speed.
+        typewriterInto(target,txt);
       }
     }
+    refreshIfGrading();
   }
+}
+
+// ONE call per question - returns three archetype answers at different skill levels.
+async function archetypeAnswers(q){
+  const len=q.type==="sa"?"1 short sentence":q.type==="fib"?"a brief phrase or sentence containing the answer":"2-3 short sentences";
+  const wmatch=(q.answer||"").match(/(\d{2,3})\s*words/i);
+  const lenSpec=(q.type==="es"&&wmatch)?`roughly ${wmatch[1]} words`:len;
+  const prompt=`Write THREE distinct school-student answers to one exam question at three skill levels.
+
+Question: ${q.prompt}${q.answer?`\nRubric notes: ${q.answer}`:""}
+
+Length for each: ${lenSpec}.
+
+Output EXACTLY in this format, nothing else:
+###WRONG###
+<a clearly incorrect answer - confused or factually wrong>
+###PARTIAL###
+<a partially correct answer - right general idea but a clear factual mistake or gap>
+###CORRECT###
+<a clean correct answer - on-target and well-explained for a school student>
+
+No JSON. No commentary. No preamble. Just the three sections.`;
+  const txt=await aiText(prompt,{retries:3,timeout:40000});
+  if(!txt)return null;
+  const m1=txt.match(/###WRONG###\s*\n?([\s\S]*?)(?=###PARTIAL###|$)/i);
+  const m2=txt.match(/###PARTIAL###\s*\n?([\s\S]*?)(?=###CORRECT###|$)/i);
+  const m3=txt.match(/###CORRECT###\s*\n?([\s\S]*?)$/i);
+  const wrong=(m1?.[1]||"").trim();
+  const partial=(m2?.[1]||"").trim();
+  const correct=(m3?.[1]||"").trim();
+  if(!wrong||!partial||!correct)return null;
+  return {wrong,partial,correct};
 }
 function refreshIfGrading(){
   const on=document.querySelector("nav.side button.on");
