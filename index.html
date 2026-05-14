@@ -2015,7 +2015,9 @@ function viewGrades(){
   if(state.quarterAverages[state.quarter-1]===null)state.quarterAverages[state.quarter-1]=overall;
   const sorted=studs.filter(s=>s._avg>0).sort((a,b)=>b._avg-a._avg);
   const top=sorted.slice(0,3);
-  const bottom=sorted.slice(-3).reverse();
+  // Bottom only makes sense if we have at least 6 graded students (so it doesn't overlap with top).
+  // Show only students with avg below 60 - actually struggling, not just "lowest in a tiny sample".
+  const bottom=sorted.length>=6?sorted.filter(s=>s._avg<60).slice(-3).reverse():[];
   // trend (compare current quarter avg to previous)
   const prev=state.quarterAverages[state.quarter-2];
   const trend=prev==null?"":(overall>prev+1?"trending up":overall<prev-1?"trending down":"steady");
@@ -2047,7 +2049,7 @@ function viewGrades(){
         ${top.length?`<table><tbody>${top.map(s=>`<tr><td>${s.name}</td><td><b>${s._avg.toFixed(1)}</b></td></tr>`).join("")}</tbody></table>`:`<p><i>No grades yet.</i></p>`}
       </div>
       <div class="q"><h4>Need support</h4>
-        ${bottom.length?`<table><tbody>${bottom.map(s=>`<tr><td>${s.name}</td><td style="color:var(--red)"><b>${s._avg.toFixed(1)}</b></td></tr>`).join("")}</tbody></table>`:`<p><i>No grades yet.</i></p>`}
+        ${bottom.length?`<table><tbody>${bottom.map(s=>`<tr><td>${s.name}</td><td style="color:var(--red)"><b>${s._avg.toFixed(1)}</b></td></tr>`).join("")}</tbody></table>`:`<p class="muted"><i>${sorted.length<6?"Not enough grades yet to spot strugglers.":"Nobody is struggling - everyone is above 60."}</i></p>`}
       </div>
     </div>
     ${subjectBlock}
@@ -2339,9 +2341,32 @@ function sendReply(){
   ta.value="";
   showView("messages");buildNav();
   toast("Reply sent.");
-  // background evaluation (does not block UI)
   evaluatePlayerMessage(body,c);
   _trackAction();
+  // Schedule a follow-up from the contact - keeps conversations going.
+  scheduleFollowupFromContact(c,body);
+}
+
+// After the player replies, the contact may write back in 1-3 days.
+function scheduleFollowupFromContact(c,playerBody){
+  if(!c)return;
+  // probability of a follow-up depends on contact kind
+  let p=0.6;
+  if(c.kind==="parent")p=0.7;
+  else if(c.kind==="student"){
+    const s=findStudent(c.studentId);
+    p=s?replyProbability(s):0.4;
+  }else if(c.kind==="staff")p=0.55;
+  if(Math.random()>p)return;
+  state.pendingReplies.push({
+    contactId:c.id,
+    studentId:c.studentId,
+    teacherIdx:c.kind==="staff"?state.npcTeachers.findIndex(t=>t.name===c.name):undefined,
+    fireAtTick:tickCounter()+1+Math.floor(Math.random()*3),
+    kind:c.kind==="staff"?"staff":"followup",
+    inReplyTo:`Their previous message and your reply: "${playerBody.slice(0,200)}"`,
+    subject:"(follow-up)"
+  });
 }
 
 // Send the player's message text to AI for a professionalism rating.
@@ -2473,8 +2498,8 @@ function sendStudentMessage(){
 
 // Decide whether the student will reply, based on personality + relationship signals.
 function replyProbability(s){
-  const base={diligent:.82,lazy:.22,eager:.9,shy:.28,sarcastic:.5,
-    anxious:.65,confident:.7,withdrawn:.15,"class-clown":.55,perfectionist:.78}[s.personality]??.5;
+  const base={diligent:.88,lazy:.4,eager:.95,shy:.5,sarcastic:.65,
+    anxious:.75,confident:.8,withdrawn:.35,"class-clown":.7,perfectionist:.85}[s.personality]??.6;
   // boost if they have recent green/purple cards from you; reduce if yellow
   const recent=s.cards.slice(-4);
   let bias=0;
@@ -2528,6 +2553,23 @@ async function tickPendingReplies(){
       state.contacts.push(principal);
       r.contactId=principal.id;
     }
+  }else if(r.kind==="followup"){
+    // A parent or student following up on the player's reply.
+    const fromStudent=c.kind==="student";
+    let voiceCfg,senderInfo;
+    if(fromStudent){
+      const s=findStudent(c.studentId);if(!s)return;
+      senderName=s.first;senderInfo=`a school student named ${s.first}, personality: ${s.personality}`;
+      voiceCfg=STUDENT_VOICES.find(v=>v.key===s.voiceKey)||STUDENT_VOICES[0];
+    }else{
+      senderName=c.name;senderInfo=`${c.relation}`;
+      voiceCfg=PARENT_VOICES.find(v=>v.key===c.voiceKey)||PARENT_VOICES[0];
+    }
+    const brief=c.studentId!=null?studentContextBrief(findStudent(c.studentId)):"";
+    prompt=`Write a SHORT follow-up message FROM ${c.name} (${senderInfo}) TO Ms. ${state.name}, continuing this conversation: """${r.inReplyTo}"""
+Voice: ${voiceCfg.style}.
+${brief}
+Rules: 1-3 sentences. Build on the previous exchange. May agree, push back, ask a clarifying question, or thank. Reference a real recent fact if natural. No markdown. No quotation marks around the body.`;
   }else if(r.kind==="gradeReaction"){
     const s=findStudent(r.studentId);if(!s)return;
     senderName=s.first;
@@ -2554,7 +2596,13 @@ Rules: 1-3 sentences. May ask a follow-up question or thank/complain - choose wh
     prompt=`Write a SHORT reply FROM ${s.first} (a school student) TO Ms. ${state.name}, in response to:\n"""${r.inReplyTo}"""\nVoice: ${v.style}. ${writeHint}. Personality: ${s.personality}. ${s.story?`Story context: ${s.story}`:""}\n${brief}\nRules: 1-3 sentences MAX. Reference a real recent fact if it fits naturally. No markdown. No quotation marks around the whole thing.`;
   }
   const body=await aiLine(prompt,700);
-  if(!body)return;
+  if(!body){
+    // Don't drop the reply on AI failure - try again next tick.
+    r.fireAtTick=tickCounter()+1;
+    r._retries=(r._retries||0)+1;
+    if(r._retries<=3)state.pendingReplies.push(r);
+    return;
+  }
   const finalContact=state.contacts.find(x=>x.id===r.contactId)||c;
   if(!finalContact)return;
   state.messages.push({id:"m"+Date.now()+Math.floor(Math.random()*999),
