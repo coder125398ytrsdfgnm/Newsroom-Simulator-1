@@ -329,15 +329,13 @@
     <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent);margin-right:.4em;animation:pulse-red 1.4s infinite"></span>AI working...
   </div>
   <div id="criticalGate" style="display:none;position:fixed;inset:0;background:rgba(11,8,5,.85);z-index:200;align-items:center;justify-content:center;backdrop-filter:blur(4px)">
-    <div style="background:var(--panel);border:2px solid var(--accent);border-radius:14px;padding:1.5em 2em;max-width:520px;text-align:center;box-shadow:0 12px 40px rgba(0,0,0,.6)">
-      <h2 style="color:var(--accent);margin-top:0">Hold a second...</h2>
-      <p class="gate-task" style="font-style:italic;font-size:1.1em;min-height:1.4em">AI catching up</p>
-      <div style="display:flex;justify-content:center;gap:.4em;margin:1em 0">
-        <span class="dot" style="width:12px;height:12px;background:var(--accent);border-radius:50%;animation:gate-bounce 1.2s ease-in-out infinite"></span>
-        <span class="dot" style="width:12px;height:12px;background:var(--accent);border-radius:50%;animation:gate-bounce 1.2s ease-in-out infinite .15s"></span>
-        <span class="dot" style="width:12px;height:12px;background:var(--accent);border-radius:50%;animation:gate-bounce 1.2s ease-in-out infinite .3s"></span>
+    <div style="background:var(--panel);border:2px solid var(--accent);border-radius:14px;padding:1.5em 2em;max-width:560px;width:90%;box-shadow:0 12px 40px rgba(0,0,0,.6)">
+      <h2 style="color:var(--accent);margin:0;text-align:center">Hold a second...</h2>
+      <p class="gate-task" style="font-style:italic;font-size:1.05em;min-height:1.4em;text-align:center">AI catching up</p>
+      <div id="gateLive" style="background:#0e0a07;border:1px dashed var(--accent);border-radius:8px;padding:.7em .9em;margin:.6em 0;min-height:80px;font-family:Georgia,serif;font-size:.9em;line-height:1.4;color:var(--ink);max-height:140px;overflow:hidden">
+        <span class="muted">Drafts will appear here as the school comes to life...</span>
       </div>
-      <p class="muted gate-flavor" style="font-size:.9em">Don't worry - this won't take long. Take a breath.</p>
+      <p class="muted gate-flavor" style="font-size:.85em;text-align:center">Don't worry - this won't take long.</p>
     </div>
   </div>
   <main>
@@ -457,14 +455,18 @@ async function _aiOnce(prompt,opts={}){
   }
   return txt.trim().replace(/^```(?:json)?\s*/i,"").replace(/```$/,"").trim()||null;
 }
-async function aiText(prompt,opts={}){
+async function aiText(prompt,opts={},extras={}){
   const tries=opts.retries??3;
   return aiEnqueue(async ()=>{
     let lastErr=null;
     for(let i=0;i<=tries;i++){
       try{
         const t=await _aiOnce(prompt,opts);
-        if(t)return t;
+        if(t){
+          // If the gate is open, briefly show the response in the live panel.
+          if(_criticalWork>0)gateLiveShow(t);
+          return t;
+        }
         await new Promise(r=>setTimeout(r,700+i*500));
       }catch(e){
         lastErr=e;
@@ -476,6 +478,25 @@ async function aiText(prompt,opts={}){
     if(window.console)console.warn("[AI] gave up:",lastErr?.status,lastErr?.message,lastErr?.body);
     return null;
   });
+}
+function gateLiveShow(text){
+  const el=document.getElementById("gateLive");if(!el)return;
+  // Show the first compelling chunk - first paragraph or 220 chars - typewriter into it.
+  const sample=text.replace(/###[\s\S]*?###/g,"").trim().slice(0,260);
+  if(!sample)return;
+  el.innerHTML="";
+  const span=document.createElement("span");
+  el.appendChild(span);
+  // Quick typewriter (no await - fire and forget)
+  let i=0;
+  const tick=()=>{
+    if(_criticalWork===0)return;
+    const burst=3+Math.floor(Math.random()*4);
+    i=Math.min(i+burst,sample.length);
+    span.textContent=sample.slice(0,i);
+    if(i<sample.length)setTimeout(tick,18+Math.random()*22);
+  };
+  tick();
 }
 // Truncation guard: any response whose final non-space char isn't ] or } is incomplete.
 function isCompleteJSON(s){
@@ -876,7 +897,66 @@ function viewFormRoom(){
       <div class="board">Form period. Take the register, address concerns, read recent cards.</div>
       ${seatGrid(false)}
     </div>
-    <p class="muted">As Form Tutor you cannot administer cards. Click a student to view their record. ${pending} pending need(s) this week.</p>`;
+    <h3>Form Tutor actions</h3>
+    <div class="row">
+      <button onclick="callAssembly()">Call Assembly</button>
+      <button onclick="emailAllParents()">Email All Parents</button>
+      <button onclick="issueClassCommendation()">Class Commendation</button>
+    </div>
+    <p class="muted">As Form Tutor you cannot administer cards but you have these tools. ${pending} pending need(s) this week.</p>`;
+}
+
+async function callAssembly(){
+  const ov=showBusy("Calling assembly");beginCritical("Drafting assembly remarks");
+  const cls=currentClass();
+  const prompt=`Write 3-4 sentences of a school assembly speech that the form tutor Ms. ${state.name} would give to her form class ${cls.name}. Tone: warm, motivating, brief. End with a single uplifting line. No markdown. No quotes around the body.`;
+  const txt=await aiLine(prompt,800);
+  ov.close();endCritical();
+  if(!txt){toast("Assembly drafting failed - try again.");return;}
+  cls.students.forEach(s=>s.mood=clamp(s.mood+5));
+  state.rep+=2;state.actionsThisWeek=(state.actionsThisWeek||0)+1;
+  logActivity({type:"gossip",text:`You called an assembly. The class left in better spirits.`});
+  const m=document.createElement("div");m.className="modal";
+  m.innerHTML=`<div class="box"><h2>Assembly remarks</h2>
+    <div style="background:#f7efd9;color:#1b1410;padding:1em;border-radius:6px;font-family:Georgia,serif;white-space:pre-wrap">${esc(txt)}</div>
+    <p class="muted">+5 mood across class · +2 rep</p>
+    <div class="row" style="justify-content:flex-end"><button class="primary" onclick="closeModal()">Done</button></div></div>`;
+  document.body.appendChild(m);m.onclick=e=>{if(e.target===m)closeModal();};
+  renderHud();buildNav();saveGame(false);
+}
+
+async function emailAllParents(){
+  const ov=showBusy("Drafting parent newsletter");beginCritical("Drafting parent newsletter");
+  const cls=currentClass();
+  const overall=cls.students.reduce((a,s)=>a+combinedAvg(s),0)/cls.students.length;
+  const prompt=`Write a SHORT (4-6 sentences) parent newsletter from form tutor Ms. ${state.name} to all parents of ${cls.name}. Mention the class is doing well overall (avg ${overall.toFixed(0)}/100). End with one practical reminder. Plain prose, no markdown.`;
+  const txt=await aiLine(prompt,1000);
+  ov.close();endCritical();
+  if(!txt){toast("Couldn't draft.");return;}
+  // Send to every existing parent contact
+  const parents=state.contacts.filter(c=>c.kind==="parent");
+  parents.forEach(p=>{
+    state.messages.push({id:"m"+Date.now()+Math.floor(Math.random()*999),contactId:p.id,fromMe:true,
+      subject:`Newsletter - ${cls.name}`,body:txt,
+      week:state.week,day:DAYS[state.dayIdx],read:true});
+  });
+  state.rep+=3;state.actionsThisWeek=(state.actionsThisWeek||0)+1;
+  toast(`Newsletter sent to ${parents.length} parents. +3 rep.`);
+  renderHud();buildNav();saveGame(false);
+}
+
+function issueClassCommendation(){
+  const cls=currentClass();
+  const top=cls.students.slice().sort((a,b)=>combinedAvg(b)-combinedAvg(a)).filter(s=>combinedAvg(s)>0).slice(0,3);
+  if(!top.length){toast("No grades yet to commend.");return;}
+  top.forEach(s=>{
+    s.cards.push({color:"green",reason:"Class commendation - top performer this period",week:state.week,by:"Ms. "+state.name});
+    s.mood=clamp(s.mood+6);
+  });
+  state.rep+=2;state.actionsThisWeek=(state.actionsThisWeek||0)+1;
+  logActivity({type:"gossip",text:`You commended ${top.map(s=>s.first).join(", ")} for outstanding work.`});
+  toast(`Commended ${top.length} students. +2 rep.`);
+  renderHud();buildNav();refreshCurrentView();saveGame(false);
 }
 function viewClassroom(){
   const c=currentClass();
@@ -1294,7 +1374,14 @@ function viewRoster(){
       <tbody>${cls.students.map(s=>{
         const cc={green:0,yellow:0,purple:0};s.cards.forEach(c=>cc[c.color]++);
         const cur=att[s.id]||"";
-        const opt=(v,lbl,clr)=>`<button class="reroll" style="${cur===v?'background:'+clr+';color:#000;font-weight:bold':''}" onclick="setAttendance(${s.id},'${v}')">${lbl}</button>`;
+        const note=(state.attendanceNotes||{})[s.id]||"";
+        const labelMap={present:"Here",late:"Late",absent:"Absent",excused:"Excused"};
+        const colorMap={present:"var(--green)",late:"var(--yellow)",absent:"var(--red)",excused:"var(--purple)"};
+        const sel=`<select onchange="setAttendance(${s.id},this.value)" style="background:${cur?colorMap[cur]:'#0e0a07'};color:${cur?'#000':'#f3e7d3'};font-weight:${cur?'bold':'normal'};border:1px solid #333;padding:.3em;border-radius:4px;min-width:9em">
+          <option value="">- choose -</option>
+          ${Object.entries(labelMap).map(([k,v])=>`<option value="${k}" ${cur===k?"selected":""}>${v}</option>`).join("")}
+        </select>`;
+        const noteBtn=`<button class="reroll" onclick="editAttendanceNote(${s.id})" title="${esc(note||'add note')}">${note?"✎":"+"} note</button>`;
         const recent=recentAttendance(s.id,cls.name,5);
         const recentStrip=recent.map(v=>{
           if(v==="present")return `<span title="present" style="display:inline-block;width:14px;height:14px;background:var(--green);border:1px solid #000;margin-right:1px"></span>`;
@@ -1306,7 +1393,7 @@ function viewRoster(){
         return `<tr>
           <td class="clickable" onclick="openStudent(${s.id},${state.role==='subject'})">${s.name}</td>
           <td>${recentStrip}</td>
-          <td>${opt("present","P","var(--green)")} ${opt("late","L","var(--yellow)")} ${opt("absent","A","var(--red)")}</td>
+          <td>${sel} ${noteBtn}${note?`<div style="font-size:.75em;opacity:.7;margin-top:.2em">${esc(note)}</div>`:""}</td>
           <td>${combinedAvg(s).toFixed(1)}</td>
           <td><small>${s.mood.toFixed(0)} / ${s.effort.toFixed(0)}</small></td>
           <td>${cc.green}/${cc.yellow}/${cc.purple}</td>
@@ -1350,6 +1437,15 @@ function attendanceFor(week,dayIdx,clsName){
   const key=`${week}.${dayIdx}.${clsName}`;
   state.attendance[key]=state.attendance[key]||{};
   return state.attendance[key];
+}
+function editAttendanceNote(sid){
+  state.attendanceNotes=state.attendanceNotes||{};
+  const cur=state.attendanceNotes[sid]||"";
+  const txt=prompt("Note for this student:",cur);
+  if(txt==null)return;
+  if(txt.trim())state.attendanceNotes[sid]=txt.trim();
+  else delete state.attendanceNotes[sid];
+  showView("roster");
 }
 function setAttendance(sid,val){
   const att=attendanceFor(state.week,state.dayIdx,currentClass().name);
@@ -1631,7 +1727,8 @@ async function precomputeAnswers(testId,classIdx){
       const a=archs[qi];if(!a)return {text:null};
       const ability=(s.ability*.7+s.effort*.2+s.mood*.1)/100;
       const roll=ability+(Math.random()*.3-.15);
-      const pick=roll<.35?a.wrong:roll<.65?a.partial:a.correct;
+      const tier=roll<.35?a.wrong:roll<.65?a.partial:a.correct;
+      const pick=pickFromTier(tier,s.id);
       return {text:pick};
     });
   }
@@ -1790,11 +1887,9 @@ async function _streamFillAnswersImpl(testId,classIdx,test,cls,asn){
       const ans=asn[s.id].answers[qi];
       if(!ans.pending && !ans.writing)continue;
       const ability=(s.ability*.7+s.effort*.2+s.mood*.1)/100;
-      let pick;
       const roll=ability+(Math.random()*.3-.15);
-      if(roll<.35)pick=arch.wrong;
-      else if(roll<.65)pick=arch.partial;
-      else pick=arch.correct;
+      const tier=roll<.35?arch.wrong:roll<.65?arch.partial:arch.correct;
+      const pick=pickFromTier(tier,s.id);
       // Apply a small writing-skill flavor: weak writers drop apostrophes.
       let txt=pick;
       if(s.writing<35){
@@ -1812,36 +1907,47 @@ async function _streamFillAnswersImpl(testId,classIdx,test,cls,asn){
   }
 }
 
-// ONE call per question - returns three archetype answers at different skill levels.
+// ONE call per question - returns SIX distinct student answers across the skill spectrum.
+// Each student gets a unique-feeling answer. Variety with one round-trip.
 async function archetypeAnswers(q){
+  const subj=state.subject||"the subject";
   const len=q.type==="sa"?"1 short sentence":q.type==="fib"?"a brief phrase or sentence containing the answer":"2-3 short sentences";
   const wmatch=(q.answer||"").match(/(\d{2,3})\s*words/i);
   const lenSpec=(q.type==="es"&&wmatch)?`roughly ${wmatch[1]} words`:len;
-  const prompt=`Write THREE distinct school-student answers to one exam question at three skill levels.
+  const prompt=`Write SIX DISTINCT school-student answers to one ${subj} exam question. Each answer should sound like a different real student - different vocabulary, different mistakes, different sentence rhythm.
 
 Question: ${q.prompt}${q.answer?`\nRubric notes: ${q.answer}`:""}
 
 Length for each: ${lenSpec}.
 
-Output EXACTLY in this format, nothing else:
-###WRONG###
-<a clearly incorrect answer - confused or factually wrong>
-###PARTIAL###
-<a partially correct answer - right general idea but a clear factual mistake or gap>
-###CORRECT###
-<a clean correct answer - on-target and well-explained for a school student>
+Output EXACTLY in this delimiter format, nothing else:
+###WRONG-A###
+<a clearly wrong answer in voice 1>
+###WRONG-B###
+<another distinct wrong answer with a different mistake in voice 2>
+###PARTIAL-A###
+<partially right answer in voice 3>
+###PARTIAL-B###
+<another distinct partial answer in voice 4>
+###CORRECT-A###
+<a clean correct answer in voice 5>
+###CORRECT-B###
+<another distinct correct answer in voice 6>
 
-No JSON. No commentary. No preamble. Just the three sections.`;
-  const txt=await aiText(prompt,{retries:3,timeout:40000});
+No JSON. No commentary. No preamble. Just the six sections, each unique.`;
+  const txt=await aiText(prompt,{retries:3,timeout:50000},{streamTo:"wait"});
   if(!txt)return null;
-  const m1=txt.match(/###WRONG###\s*\n?([\s\S]*?)(?=###PARTIAL###|$)/i);
-  const m2=txt.match(/###PARTIAL###\s*\n?([\s\S]*?)(?=###CORRECT###|$)/i);
-  const m3=txt.match(/###CORRECT###\s*\n?([\s\S]*?)$/i);
-  const wrong=(m1?.[1]||"").trim();
-  const partial=(m2?.[1]||"").trim();
-  const correct=(m3?.[1]||"").trim();
-  if(!wrong||!partial||!correct)return null;
+  const get=(tag)=>{const m=txt.match(new RegExp(`###${tag}###\\s*\\n?([\\s\\S]*?)(?=###[A-Z]+-[A-Z]###|$)`,"i"));return (m?.[1]||"").trim();};
+  const wrong=[get("WRONG-A"),get("WRONG-B")].filter(Boolean);
+  const partial=[get("PARTIAL-A"),get("PARTIAL-B")].filter(Boolean);
+  const correct=[get("CORRECT-A"),get("CORRECT-B")].filter(Boolean);
+  if(!wrong.length||!partial.length||!correct.length)return null;
   return {wrong,partial,correct};
+}
+function pickFromTier(tierArr,studentId){
+  // Stable pick by student id so repeated views are consistent.
+  if(!tierArr||!tierArr.length)return null;
+  return tierArr[studentId%tierArr.length];
 }
 function refreshIfGrading(){
   const on=document.querySelector("nav.side button.on");
@@ -2124,7 +2230,7 @@ function queueGradeReaction(student,score,test){
 async function aiSuggest(){
   toast("Asking the muse...");
   const subj=state.subject||"general knowledge";
-  const prompt=`Write ONE multiple-choice quiz question for a school ${subj} class. The question must be answerable, the correct answer must be ONE of the four options, and the distractors must be plausible.
+  const prompt=`Write ONE multiple-choice quiz question STRICTLY in the subject of ${subj} for a school class. The question MUST be a ${subj} topic - do not stray into other subjects. The correct answer must be ONE of the four options, distractors plausible.
 Return ONLY a compact JSON object: {"q":"<question text>","options":["a","b","c","d"],"correct":<integer 0-3>}`;
   const data=await aiJSON(prompt,{retries:3,timeout:25000});
   if(!data||typeof data.q!=="string"||!Array.isArray(data.options)||data.options.length<2){
@@ -2132,10 +2238,9 @@ Return ONLY a compact JSON object: {"q":"<question text>","options":["a","b","c"
     return;
   }
   const correct=Math.max(0,Math.min(data.options.length-1,parseInt(data.correct)||0));
-  // pad options to 4 if needed
   while(data.options.length<4)data.options.push("");
   addQuestion("mc",{prompt:data.q,options:data.options.slice(0,4).map(o=>String(o||"")),correct});
-  toast("AI question added.");
+  toast(`${subj} question added.`);
 }
 
 // ============================================================
