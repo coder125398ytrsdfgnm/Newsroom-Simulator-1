@@ -50,10 +50,12 @@
   #game{display:none;flex-direction:column;height:100vh}
   #game.active{display:flex}
   main{flex:1;display:flex;overflow:hidden}
-  nav.side{width:180px;background:#0e0a07;padding:.5em;display:flex;flex-direction:column;gap:.3em}
-  nav.side button{text-align:left}
-  nav.side button.on{background:var(--accent);color:#1b1410}
-  nav.side .sep{height:1px;background:#3a2b20;margin:.3em 0}
+  nav.side{width:190px;background:linear-gradient(#0e0a07,#1b1410);padding:.6em .5em;display:flex;flex-direction:column;gap:.25em;border-right:1px solid #3a2b20}
+  nav.side button{text-align:left;font-size:.92em;padding:.55em .7em;border-radius:8px;border:1px solid transparent;transition:background .15s ease,border-color .15s ease}
+  nav.side button:hover{background:#241a14;border-color:#3a2b20}
+  nav.side button.on{background:var(--accent);color:#1b1410;font-weight:bold;border-color:#000}
+  nav.side .sep{height:1px;background:#3a2b20;margin:.4em 0}
+  nav.side .heading{font-size:.7em;text-transform:uppercase;letter-spacing:1.2px;opacity:.5;padding:.3em .5em .1em;margin-top:.3em}
   section.view{flex:1;overflow:auto;padding:1em}
 
   .room{background:linear-gradient(#3a2b20,#2a1f18);border:2px solid #000;
@@ -705,23 +707,28 @@ function buildNav(){
     light.textContent=unread===1?"1 new message":(unread>1?`${unread} new messages`:"New message");
   }
   let html="";
+  html+=`<div class="heading">Class</div>`;
   if(role==="tutor"){
     html+=navBtn("formroom","Form Room");
-    html+=navBtn("roster","Roster");
+    html+=navBtn("roster","Roster · Register");
     html+=navBtn("needs","Student Needs");
     html+=navBtn("cards","Card Record");
-    html+=navBtn("grades","Quarterly Grades");
   }else{
     html+=navBtn("classroom","Classroom");
-    html+=navBtn("roster","Roster");
+    html+=navBtn("roster","Roster · Register");
+  }
+  if(role==="subject"){
+    html+=`<div class="heading">Assessment</div>`;
     html+=navBtn("builder","Test Builder");
     html+=navBtn("tests","Tests");
     html+=navBtn("grading","Grading");
-    html+=navBtn("grades","Quarterly Grades");
   }
+  html+=`<div class="heading">Reports</div>`;
+  html+=navBtn("grades","Quarterly Grades");
+  html+=navBtn("activity","Staffroom Feed");
+  html+=`<div class="heading">Comms</div>`;
   html+=navBtn("messages","Messages"+msgBadge);
   html+=navBtn("missions","Missions"+misBadge);
-  html+=navBtn("activity","Staffroom Feed");
   html+=`<div class="sep"></div>
     <button onclick="saveGame(true)">Save Game</button>
     <button onclick="quitToMenu()">Quit to Menu</button>
@@ -796,6 +803,7 @@ function viewFormRoom(){
   const c=currentClass();
   const pending=c.students.filter(s=>s.flag).length;
   return `<h2>Form Room - ${c.name}</h2>
+    ${todayPanel()}
     <div class="room">
       <div class="board">Form period. Take the register, address concerns, read recent cards.</div>
       ${seatGrid(false)}
@@ -806,11 +814,48 @@ function viewClassroom(){
   const c=currentClass();
   return `<h2>Classroom - ${c.name} (${state.subject})</h2>
     ${classPicker()}
+    ${todayPanel()}
     <div class="room">
-      <div class="board">Today's lesson plan goes here. Run a test or assign a card.</div>
+      <div class="board">Today's lesson. Run a test, hand out cards, take the register.</div>
       ${seatGrid(true)}
     </div>
     <p class="muted">Click a student to view their record or assign a card (with a reason).</p>`;
+}
+
+// "Today" panel: surface every pending task across all systems in one place.
+function todayPanel(){
+  const cls=currentClass();
+  const tasks=[];
+  // Attendance not taken yet today?
+  const attKey=`${state.week}.${state.dayIdx}.${cls.name}`;
+  const att=state.attendance?.[attKey]||{};
+  const allTaken=cls.students.every(s=>att[s.id]);
+  if(!allTaken)tasks.push({tag:"attendance",text:`Take the register for ${cls.name}`,action:`showView('roster')`,btn:"Open Roster"});
+  // Unread messages
+  const unread=state.messages.filter(m=>!m.fromMe&&!m.read).length;
+  if(unread)tasks.push({tag:"messages",text:`${unread} unread message${unread===1?"":"s"}`,action:`showView('messages')`,btn:"Read"});
+  // Form-tutor needs
+  if(state.role==="tutor"){
+    const flagged=cls.students.filter(s=>s.flag);
+    if(flagged.length)tasks.push({tag:"needs",text:`${flagged.length} student need${flagged.length===1?"":"s"} to address`,action:`showView('needs')`,btn:"Open Needs"});
+  }
+  // Tests awaiting grading
+  if(state.role==="subject"){
+    const ungraded=state.tests.filter(t=>{const a=t.assignments[state.activeClassIdx];return a&&Object.values(a).some(x=>!x.scored&&!x.absent);}).length;
+    if(ungraded)tasks.push({tag:"grading",text:`${ungraded} test${ungraded===1?"":"s"} to grade`,action:`showView('grading')`,btn:"Grade"});
+  }
+  // Open missions
+  const openM=state.missions.filter(m=>m.status==="open").length;
+  if(openM)tasks.push({tag:"missions",text:`${openM} open mission${openM===1?"":"s"}`,action:`showView('missions')`,btn:"Missions"});
+  if(!tasks.length){
+    return `<div style="background:#1b1410;border-left:3px solid var(--green);padding:.5em .8em;border-radius:6px;margin-bottom:.6em"><b>All caught up.</b> <span class="muted">Advance the day to move things along.</span></div>`;
+  }
+  return `<div style="background:#1b1410;border-left:3px solid var(--accent);padding:.5em .8em;border-radius:6px;margin-bottom:.6em">
+    <b>Today (${DAYS[state.dayIdx]} of Week ${state.week})</b>
+    <ul style="margin:.3em 0 0 0;padding-left:1.2em">
+      ${tasks.map(t=>`<li>${esc(t.text)} <button class="reroll" style="margin-left:.4em" onclick="${t.action}">${esc(t.btn)}</button></li>`).join("")}
+    </ul>
+  </div>`;
 }
 
 // ============================================================
