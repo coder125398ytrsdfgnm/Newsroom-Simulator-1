@@ -2382,12 +2382,12 @@ function predictAttendance(s,recent){
   const absents=recent.filter(v=>v==="absent").length;
   const lates=recent.filter(v=>v==="late").length;
   const excuses=recent.filter(v=>v==="excused").length;
-  if(absents>=3)return {text:"likely absent again",color:"#e26464"};
-  if(s.mood<25)return {text:"might skip - low mood",color:"#e26464"};
-  if(excuses>=2)return {text:"recently excused",color:"#9b59ff"};
-  if(lates>=2)return {text:"running late lately",color:"#f7c948"};
-  if(s.effort>70&&s.mood>60)return {text:"reliable - here",color:"#4caf50"};
-  return {text:"probably here",color:"#888"};
+  if(absents>=3)return {text:"absent again? 3+ recent",color:"#e26464"};
+  if(s.mood<25)return {text:"low mood - may skip",color:"#e26464"};
+  if(excuses>=2)return {text:"often excused",color:"#9b59ff"};
+  if(lates>=2)return {text:"late lately",color:"#f7c948"};
+  if(s.effort>70&&s.mood>60)return {text:"reliable",color:"#4caf50"};
+  return {text:"no signal",color:"#888"};
 }
 
 // Tiny signal hint - tells the player what to watch for, derived from real state.
@@ -3596,16 +3596,36 @@ function viewMessages(){
   }
   const sel=state.selectedContact||state.contacts[0].id;
   state.selectedContact=sel;
-  const contactRows=state.contacts.slice().sort((a,b)=>lastMsgWeek(b)-lastMsgWeek(a)).map(c=>{
-    const last=lastMsgFor(c.id);
-    const unread=state.messages.filter(m=>m.contactId===c.id&&!m.fromMe&&!m.read).length;
-    return `<div class="contact-row ${c.id===sel?"sel":""}" onclick="selectContact('${c.id}')">
-      <div class="who">${unread?'<span class="dot"></span>':""}${esc(c.name)} ${unread?`<span class="badge">${unread}</span>`:""}</div>
-      <div class="preview">${esc(c.relation)} · ${last?esc(last.subject):"-"}</div>
+  // Group contacts by kind
+  const groups={
+    "Parents":state.contacts.filter(c=>c.kind==="parent"),
+    "Students":state.contacts.filter(c=>c.kind==="student"),
+    "Colleagues":state.contacts.filter(c=>c.kind==="staff" && !["c-principal","c-hr"].includes(c.id)),
+    "School / HR":state.contacts.filter(c=>c.kind==="staff" && ["c-principal","c-hr"].includes(c.id))
+  };
+  state._msgGroups=state._msgGroups||{};
+  const renderGroup=(label,arr)=>{
+    if(!arr.length)return "";
+    const open=state._msgGroups[label]!==false;
+    const unreadCount=arr.reduce((a,c)=>a+state.messages.filter(m=>m.contactId===c.id&&!m.fromMe&&!m.read).length,0);
+    return `<div style="border-bottom:1px solid #3a2b20">
+      <div onclick="state._msgGroups['${label}']=!(${open});showView('messages')"
+        style="padding:.4em .6em;cursor:pointer;background:#1b1410;font-size:.8em;text-transform:uppercase;letter-spacing:1px;color:var(--accent);display:flex;justify-content:space-between;align-items:center">
+        <span>${open?"▾":"▸"} ${esc(label)} (${arr.length})</span>
+        ${unreadCount?`<span class="badge">${unreadCount}</span>`:""}
+      </div>
+      ${open?arr.sort((a,b)=>lastMsgWeek(b)-lastMsgWeek(a)).map(c=>{
+        const last=lastMsgFor(c.id);
+        const unread=state.messages.filter(m=>m.contactId===c.id&&!m.fromMe&&!m.read).length;
+        return `<div class="contact-row ${c.id===sel?"sel":""}" onclick="selectContact('${c.id}')">
+          <div class="who">${unread?'<span class="dot"></span>':""}${esc(c.name)} ${unread?`<span class="badge">${unread}</span>`:""}</div>
+          <div class="preview">${esc(c.relation)} · ${last?esc(last.subject):"-"}</div>
+        </div>`;
+      }).join(""):""}
     </div>`;
-  }).join("");
+  };
+  const contactRows=Object.entries(groups).map(([k,v])=>renderGroup(k,v)).join("");
   const thread=state.messages.filter(m=>m.contactId===sel).sort((a,b)=>a.week-b.week||DAYS.indexOf(a.day)-DAYS.indexOf(b.day));
-  // mark inbound as read
   thread.forEach(m=>{if(!m.fromMe)m.read=true;});
   const c=state.contacts.find(x=>x.id===sel);
   const linkedMissions=state.missions.filter(m=>m.contactId===sel);
@@ -4147,11 +4167,26 @@ Return ONLY the JSON object.`;
       plan[4].push({type:"story",studentId:s.id,story:line});
     });
   }
-  // Grades from other teachers - NO AI, ALWAYS scheduled even if the AI call above failed
-  const gradesCount=Math.min(notable.length,3);
-  for(let i=0;i<gradesCount;i++){
+  // Grades from other teachers - ONE subject per week gives the WHOLE CLASS a grade
+  // (cycled through subjects week by week), so it feels like a real test happened.
+  // Plus singular notable spurts for narrative flavor.
+  const allStudents=state.classes.flatMap(c=>c.students);
+  const weeklyTeacher=teachers[state.week%teachers.length];
+  if(weeklyTeacher){
+    // schedule a class-wide grading event on one weekday
+    const gradingDay=Math.floor(Math.random()*5);
+    plan[gradingDay].push({
+      type:"classGrade",
+      subject:weeklyTeacher.subject,
+      by:weeklyTeacher.name,
+      studentIds:allStudents.map(s=>s.id)
+    });
+  }
+  // Plus 1-2 singular grades scattered for narrative
+  const singular=Math.min(notable.length,2);
+  for(let i=0;i<singular;i++){
     const s=notable[(i+plans.length)%notable.length].s;
-    const teacher=teachers[(i+state.week)%teachers.length];
+    const teacher=teachers[(i+state.week+1)%teachers.length];
     const drift=(Math.random()*20-10);
     const score=clamp(s.ability*.65+s.effort*.2+s.mood*.15+drift);
     const day=Math.floor(Math.random()*5);
@@ -4239,13 +4274,40 @@ async function evolveStoriesFor(students){
 
 function viewActivity(){
   const a=state.activity||[];
+  state._actFilter=state._actFilter||"all";
+  const filter=state._actFilter;
+  const filtered=filter==="all"?a:a.filter(e=>e.type===filter);
+  const tags=["all","card","grade","gossip"];
+  // Build a quick "this week" summary header
+  const thisWeek=a.filter(e=>e.week===state.week);
+  const counts={card:thisWeek.filter(e=>e.type==="card").length,grade:thisWeek.filter(e=>e.type==="grade").length,gossip:thisWeek.filter(e=>e.type==="gossip").length};
+  // Make student names clickable - find first matching student per entry
+  const linkify=(text)=>{
+    const all=state.classes.flatMap(c=>c.students);
+    let out=esc(text);
+    all.forEach(s=>{
+      const re=new RegExp(`\\b${s.first}\\b`);
+      if(re.test(out)){
+        out=out.replace(re,`<a onclick="openStudent(${s.id},${state.role==='subject'})" style="color:var(--accent);cursor:pointer;text-decoration:underline">${s.first}</a>`);
+      }
+    });
+    return out;
+  };
   return `<h2>Staffroom Feed</h2>
-    <p class="muted">What other teachers and the school have been up to. Pulled from the corkboard.</p>
+    <div style="display:flex;gap:1em;background:#1b1410;padding:.6em .8em;border-radius:6px;margin-bottom:.6em;font-size:.85em">
+      <span><b>This week:</b></span>
+      <span><b style="color:var(--accent)">${counts.card}</b> cards issued</span>
+      <span><b style="color:var(--green)">${counts.grade}</b> grade events</span>
+      <span><b style="color:var(--purple)">${counts.gossip}</b> gossip lines</span>
+    </div>
+    <div class="row" style="margin-bottom:.5em">
+      ${tags.map(t=>`<button class="${filter===t?'primary':''}" onclick="state._actFilter='${t}';showView('activity')">${t}</button>`).join("")}
+    </div>
     <div class="feed">
-      ${a.length?a.map(e=>`<div class="item">
+      ${filtered.length?filtered.map(e=>`<div class="item">
         <div class="when">Wk ${e.week} ${e.day}</div>
-        <div><span class="tag ${e.type}">${e.type}</span>${esc(e.text)}</div>
-      </div>`).join(""):"<p><i>Nothing yet. Advance time.</i></p>"}
+        <div><span class="tag ${e.type}">${e.type}</span>${linkify(e.text)}</div>
+      </div>`).join(""):"<p><i>Nothing matching that filter. Try 'all' or advance time.</i></p>"}
     </div>`;
 }
 
@@ -4329,6 +4391,21 @@ function releaseDayEvents(dayIdx){
       s.otherGrades.push({subject:ev.subject,by:ev.by,score:ev.score,week:state.week});
       if(s.otherGrades.length>30)s.otherGrades.shift();
       logActivity({type:"grade",text:`${ev.by} returned ${ev.subject} mark for ${s.first}: ${ev.score.toFixed(0)}`});
+    }else if(ev.type==="classGrade"){
+      const results=[];
+      ev.studentIds.forEach(sid=>{
+        const s=findStudent(sid);if(!s)return;
+        const drift=Math.random()*20-10;
+        const score=clamp(s.ability*.65+s.effort*.2+s.mood*.15+drift);
+        s.otherGrades=s.otherGrades||[];
+        s.otherGrades.push({subject:ev.subject,by:ev.by,score,week:state.week});
+        if(s.otherGrades.length>30)s.otherGrades.shift();
+        results.push({first:s.first,score});
+      });
+      const avg=results.reduce((a,b)=>a+b.score,0)/Math.max(1,results.length);
+      const top=results.slice().sort((a,b)=>b.score-a.score)[0];
+      const bot=results.slice().sort((a,b)=>a.score-b.score)[0];
+      logActivity({type:"grade",text:`${ev.by} (${ev.subject}) gave a class test - avg ${avg.toFixed(1)}. Top: ${top.first} (${top.score.toFixed(0)}). Lowest: ${bot.first} (${bot.score.toFixed(0)}).`});
     }else if(ev.type==="gossip"){
       logActivity({type:"gossip",text:ev.text});
     }else if(ev.type==="story"){
@@ -4382,14 +4459,16 @@ async function weeklyTick(){
     });
   }
   state.actionsThisWeek=0;
-  // form tutors: each week, students with notable story drift may surface a need (AI generated).
+  // form tutors: each week, surface 2-4 student needs. Lowered randomness so they actually appear.
   if(state.role==="tutor"){
     const cls=state.classes[0];
-    const candidates=cls.students.filter(s=>!s.flag).map(s=>({s,score:storySalience(s.story)+(s.mood<40?2:0)})).filter(x=>x.score>0);
+    const candidates=cls.students.filter(s=>!s.flag).map(s=>({
+      s,score:(storySalience(s.story)||0)+(s.mood<40?3:0)+(s.effort<35?2:0)+(combinedAvg(s)<50&&combinedAvg(s)>0?2:0)+Math.random()
+    }));
     candidates.sort((a,b)=>b.score-a.score);
-    const targets=candidates.slice(0,Math.min(3,candidates.length));   // up to 3 needs now
+    const want=2+Math.floor(Math.random()*3);   // always 2-4 needs surfaced
+    const targets=candidates.slice(0,Math.min(want,candidates.length));
     for(const t of targets){
-      if(Math.random()>.55)continue;
       const need=await generateNeed(t.s);
       if(need)t.s.flag=need;
     }
