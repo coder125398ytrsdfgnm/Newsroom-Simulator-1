@@ -844,6 +844,7 @@ function buildNav(){
     html+=navBtn("builder","Test Builder");
     html+=navBtn("tests","Tests");
     html+=navBtn("grading","Grading");
+    html+=navBtn("homework","Homework");
   }
   html+=`<div class="heading">Reports</div>`;
   if(role==="tutor")html+=navBtn("grades","Quarterly Grades");
@@ -876,6 +877,7 @@ function showView(v){
   else if(v==="messages")host.innerHTML=viewMessages();
   else if(v==="missions")host.innerHTML=viewMissions();
   else if(v==="activity")host.innerHTML=viewActivity();
+  else if(v==="homework")host.innerHTML=viewHomework();
 }
 
 // ============================================================
@@ -1026,6 +1028,8 @@ function viewClassroom(){
       <button onclick="runOfficeHours()" title="Hold office hours for a struggling student - boosts ability">Office Hours</button>
       <button onclick="runGroupProject()" title="Class-wide group project - boosts effort across the class">Group Project</button>
       <button onclick="runPopQuiz()" title="Surprise quiz - reveals current ability">Pop Quiz</button>
+      <button onclick="assignHomework()" title="Assign homework due in 2-3 days">Assign Homework</button>
+      <button onclick="showView('homework')" title="View assigned homework and completion">View Homework</button>
     </div>
     <p class="muted">Click a student to view their record or assign a card (with a reason).</p>`;
 }
@@ -1063,6 +1067,157 @@ function runGroupProject(){
   toast(`Group project: +4 effort across class, +2 rep.`);
   renderHud();buildNav();refreshCurrentView();saveGame(false);
 }
+// ============================================================
+// HOMEWORK SYSTEM
+// ============================================================
+function assignHomework(){
+  const cls=currentClass();
+  const m=document.createElement("div");m.className="modal";
+  m.innerHTML=`<div class="box">
+    <h2>Assign Homework</h2>
+    <p class="muted">Students complete it based on their effort. High-effort kids finish on time, low-effort kids forget. Affects ability.</p>
+    <label>Title: <input id="hwTitle" type="text" placeholder="${state.subject||"Subject"} homework #${(state.homework||[]).length+1}" style="width:100%"></label>
+    <label style="display:block;margin-top:.5em">Description / instructions:
+      <textarea id="hwBody" rows="3" placeholder="What should they do? Reading, problem set, writing exercise..." style="width:100%"></textarea>
+    </label>
+    <div class="row">
+      <label>Difficulty:
+        <select id="hwDifficulty">
+          <option value="easy">Easy (most will complete)</option>
+          <option value="medium" selected>Medium (effort matters)</option>
+          <option value="hard">Hard (only diligent kids finish)</option>
+        </select>
+      </label>
+      <label>Due in:
+        <select id="hwDue">
+          <option value="2">2 days</option>
+          <option value="3" selected>3 days</option>
+          <option value="5">5 days (next week)</option>
+        </select>
+      </label>
+    </div>
+    <div class="row" style="justify-content:flex-end">
+      <button onclick="closeModal()">Cancel</button>
+      <button class="primary" onclick="submitHomework()">Assign</button>
+    </div>
+  </div>`;
+  document.body.appendChild(m);m.onclick=e=>{if(e.target===m)closeModal();};
+}
+function submitHomework(){
+  const cls=currentClass();
+  const title=document.getElementById("hwTitle").value.trim()||`${state.subject||"Subject"} homework`;
+  const body=document.getElementById("hwBody").value.trim();
+  const difficulty=document.getElementById("hwDifficulty").value;
+  const dueDays=parseInt(document.getElementById("hwDue").value);
+  if(!body){toast("Add some instructions.");return;}
+  state.homework=state.homework||[];
+  const hw={
+    id:"hw"+Date.now(),title,body,difficulty,
+    classIdx:state.activeClassIdx,
+    className:cls.name,
+    assignedWeek:state.week,assignedDay:state.dayIdx,
+    dueTick:tickCounter()+dueDays,
+    completion:{},      // studentId -> 'done'|'partial'|'missing'
+    settled:false
+  };
+  // Roll completion immediately based on effort. Show on due date.
+  cls.students.forEach(s=>{
+    const eff=s.effort/100;
+    const moodMod=(s.mood-50)/200;     // mood swings completion ±0.25
+    const diffMod=difficulty==="easy"?0.15:difficulty==="hard"?-0.15:0;
+    const score=eff+moodMod+diffMod+(Math.random()*0.2-0.1);
+    let outcome;
+    if(score>=0.65)outcome="done";
+    else if(score>=0.35)outcome="partial";
+    else outcome="missing";
+    hw.completion[s.id]=outcome;
+  });
+  state.homework.push(hw);
+  state.actionsThisWeek=(state.actionsThisWeek||0)+1;
+  state.rep+=1;
+  toast(`Homework assigned. Due in ${dueDays} day${dueDays===1?"":"s"}. Check back to see who finishes.`);
+  closeModal();renderHud();buildNav();showView("homework");saveGame(false);
+}
+
+function viewHomework(){
+  state.homework=state.homework||[];
+  const cls=currentClass();
+  const mine=state.homework.filter(h=>h.classIdx===state.activeClassIdx);
+  if(!mine.length)return `<h2>Homework</h2>${classPicker()}
+    <p class="muted">No homework assigned yet. Go to the Classroom and click "Assign Homework".</p>`;
+  return `<h2>Homework - ${cls.name}</h2>${classPicker()}
+    ${mine.slice().reverse().map(h=>{
+      const due=h.dueTick;
+      const now=tickCounter();
+      const isDue=now>=due;
+      const stats={done:0,partial:0,missing:0};
+      cls.students.forEach(s=>{const c=h.completion[s.id]||"missing";stats[c]++;});
+      const total=cls.students.length;
+      const cls2=isDue?"":"opacity:.85";
+      return `<div style="background:var(--panel);border-left:3px solid ${isDue?(h.settled?'var(--green)':'var(--accent)'):'#888'};padding:.7em .9em;margin:.5em 0;border-radius:6px;${cls2}">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div><b>${esc(h.title)}</b> <small class="muted">(${h.difficulty}, assigned wk ${h.assignedWeek} ${DAYS[h.assignedDay]})</small></div>
+          <div><small class="muted">${isDue?(h.settled?"settled":"due now"):"due wk "+Math.floor(due/5)+" "+DAYS[due%5]}</small></div>
+        </div>
+        <div style="font-size:.85em;opacity:.85;margin-top:.3em">${esc(h.body)}</div>
+        <div style="margin-top:.5em;display:flex;gap:1em;font-size:.85em">
+          <span><b style="color:var(--green)">${stats.done}</b> done</span>
+          <span><b style="color:var(--yellow)">${stats.partial}</b> partial</span>
+          <span><b style="color:var(--red)">${stats.missing}</b> missing</span>
+          <span class="muted">of ${total}</span>
+        </div>
+        ${isDue&&!h.settled?`<div style="margin-top:.5em"><button class="primary" onclick="settleHomework('${h.id}')">Review &amp; Settle</button></div>`:""}
+        ${h.settled?`<div style="margin-top:.5em"><button class="reroll" onclick="viewHomeworkDetail('${h.id}')">Details</button></div>`:""}
+      </div>`;
+    }).join("")}`;
+}
+
+function settleHomework(hwId){
+  const hw=state.homework.find(x=>x.id===hwId);if(!hw)return;
+  const cls=state.classes[hw.classIdx];
+  // Apply real consequences for each student
+  cls.students.forEach(s=>{
+    const c=hw.completion[s.id];
+    if(c==="done"){
+      s.ability=clamp(s.ability+0.4);
+      s.effort=clamp(s.effort+1);
+    }else if(c==="partial"){
+      s.ability=clamp(s.ability+0.1);
+    }else{
+      // missing - yellow card territory
+      s.ability=clamp(s.ability-0.3);
+      s.effort=clamp(s.effort-1);
+      s.cards.push({color:"yellow",reason:`Missing homework: ${hw.title}`,week:state.week,by:"Ms. "+state.name});
+    }
+  });
+  hw.settled=true;
+  state.actionsThisWeek=(state.actionsThisWeek||0)+1;
+  state.rep+=2;
+  const stats={done:0,partial:0,missing:0};
+  Object.values(hw.completion).forEach(c=>stats[c]++);
+  logActivity({type:"grade",text:`Homework settled - ${hw.title}: ${stats.done} done, ${stats.partial} partial, ${stats.missing} missing.`});
+  toast(`Homework settled. ${stats.missing} yellow cards issued for missing work. +2 rep.`);
+  renderHud();buildNav();showView("homework");saveGame(false);
+}
+
+function viewHomeworkDetail(hwId){
+  const hw=state.homework.find(x=>x.id===hwId);if(!hw)return;
+  const cls=state.classes[hw.classIdx];
+  const m=document.createElement("div");m.className="modal";
+  const rows=cls.students.map(s=>{
+    const c=hw.completion[s.id]||"missing";
+    const color=c==="done"?"var(--green)":c==="partial"?"var(--yellow)":"var(--red)";
+    return `<tr><td>${esc(s.name)}</td><td style="color:${color};font-weight:bold">${c}</td></tr>`;
+  }).join("");
+  m.innerHTML=`<div class="box" style="max-width:520px">
+    <h2>${esc(hw.title)}</h2>
+    <p class="muted">${esc(hw.body)}</p>
+    <table><thead><tr><th>Student</th><th>Outcome</th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="row" style="justify-content:flex-end"><button class="primary" onclick="closeModal()">Close</button></div>
+  </div>`;
+  document.body.appendChild(m);m.onclick=e=>{if(e.target===m)closeModal();};
+}
+
 function runPopQuiz(){
   const cls=currentClass();
   // Reveals current performance distribution without going through full Test flow.
@@ -1101,6 +1256,9 @@ function todayPanel(){
   if(state.role==="subject"){
     const ungraded=state.tests.filter(t=>{const a=t.assignments[state.activeClassIdx];return a&&Object.values(a).some(x=>!x.scored&&!x.absent);}).length;
     if(ungraded)tasks.push({tag:"grading",text:`${ungraded} test${ungraded===1?"":"s"} to grade`,action:`showView('grading')`,btn:"Grade"});
+    // Homework due to be settled
+    const hwDue=(state.homework||[]).filter(h=>h.classIdx===state.activeClassIdx&&!h.settled&&tickCounter()>=h.dueTick).length;
+    if(hwDue)tasks.push({tag:"homework",text:`${hwDue} homework due to settle`,action:`showView('homework')`,btn:"Review"});
   }
   // Open missions
   const openM=state.missions.filter(m=>m.status==="open").length;
@@ -2639,6 +2797,18 @@ async function queueMessage(contact,kind,opts={}){
 function studentContextBrief(s){
   if(!s)return "";
   const lines=[];
+  // Have you ACTUALLY done anything positive for this kid? If not, parents have no reason to thank you.
+  const myGreenOrPurple=s.cards.filter(c=>c.by==="Ms. "+state.name&&(c.color==="green"||c.color==="purple")).length;
+  const conv=state.messages.filter(m=>{
+    const c=state.contacts.find(x=>x.id===m.contactId);
+    return c && c.studentId===s.id && m.fromMe;
+  }).length;
+  if(myGreenOrPurple===0 && conv===0){
+    lines.push(`The teacher Ms. ${state.name} has NOT done anything specific for ${s.first} yet - no green/purple cards, no direct messages. Parents should NOT thank her for help that didn't happen.`);
+  }else{
+    if(myGreenOrPurple>0)lines.push(`Ms. ${state.name} has given ${s.first} ${myGreenOrPurple} positive card(s).`);
+    if(conv>0)lines.push(`Ms. ${state.name} has sent ${s.first} ${conv} direct message(s).`);
+  }
   // recent grades from your tests
   const lastGrade=(s.grades||[]).slice(-1)[0];
   if(lastGrade)lines.push(`Last ${state.subject||"test"} grade: ${lastGrade.score.toFixed(0)}/100.`);
@@ -2873,6 +3043,21 @@ function scheduleFollowupFromContact(c,playerBody){
 // Result adjusts reputation accordingly. Fire-and-forget.
 async function evaluatePlayerMessage(text,contact){
   if(!text||text.length<3)return;
+  // Hard-coded safety net for obvious offenses - AI sometimes scores these too leniently.
+  const profane=/\b(fuck|shit|cunt|bitch|dick|pussy|cock|asshole|bastards?|whores?|sluts?|retards?|nigg|fag|piss off|kill yourself|kys|stfu)\b/i;
+  if(profane.test(text)){
+    state.badMessageCount=(state.badMessageCount||0)+1;
+    const note=`Profane or hostile content in a message to ${contact?.name||"a contact"}`;
+    if(state.badMessageCount===1){
+      queueDeptWarning("HR",`URGENT: A message you sent contained profane or threatening content. ONE MORE incident and you are out. This is your only warning.`);
+      state.rep=Math.max(0,state.rep-15);
+      toast(`SERIOUS HR WARNING (-15 rep). One more like that and you are FIRED.`);
+      renderHud();buildNav();saveGame(false);
+    }else{
+      fireMe(`You sent another message containing profane or threatening content (${note}). After a prior warning, this is the end.`);
+    }
+    return;
+  }
   const audience=contact?.kind==="student"?`a school student named ${contact.name}`
               :contact?.kind==="staff"?`a colleague (${contact.relation})`
               :contact?.kind==="parent"?`a parent (${contact.relation})`:"a contact";
