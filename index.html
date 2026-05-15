@@ -1021,7 +1021,63 @@ function viewClassroom(){
       <div class="board">Today's lesson. Run a test, hand out cards, take the register.</div>
       ${seatGrid(true)}
     </div>
+    <h3>Teacher actions</h3>
+    <div class="row">
+      <button onclick="runOfficeHours()" title="Hold office hours for a struggling student - boosts ability">Office Hours</button>
+      <button onclick="runGroupProject()" title="Class-wide group project - boosts effort across the class">Group Project</button>
+      <button onclick="runPopQuiz()" title="Surprise quiz - reveals current ability">Pop Quiz</button>
+    </div>
     <p class="muted">Click a student to view their record or assign a card (with a reason).</p>`;
+}
+
+function runOfficeHours(){
+  const cls=currentClass();
+  const strugglers=cls.students.slice().sort((a,b)=>combinedAvg(a)-combinedAvg(b)).filter(s=>combinedAvg(s)>0).slice(0,8);
+  if(!strugglers.length){toast("No one with grades yet.");return;}
+  const m=document.createElement("div");m.className="modal";
+  m.innerHTML=`<div class="box">
+    <h2>Office Hours</h2>
+    <p class="muted">Pick a struggling student to give 1-on-1 attention. +3 ability, +5 effort, +8 mood. +1 rep.</p>
+    <div style="display:flex;flex-direction:column;gap:.3em;max-height:300px;overflow:auto">
+      ${strugglers.map(s=>`<button onclick="applyOfficeHours(${s.id})" style="text-align:left">
+        <b>${esc(s.name)}</b> - avg ${combinedAvg(s).toFixed(1)} <small class="muted">mood ${s.mood.toFixed(0)} effort ${s.effort.toFixed(0)}</small>
+      </button>`).join("")}
+    </div>
+    <div class="row" style="justify-content:flex-end;margin-top:.6em"><button onclick="closeModal()">Cancel</button></div>
+  </div>`;
+  document.body.appendChild(m);m.onclick=e=>{if(e.target===m)closeModal();};
+}
+function applyOfficeHours(sid){
+  const s=findStudent(sid);if(!s)return;
+  s.ability=clamp(s.ability+3);s.effort=clamp(s.effort+5);s.mood=clamp(s.mood+8);
+  state.rep+=1;state.actionsThisWeek=(state.actionsThisWeek||0)+1;
+  logActivity({type:"gossip",text:`You held office hours with ${s.first}. They left with a clearer plan.`});
+  toast(`Office hours with ${s.first}: +3 ability, +5 effort, +8 mood, +1 rep.`);
+  closeModal();renderHud();buildNav();refreshCurrentView();saveGame(false);
+}
+function runGroupProject(){
+  const cls=currentClass();
+  cls.students.forEach(s=>{s.effort=clamp(s.effort+4);s.ability=clamp(s.ability+0.5);s.mood=clamp(s.mood+2);});
+  state.rep+=2;state.actionsThisWeek=(state.actionsThisWeek||0)+1;
+  logActivity({type:"gossip",text:`Group project assigned in ${cls.name}. Students grumble but engage.`});
+  toast(`Group project: +4 effort across class, +2 rep.`);
+  renderHud();buildNav();refreshCurrentView();saveGame(false);
+}
+function runPopQuiz(){
+  const cls=currentClass();
+  // Reveals current performance distribution without going through full Test flow.
+  const scores=cls.students.map(s=>{
+    const ability=(s.ability*.7+s.effort*.2+s.mood*.1)+Math.random()*15-7.5;
+    return {s,score:clamp(ability)};
+  });
+  scores.forEach(({s,score})=>{
+    s.grades.push({testId:"popquiz-"+state.week,score,scale:"percent",weight:0.3});
+  });
+  state.actionsThisWeek=(state.actionsThisWeek||0)+1;
+  const avg=scores.reduce((a,b)=>a+b.score,0)/scores.length;
+  toast(`Pop quiz given. Class avg: ${avg.toFixed(1)}`);
+  logActivity({type:"grade",text:`Pop quiz in ${cls.name}: class avg ${avg.toFixed(1)}.`});
+  renderHud();buildNav();refreshCurrentView();saveGame(false);
 }
 
 // "Today" panel: surface every pending task across all systems in one place.
@@ -1842,12 +1898,9 @@ async function precomputeAnswers(testId,classIdx){
         }
         return {pick:idx,text:q.type==="mc"?(q.options[idx]||""):(idx===0?"True":"False")};
       }
-      const a=archs[qi];if(!a)return {text:null};
-      const ability=(s.ability*.7+s.effort*.2+s.mood*.1)/100;
-      const roll=ability+(Math.random()*.3-.15);
-      const tier=roll<.35?a.wrong:roll<.65?a.partial:a.correct;
-      const pick=pickFromTier(tier,s.id);
-      return {text:pick};
+      const a=archs[qi];if(!a||!a.levels)return {text:null};
+      const eff=Math.max(5,Math.min(95,(s.ability*.7+s.effort*.2+s.mood*.1)+(Math.random()*10-5)));
+      return {text:pickFromLevels(a.levels,eff)};
     });
   }
 }
@@ -2008,10 +2061,9 @@ async function _streamFillAnswersImpl(testId,classIdx,test,cls,asn){
       if(asn[s.id].absent)continue;
       const ans=asn[s.id].answers[qi];
       if(!ans.pending && !ans.writing)continue;
-      const ability=(s.ability*.7+s.effort*.2+s.mood*.1)/100;
-      const roll=ability+(Math.random()*.3-.15);
-      const tier=roll<.35?arch.wrong:roll<.65?arch.partial:arch.correct;
-      const pick=pickFromTier(tier,s.id);
+      // Effective ability = blended attributes, with small noise.
+      const eff=Math.max(5,Math.min(95,(s.ability*.7+s.effort*.2+s.mood*.1)+(Math.random()*10-5)));
+      const pick=pickFromLevels(arch.levels,eff);
       // Apply a small writing-skill flavor: weak writers drop apostrophes.
       let txt=pick;
       if(s.writing<35){
@@ -2039,21 +2091,21 @@ async function archetypeAnswersForTest(test,writtenIdxs){
     const len=q.type==="sa"?"1 short sentence":q.type==="fib"?"a brief phrase":(q.type==="es"&&wmatch?`~${wmatch[1]} words`:"2-3 sentences");
     return `Q${i+1} (${q.type.toUpperCase()}, ${len}): ${q.prompt}${q.answer?` | rubric: ${q.answer}`:""}`;
   }).join("\n");
-  const prompt=`Write student archetype answers for a ${subj} test. For EACH question below, give NINE distinct student answers - three wrong, three partial, three correct. Each must sound different (different vocabulary, sentence rhythm, mistakes).
+  const prompt=`Write student answers for a ${subj} test. For EACH question below, write NINE distinct answers from students at ABILITY LEVELS 10, 20, 30, 40, 50, 60, 70, 80, 90 (out of 100). The answer should reflect what a student at that ability level would actually write - lower ability means more mistakes, weaker grasp, possibly off-topic; higher ability means clear, correct, well-reasoned. CRUCIAL: actually answer the question correctly at high levels; actually answer it wrong at low levels. Use the question's correct answer (from rubric) as ground truth.
 
 ${blocks}
 
-Output EXACTLY this format - one block per question, in order:
+Output EXACTLY this format - one block per question:
 ===Q1===
-###WRONG-A### <wrong, voice 1>
-###WRONG-B### <wrong, voice 2 (different mistake)>
-###WRONG-C### <wrong, voice 3 (different again)>
-###PARTIAL-A### <partial, voice 4>
-###PARTIAL-B### <partial, voice 5>
-###PARTIAL-C### <partial, voice 6>
-###CORRECT-A### <correct, voice 7>
-###CORRECT-B### <correct, voice 8>
-###CORRECT-C### <correct, voice 9>
+###L10### <answer from a struggling student>
+###L20### ...
+###L30### ...
+###L40### ...
+###L50### ...
+###L60### ...
+###L70### ...
+###L80### ...
+###L90### <answer from a strong student>
 ===Q2===
 ... and so on for each question.
 
@@ -2066,17 +2118,10 @@ No JSON. No preamble. Begin output with ===Q1===.`;
     const m=txt.match(re);
     if(!m)return;
     const block=m[1];
-    const get=(tag)=>{const mm=block.match(new RegExp(`###${tag}###\\s*([\\s\\S]*?)(?=###[A-Z]+-[A-Z]###|$)`,"i"));return (mm?.[1]||"").trim();};
-    const wrong=[get("WRONG-A"),get("WRONG-B"),get("WRONG-C")].filter(Boolean);
-    const partial=[get("PARTIAL-A"),get("PARTIAL-B"),get("PARTIAL-C")].filter(Boolean);
-    const correct=[get("CORRECT-A"),get("CORRECT-B"),get("CORRECT-C")].filter(Boolean);
-    if(wrong.length||partial.length||correct.length){
-      out[qi]={
-        wrong:wrong.length?wrong:["(answer pending)"],
-        partial:partial.length?partial:["(answer pending)"],
-        correct:correct.length?correct:["(answer pending)"]
-      };
-    }
+    const get=(tag)=>{const mm=block.match(new RegExp(`###${tag}###\\s*([\\s\\S]*?)(?=###L\\d+###|$)`,"i"));return (mm?.[1]||"").trim();};
+    const levels={};
+    [10,20,30,40,50,60,70,80,90].forEach(l=>{const t=get("L"+l);if(t)levels[l]=t;});
+    if(Object.keys(levels).length){out[qi]={levels};}
   });
   return out;
 }
@@ -2118,9 +2163,20 @@ No JSON. No commentary. No preamble. Just the six sections, each unique.`;
   return {wrong,partial,correct};
 }
 function pickFromTier(tierArr,studentId){
-  // Stable pick by student id so repeated views are consistent.
   if(!tierArr||!tierArr.length)return null;
   return tierArr[studentId%tierArr.length];
+}
+// Pick an answer from the level map keyed by ability bucket. Falls through to nearest level.
+function pickFromLevels(levels,effective){
+  if(!levels||!Object.keys(levels).length)return null;
+  const bucket=Math.round(effective/10)*10;
+  if(levels[bucket])return levels[bucket];
+  // walk outward to find nearest available
+  for(let d=10;d<=80;d+=10){
+    if(levels[bucket-d])return levels[bucket-d];
+    if(levels[bucket+d])return levels[bucket+d];
+  }
+  return Object.values(levels)[0];
 }
 function refreshIfGrading(){
   const on=document.querySelector("nav.side button.on");
@@ -2347,7 +2403,8 @@ function viewGrading(){
         <button onclick="gradePage(1,${t.id})" ${idx===cls.students.length-1?"disabled":""}>Next student &rarr;</button>
       </div>
       <div>
-        ${sub.scored?"":`<button class="primary" onclick="returnPaper(${t.id},${s.id})">Mark &amp; Return Paper</button>`}
+        ${sub.scored?"":`<button onclick="aiMarkPaper(${t.id},${s.id})">AI Mark</button>
+        <button class="primary" onclick="returnPaper(${t.id},${s.id})">Mark &amp; Return Paper</button>`}
       </div>
     </div>`;
 }
@@ -2366,6 +2423,36 @@ function gradePage(delta,testId){
   state.gradingPage=Math.max(0,Math.min(cls.students.length-1,(state.gradingPage||0)+delta));
   showView("grading");
 }
+// Have the AI judge each answer against the question's rubric and pre-fill scores.
+async function aiMarkPaper(testId,sid){
+  const t=state.tests.find(x=>x.id===testId);
+  const sub=t.assignments[state.activeClassIdx][sid];
+  if(!sub||sub.absent){toast("Nothing to mark.");return;}
+  const ov=showBusy("AI marking the paper");beginCritical("AI grading");
+  const items=t.questions.map((q,i)=>{
+    const ans=sub.answers[i]||{};
+    let resp;
+    if(q.type==="mc"){resp=`chose: ${q.options[ans.pick]||"(none)"} (correct: ${q.options[q.correct]||"?"})`;}
+    else if(q.type==="tf"){resp=`chose: ${ans.pick===0?"True":"False"} (correct: ${q.correct===0?"True":"False"})`;}
+    else resp=ans.text||"(blank)";
+    return `Q${i+1} [${q.type}]: ${q.prompt}\nRubric: ${q.answer||"(none)"}\nStudent: ${resp}`;
+  }).join("\n---\n");
+  const prompt=`Mark each of these student exam answers from 0 to 100 based on the rubric. Be fair and a school teacher. JSON only.
+
+${items}
+
+Return ONLY a JSON array of integers, length ${t.questions.length}. Example: [85, 60, 0]`;
+  const data=await aiJSON(prompt,{retries:3,timeout:35000});
+  ov.close();endCritical();
+  if(!Array.isArray(data)){toast("AI couldn't mark - try again or grade manually.");return;}
+  t.questions.forEach((q,i)=>{
+    const v=parseInt(data[i]);
+    if(!isNaN(v))sub.perQ[i]=Math.max(0,Math.min(100,v));
+  });
+  toast("AI suggested scores. Review and adjust before returning.");
+  showView("grading");
+}
+
 async function returnPaper(testId,sid){
   const t=state.tests.find(x=>x.id===testId);
   const sub=t.assignments[state.activeClassIdx][sid];
