@@ -892,7 +892,18 @@ function renderHud(){
   document.getElementById("week").textContent=state.week;
   document.getElementById("day").textContent=DAYS[state.dayIdx];
   document.getElementById("rep").textContent=state.rep;
-  document.getElementById("rank").textContent=state.rank;
+  // Rank with mini progress bar to next promotion
+  const rl=rankLevel();
+  const next=RANKS[rl+1];
+  const cur=RANKS[rl];
+  const pct=next?Math.min(100,Math.max(0,(state.rep-cur.rep)/(next.rep-cur.rep)*100)):100;
+  const rankEl=document.getElementById("rank");
+  if(rankEl){
+    rankEl.innerHTML=`<span title="${next?`${next.rep-state.rep} rep to ${next.key}`:'Max rank'}">${state.rank}</span>
+      <span style="display:inline-block;vertical-align:middle;margin-left:.3em;width:60px;height:6px;background:#0e0a07;border:1px solid #000;border-radius:3px;overflow:hidden">
+        <span style="display:block;height:100%;width:${pct}%;background:var(--accent)"></span>
+      </span>`;
+  }
   const r=computeRating();state.rating=r;
   const lab=ratingLabel(r);
   const el=document.getElementById("ratingHud");
@@ -905,8 +916,16 @@ function renderHud(){
 function currentClass(){return state.classes[state.activeClassIdx];}
 function classPicker(){
   if(state.classes.length<2)return "";
-  return `<div class="row">Class:
-    ${state.classes.map((c,i)=>`<button class="${i===state.activeClassIdx?'primary':''}" onclick="setClass(${i})">${c.name}</button>`).join("")}
+  return `<div style="background:#1b1410;padding:.4em .7em;border-radius:6px;margin-bottom:.6em;display:flex;align-items:center;gap:.5em;flex-wrap:wrap">
+    <b style="opacity:.7;font-size:.85em">Viewing class:</b>
+    ${state.classes.map((c,i)=>{
+      const isActive=i===state.activeClassIdx;
+      const avg=c.students.length?c.students.reduce((a,s)=>a+combinedAvg(s),0)/c.students.length:0;
+      return `<button class="${isActive?'primary':''}" onclick="setClass(${i})" style="min-width:5em">
+        <b>${esc(c.name)}</b>
+        <small style="display:block;font-size:.7em;opacity:.8">${c.students.length} kids · avg ${avg>0?avg.toFixed(0):"-"}</small>
+      </button>`;
+    }).join("")}
   </div>`;
 }
 function setClass(i){state.activeClassIdx=i;showView(state.role==="tutor"?"formroom":"classroom");}
@@ -1060,12 +1079,139 @@ function applyOfficeHours(sid){
   closeModal();renderHud();buildNav();refreshCurrentView();saveGame(false);
 }
 function runGroupProject(){
+  state.groupProjectCooldown=state.groupProjectCooldown||{};
   const cls=currentClass();
-  cls.students.forEach(s=>{s.effort=clamp(s.effort+4);s.ability=clamp(s.ability+0.5);s.mood=clamp(s.mood+2);});
-  state.rep+=2;state.actionsThisWeek=(state.actionsThisWeek||0)+1;
-  logActivity({type:"gossip",text:`Group project assigned in ${cls.name}. Students grumble but engage.`});
-  toast(`Group project: +4 effort across class, +2 rep.`);
-  renderHud();buildNav();refreshCurrentView();saveGame(false);
+  if(state.week<=(state.groupProjectCooldown[cls.name]||0)){
+    toast(`Already ran a group project this week in ${cls.name}.`);return;
+  }
+  state.groupProjectCooldown[cls.name]=state.week;
+  // open the new group project flow
+  openGroupProject();
+}
+
+// ============================================================
+// GROUP PROJECT - form teams, set topic, simulate presentation, rate
+// ============================================================
+function openGroupProject(){
+  const cls=currentClass();
+  // Random team formation, 3-4 per team
+  const shuffled=cls.students.slice().sort(()=>Math.random()-0.5);
+  const teams=[];
+  let i=0;const size=Math.ceil(cls.students.length/Math.max(1,Math.floor(cls.students.length/4)));
+  while(i<shuffled.length){teams.push(shuffled.slice(i,i+size));i+=size;}
+  const m=document.createElement("div");m.className="modal";
+  m.innerHTML=`<div class="box" style="max-width:640px">
+    <h2>Group Project - ${cls.name}</h2>
+    <label>Topic / brief: <input id="gpTopic" type="text" placeholder="e.g. The causes of WW1, in 5 minutes" style="width:100%"></label>
+    <h3>Teams (auto-formed - synergy calculated)</h3>
+    <div style="max-height:280px;overflow:auto">
+      ${teams.map((team,ti)=>{
+        const syn=teamSynergy(team);
+        const cap=team.sort((a,b)=>combinedAvg(b)-combinedAvg(a))[0];
+        return `<div style="background:#1b1410;border-left:3px solid ${syn>60?'var(--green)':syn>35?'var(--yellow)':'var(--red)'};padding:.4em .7em;margin:.3em 0;border-radius:4px">
+          <b>Team ${ti+1}</b> <small class="muted">led by ${esc(cap.first)} · synergy ${syn.toFixed(0)}%</small>
+          <div style="font-size:.85em;opacity:.8">${team.map(s=>esc(s.first)).join(", ")}</div>
+        </div>`;
+      }).join("")}
+    </div>
+    <div class="row" style="justify-content:flex-end;margin-top:.6em">
+      <button onclick="closeModal()">Cancel</button>
+      <button class="primary" onclick="runGroupPresentation(${JSON.stringify(teams.map(t=>t.map(s=>s.id))).replace(/\"/g,'&quot;')})">Run Presentation</button>
+    </div>
+  </div>`;
+  document.body.appendChild(m);m.onclick=e=>{if(e.target===m)closeModal();};
+}
+
+function teamSynergy(team){
+  // synergy = high if abilities are balanced + moods are positive + similar personalities don't clash
+  const abilities=team.map(s=>s.ability);
+  const avg=abilities.reduce((a,b)=>a+b,0)/abilities.length;
+  const spread=Math.sqrt(abilities.reduce((a,b)=>a+(b-avg)**2,0)/abilities.length);
+  const moodAvg=team.reduce((a,s)=>a+s.mood,0)/team.length;
+  // Personality clash check
+  const clashy=team.filter(s=>s.personality==="sarcastic"||s.personality==="withdrawn").length;
+  const bonded=team.filter(s=>s.personality==="eager"||s.personality==="diligent").length;
+  return Math.max(0,Math.min(100,50+moodAvg*0.3-spread*0.4+bonded*5-clashy*3));
+}
+
+async function runGroupPresentation(teamIds){
+  const topic=document.getElementById("gpTopic").value.trim();
+  if(!topic){toast("Set a topic first.");return;}
+  closeModal();
+  const cls=currentClass();
+  const teams=teamIds.map(ids=>ids.map(id=>cls.students.find(s=>s.id===id)).filter(Boolean));
+  // Show animated presentation screen
+  const m=document.createElement("div");m.className="modal";
+  m.innerHTML=`<div class="box" style="max-width:680px">
+    <h2>Group Presentations - "${esc(topic)}"</h2>
+    <div id="gpPresentation" style="background:#0e0a07;padding:1em;border-radius:6px;min-height:200px;font-family:Georgia,serif"></div>
+    <div id="gpRatingArea" style="display:none">
+      <h3>Rate each team (0-100):</h3>
+      <div id="gpRatings"></div>
+      <div class="row" style="justify-content:flex-end;margin-top:.6em">
+        <button class="primary" onclick="submitGroupRatings()">Submit Ratings</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.appendChild(m);
+  state._gpTeams=teams;state._gpTopic=topic;
+  await animatePresentations(teams,topic);
+}
+
+async function animatePresentations(teams,topic){
+  const el=document.getElementById("gpPresentation");
+  if(!el)return;
+  for(let i=0;i<teams.length;i++){
+    const team=teams[i];
+    const syn=teamSynergy(team);
+    const cap=team.slice().sort((a,b)=>combinedAvg(b)-combinedAvg(a))[0];
+    el.innerHTML+=`<div class="qp" style="opacity:0;animation:bubble-in .5s forwards;animation-delay:${i*0.3}s">
+      <b style="color:var(--accent)">Team ${i+1}</b> · led by ${esc(cap.first)} · synergy ${syn.toFixed(0)}%<br>
+      <i style="opacity:.8">${team.map(s=>esc(s.first)).join(", ")} present...</i>
+      <div class="resp" id="gpPres${i}" style="min-height:1.5em"></div>
+    </div>`;
+    // Brief AI line per team's presentation (or skip if AI slow)
+    setTimeout(async ()=>{
+      const target=document.getElementById("gpPres"+i);if(!target)return;
+      const skill=team.reduce((a,s)=>a+s.ability,0)/team.length;
+      const tone=skill>70?"polished and confident":skill>45?"adequate but uneven":"shaky and underprepared";
+      const line=await aiLine(`In ONE sentence (10-18 words), describe how ${tone} a student team's presentation on "${topic}" goes. No quotes.`,200);
+      if(line)typewriterInto(target,line);
+    },i*1200);
+  }
+  // Show rating area after animations
+  setTimeout(()=>{
+    const ra=document.getElementById("gpRatingArea");if(!ra)return;
+    ra.style.display="block";
+    const rEl=document.getElementById("gpRatings");
+    rEl.innerHTML=teams.map((t,i)=>`<div style="margin:.3em 0">
+      <b>Team ${i+1}</b> (${t.map(s=>esc(s.first)).join(", ")}):
+      <input type="number" min="0" max="100" id="gpRate${i}" value="75" style="width:5em">
+    </div>`).join("");
+  },teams.length*1200+800);
+}
+
+function submitGroupRatings(){
+  const teams=state._gpTeams;
+  if(!teams)return;
+  teams.forEach((team,i)=>{
+    const rate=parseInt(document.getElementById("gpRate"+i)?.value)||50;
+    const syn=teamSynergy(team);
+    // High synergy + good rating = bigger ability boost
+    const abilityBoost=(rate-50)/50 * 2 + syn/100 * 1.5;
+    const effortBoost=Math.max(0,(rate-40)/20);
+    const moodBoost=(rate-50)/10;
+    team.forEach(s=>{
+      s.ability=clamp(s.ability+abilityBoost);
+      s.effort=clamp(s.effort+effortBoost);
+      s.mood=clamp(s.mood+moodBoost);
+    });
+  });
+  state.rep+=3;state.actionsThisWeek=(state.actionsThisWeek||0)+1;
+  logActivity({type:"grade",text:`Group projects completed - "${state._gpTopic}".`});
+  toast(`Group projects rated. Student gains applied. +3 rep.`);
+  delete state._gpTeams;delete state._gpTopic;
+  closeModal();renderHud();buildNav();refreshCurrentView();saveGame(false);
 }
 // ============================================================
 // HOMEWORK SYSTEM
@@ -1073,28 +1219,57 @@ function runGroupProject(){
 function assignHomework(){
   const cls=currentClass();
   const m=document.createElement("div");m.className="modal";
-  m.innerHTML=`<div class="box">
+  m.innerHTML=`<div class="box" style="max-width:560px">
     <h2>Assign Homework</h2>
-    <p class="muted">Students complete it based on their effort. High-effort kids finish on time, low-effort kids forget. Affects ability.</p>
+    <p class="muted">Students complete based on effort. Completion affects ability, mood, and may issue cards.</p>
     <label>Title: <input id="hwTitle" type="text" placeholder="${state.subject||"Subject"} homework #${(state.homework||[]).length+1}" style="width:100%"></label>
     <label style="display:block;margin-top:.5em">Description / instructions:
       <textarea id="hwBody" rows="3" placeholder="What should they do? Reading, problem set, writing exercise..." style="width:100%"></textarea>
     </label>
     <div class="row">
-      <label>Difficulty:
-        <select id="hwDifficulty">
-          <option value="easy">Easy (most will complete)</option>
-          <option value="medium" selected>Medium (effort matters)</option>
-          <option value="hard">Hard (only diligent kids finish)</option>
+      <label>Type:
+        <select id="hwType">
+          <option value="reading">Reading</option>
+          <option value="practice" selected>Practice / problem set</option>
+          <option value="writing">Writing</option>
+          <option value="research">Research</option>
+          <option value="presentation">Prep for presentation</option>
+          <option value="project">Long-form project</option>
         </select>
       </label>
+      <label>Difficulty:
+        <select id="hwDifficulty">
+          <option value="trivial">Trivial</option>
+          <option value="easy">Easy</option>
+          <option value="medium" selected>Medium</option>
+          <option value="hard">Hard</option>
+          <option value="brutal">Brutal</option>
+        </select>
+      </label>
+    </div>
+    <div class="row">
       <label>Due in:
         <select id="hwDue">
+          <option value="1">1 day (tomorrow)</option>
           <option value="2">2 days</option>
           <option value="3" selected>3 days</option>
           <option value="5">5 days (next week)</option>
+          <option value="10">10 days (2 weeks)</option>
+          <option value="20">20 days (a month)</option>
         </select>
       </label>
+      <label>Weight (impact on ability):
+        <select id="hwWeight">
+          <option value="0.5">Light (0.5x)</option>
+          <option value="1.0" selected>Normal (1x)</option>
+          <option value="1.5">Heavy (1.5x)</option>
+          <option value="2.0">Major (2x)</option>
+        </select>
+      </label>
+    </div>
+    <div class="row">
+      <label><input type="checkbox" id="hwAllClasses" ${state.classes.length>1?"":"disabled"}> Apply to all my classes</label>
+      <button onclick="aiSuggestHomework()" style="margin-left:auto">AI Suggest Topic</button>
     </div>
     <div class="row" style="justify-content:flex-end">
       <button onclick="closeModal()">Cancel</button>
@@ -1103,39 +1278,56 @@ function assignHomework(){
   </div>`;
   document.body.appendChild(m);m.onclick=e=>{if(e.target===m)closeModal();};
 }
+
+async function aiSuggestHomework(){
+  const type=document.getElementById("hwType").value;
+  const diff=document.getElementById("hwDifficulty").value;
+  const ov=showBusy("Drafting homework idea");beginCritical("Drafting homework");
+  const prompt=`Suggest ONE homework assignment for a ${state.subject||"general"} school class. Type: ${type}. Difficulty: ${diff}. Return ONLY a JSON object: {"title":"<short title>","body":"<2-3 sentence description of what the students do>"}`;
+  const data=await aiJSON(prompt,{retries:2,timeout:20000});
+  ov.close();endCritical();
+  if(!data){toast("AI couldn't suggest - try again.");return;}
+  const tEl=document.getElementById("hwTitle");
+  const bEl=document.getElementById("hwBody");
+  if(tEl&&data.title)tEl.value=data.title;
+  if(bEl&&data.body)bEl.value=data.body;
+}
 function submitHomework(){
-  const cls=currentClass();
   const title=document.getElementById("hwTitle").value.trim()||`${state.subject||"Subject"} homework`;
   const body=document.getElementById("hwBody").value.trim();
+  const type=document.getElementById("hwType").value;
   const difficulty=document.getElementById("hwDifficulty").value;
   const dueDays=parseInt(document.getElementById("hwDue").value);
+  const weight=parseFloat(document.getElementById("hwWeight").value)||1.0;
+  const applyAll=document.getElementById("hwAllClasses")?.checked;
   if(!body){toast("Add some instructions.");return;}
   state.homework=state.homework||[];
-  const hw={
-    id:"hw"+Date.now(),title,body,difficulty,
-    classIdx:state.activeClassIdx,
-    className:cls.name,
-    assignedWeek:state.week,assignedDay:state.dayIdx,
-    dueTick:tickCounter()+dueDays,
-    completion:{},      // studentId -> 'done'|'partial'|'missing'
-    settled:false
-  };
-  // Roll completion immediately based on effort. Show on due date.
-  cls.students.forEach(s=>{
-    const eff=s.effort/100;
-    const moodMod=(s.mood-50)/200;     // mood swings completion ±0.25
-    const diffMod=difficulty==="easy"?0.15:difficulty==="hard"?-0.15:0;
-    const score=eff+moodMod+diffMod+(Math.random()*0.2-0.1);
-    let outcome;
-    if(score>=0.65)outcome="done";
-    else if(score>=0.35)outcome="partial";
-    else outcome="missing";
-    hw.completion[s.id]=outcome;
+  const targets=applyAll?state.classes.map((_,i)=>i):[state.activeClassIdx];
+  targets.forEach(classIdx=>{
+    const cls=state.classes[classIdx];
+    const hw={
+      id:"hw"+Date.now()+"-"+classIdx,title,body,type,difficulty,weight,
+      classIdx,className:cls.name,
+      assignedWeek:state.week,assignedDay:state.dayIdx,
+      dueTick:tickCounter()+dueDays,
+      completion:{},settled:false
+    };
+    const diffMod={trivial:0.3,easy:0.15,medium:0,hard:-0.15,brutal:-0.3}[difficulty]||0;
+    cls.students.forEach(s=>{
+      const eff=s.effort/100;
+      const moodMod=(s.mood-50)/200;
+      const score=eff+moodMod+diffMod+(Math.random()*0.2-0.1);
+      let outcome;
+      if(score>=0.65)outcome="done";
+      else if(score>=0.35)outcome="partial";
+      else outcome="missing";
+      hw.completion[s.id]=outcome;
+    });
+    state.homework.push(hw);
   });
-  state.homework.push(hw);
   state.actionsThisWeek=(state.actionsThisWeek||0)+1;
-  state.rep+=1;
-  toast(`Homework assigned. Due in ${dueDays} day${dueDays===1?"":"s"}. Check back to see who finishes.`);
+  state.rep+=targets.length;
+  toast(`Homework assigned to ${targets.length} class${targets.length===1?"":"es"}. Due in ${dueDays} day${dueDays===1?"":"s"}.`);
   closeModal();renderHud();buildNav();showView("homework");saveGame(false);
 }
 
@@ -1176,17 +1368,17 @@ function settleHomework(hwId){
   const hw=state.homework.find(x=>x.id===hwId);if(!hw)return;
   const cls=state.classes[hw.classIdx];
   // Apply real consequences for each student
+  const w=hw.weight||1.0;
   cls.students.forEach(s=>{
     const c=hw.completion[s.id];
     if(c==="done"){
-      s.ability=clamp(s.ability+0.4);
-      s.effort=clamp(s.effort+1);
+      s.ability=clamp(s.ability+0.4*w);
+      s.effort=clamp(s.effort+1*w);
     }else if(c==="partial"){
-      s.ability=clamp(s.ability+0.1);
+      s.ability=clamp(s.ability+0.1*w);
     }else{
-      // missing - yellow card territory
-      s.ability=clamp(s.ability-0.3);
-      s.effort=clamp(s.effort-1);
+      s.ability=clamp(s.ability-0.3*w);
+      s.effort=clamp(s.effort-1*w);
       s.cards.push({color:"yellow",reason:`Missing homework: ${hw.title}`,week:state.week,by:"Ms. "+state.name});
     }
   });
@@ -1219,7 +1411,13 @@ function viewHomeworkDetail(hwId){
 }
 
 function runPopQuiz(){
+  state.popQuizCooldown=state.popQuizCooldown||{};
   const cls=currentClass();
+  const lastWeek=state.popQuizCooldown[cls.name]||0;
+  if(state.week<=lastWeek){
+    toast(`Already gave a pop quiz this week to ${cls.name}. Try again next week.`);
+    return;
+  }
   // Reveals current performance distribution without going through full Test flow.
   const scores=cls.students.map(s=>{
     const ability=(s.ability*.7+s.effort*.2+s.mood*.1)+Math.random()*15-7.5;
@@ -1401,14 +1599,38 @@ function rankLevel(){
   }
   return 0;
 }
+const RANK_PERKS={
+  "Probationary":["Standard teaching duties","Cards: green / yellow / purple"],
+  "Junior Teacher":["UNLOCKED: Schedule Detention","+10% rep gain from green cards","Office Hours session boost doubled"],
+  "Senior Teacher":["UNLOCKED: Recommend for Honors","+15% rep gain from positive messages","Inactivity penalty reduced"],
+  "Master Teacher":["UNLOCKED: Parent Conference","Group Project synergy +10%","Rating decay slowed"]
+};
 function applyPromotions(){
   const tier=RANKS[rankLevel()];
   if(state.rank!==tier.key){
     const prev=state.rank;
     state.rank=tier.key;
-    toast(`Promoted to ${tier.key}`);
+    showPromotionCeremony(prev,tier.key);
     logActivity({type:"gossip",text:`${prev?"Promoted from "+prev+" ":"Promoted "}to ${tier.key}. New abilities unlocked.`});
+    // Also drop a celebratory email from Principal
+    queueDeptWarning("Principal",`Congratulations on your promotion to ${tier.key}. Your dedication has been noticed. Keep it up.`,"praise");
   }
+}
+function showPromotionCeremony(prev,now){
+  const perks=RANK_PERKS[now]||[];
+  const m=document.createElement("div");m.className="modal";
+  m.innerHTML=`<div class="box" style="max-width:520px;text-align:center;border:3px solid var(--accent);background:linear-gradient(180deg,#3a2b20,#1b1410)">
+    <h1 style="color:var(--accent);text-shadow:0 0 12px rgba(217,164,65,.6);margin:.3em 0">PROMOTED</h1>
+    <div style="font-size:1.1em;opacity:.85">${prev?prev+" → ":""}</div>
+    <h2 style="margin:.2em 0;font-size:1.6em">${esc(now)}</h2>
+    <p class="muted" style="margin:.6em 0">The principal's office is dim but warm. A handshake. A new key.</p>
+    <h3 style="color:var(--accent)">New perks unlocked</h3>
+    <ul style="text-align:left;display:inline-block;margin:.2em auto">
+      ${perks.map(p=>`<li>${esc(p)}</li>`).join("")}
+    </ul>
+    <div style="margin-top:.8em"><button class="primary" onclick="closeModal()">Onward</button></div>
+  </div>`;
+  document.body.appendChild(m);m.onclick=e=>{if(e.target===m)closeModal();};
 }
 
 // Detention (Junior+) - heavy yellow card with parent loop.
@@ -1561,10 +1783,33 @@ function checkFireConditions(){
   }
 }
 function fireMe(reason){
-  saveGame(false);
-  alert("YOU'VE BEEN FIRED\n\n"+reason+"\n\nReturning to main menu.");
+  // Dramatic in-game fire screen instead of a chrome alert.
+  const stats=state?{
+    weeks:state.week,year:state.year,rep:state.rep,rating:Math.round(state.rating||0),
+    rank:state.rank,
+    cards:state.classes.reduce((a,c)=>a+c.students.reduce((b,s)=>b+s.cards.length,0),0)
+  }:null;
+  const m=document.createElement("div");m.className="modal";
+  m.style.background="rgba(0,0,0,.95)";
+  m.innerHTML=`<div class="box" style="max-width:560px;border:3px solid var(--red);background:#1b1410;text-align:center">
+    <div style="font-size:4em;color:var(--red);text-shadow:0 0 20px rgba(226,100,100,.5);letter-spacing:6px;font-weight:bold;margin:.2em 0;animation:bubble-in .8s ease-out">TERMINATED</div>
+    <p style="font-style:italic;font-size:1.05em;margin:.5em 0">${esc(reason)}</p>
+    <div style="background:#0e0a07;padding:.8em;border-radius:6px;margin:.8em 0;text-align:left;font-family:Georgia,serif">
+      <div style="color:var(--accent);font-size:.85em;text-transform:uppercase;letter-spacing:1px;margin-bottom:.3em">Final Record</div>
+      ${stats?`<div>Last rank: <b>${esc(stats.rank)}</b></div>
+      <div>Weeks served: <b>${stats.weeks}</b> (year ${stats.year})</div>
+      <div>Cards issued in your name: <b>${stats.cards}</b></div>
+      <div>Final reputation: <b>${stats.rep}</b> · Rating: <b>${stats.rating}</b></div>`:""}
+    </div>
+    <p class="muted" style="font-style:italic">You pack a box. Cradle it. Walk out past your old classroom for the last time. Someone is laughing somewhere down the hall.</p>
+    <button class="primary" onclick="closeFireScreen()">Return to menu</button>
+  </div>`;
+  document.body.appendChild(m);
+}
+function closeFireScreen(){
   state=null;
   try{localStorage.removeItem(SAVE_KEY);}catch(e){}
+  document.querySelectorAll(".modal").forEach(x=>x.remove());
   document.getElementById("game").classList.remove("active");
   document.getElementById("menu").classList.remove("hidden");
   refreshContinueButton();
@@ -3333,10 +3578,12 @@ Rules: 1-3 sentences. May ask a follow-up question or thank/complain - choose wh
 // MISSIONS VIEW
 // ============================================================
 function viewMissions(){
-  if(!state.missions.length)return `<h2>Missions</h2><p><i>No missions yet. They arrive with certain messages.</i></p>`;
+  const explainer=`<p class="muted">Missions are time-bound tasks triggered by parents, students, and your own promotions. Complete them within the deadline for reputation. Miss them and you lose rep. Examples: "Encourage Hana - issue a green/purple card within 2 weeks", "Reply to Mr. Khan", "Get Liam's average above 70 by next quarter".</p>`;
+  if(!state.missions.length)return `<h2>Missions</h2>${explainer}
+    <div style="background:#1b1410;border-left:3px solid var(--accent);padding:.6em .8em;border-radius:6px"><i>No missions active yet. They arrive automatically when parents reach out with specific requests, or when you take certain actions like recommending a student for honors. Check back after a few weeks of play.</i></div>`;
   const open=state.missions.filter(m=>m.status==="open");
   const closed=state.missions.filter(m=>m.status!=="open");
-  return `<h2>Missions</h2>
+  return `<h2>Missions</h2>${explainer}
     <h3>Open (${open.length})</h3>${open.map(renderMission).join("")||"<p><i>None.</i></p>"}
     <h3 style="opacity:.7;margin-top:1em">Past</h3>${closed.map(renderMission).join("")||"<p><i>None.</i></p>"}`;
 }
