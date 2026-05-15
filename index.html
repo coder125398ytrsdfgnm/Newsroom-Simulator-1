@@ -866,6 +866,7 @@ function buildNav(){
     html+=navBtn("tests","Tests");
     html+=navBtn("grading","Grading");
     html+=navBtn("homework","Homework");
+    html+=navBtn("planner","Lesson Planner");
   }
   html+=`<div class="heading">Reports</div>`;
   if(role==="tutor")html+=navBtn("grades","Quarterly Grades");
@@ -899,6 +900,7 @@ function showView(v){
   else if(v==="missions")host.innerHTML=viewMissions();
   else if(v==="activity")host.innerHTML=viewActivity();
   else if(v==="homework")host.innerHTML=viewHomework();
+  else if(v==="planner")host.innerHTML=viewPlanner();
 }
 
 // ============================================================
@@ -1060,7 +1062,14 @@ function viewClassroom(){
     ${classPicker()}
     ${todayPanel()}
     <div class="room">
-      <div class="board">Today's lesson. Run a test, hand out cards, take the register.</div>
+      <div class="board">${(()=>{
+        const k=planKey(state.week,state.dayIdx,state.activeClassIdx);
+        const acts=(state.lessonPlan||{})[k];
+        if(acts&&acts.length){
+          return acts.map(a=>{const t=ACTIVITY_TYPES[a.type]||{label:a.type};return `<b>${esc(t.label)}:</b> ${esc(a.title||"")} ${a.body?`<small style="opacity:.85">- ${esc(a.body)}</small>`:""}`;}).join("<br>");
+        }
+        return `<small style="opacity:.7">No lesson planned for today. <button class="reroll" style="margin-left:.4em" onclick="showView('planner')">Plan now</button></small>`;
+      })()}</div>
       ${seatGrid(true)}
     </div>
     <h3>Teacher actions</h3>
@@ -1447,13 +1456,194 @@ function submitHomework(){
   closeModal();renderHud();buildNav();showView("homework");saveGame(false);
 }
 
+// ============================================================
+// LESSON PLANNER - weekly calendar of activities
+// ============================================================
+const ACTIVITY_TYPES={
+  lecture:    {label:"Lecture",       color:"#5a8acc", effects:{ability:+0.4,effort:0,mood:-0.5}},
+  discussion: {label:"Discussion",    color:"#8a5acc", effects:{ability:+0.2,effort:+0.5,mood:+1}},
+  practical:  {label:"Lab / Practical",color:"#5acc8a", effects:{ability:+0.5,effort:+0.5,mood:+0.5}},
+  groupwork:  {label:"Group Work",    color:"#ccaa5a", effects:{ability:+0.2,effort:+1,mood:+1}},
+  review:     {label:"Review session",color:"#cc8a5a", effects:{ability:+0.3,effort:+0.2,mood:0}},
+  quiz:       {label:"Quiz",          color:"#cc5a5a", effects:{ability:+0.1,effort:+0.3,mood:-1}},
+  free:       {label:"Free study",    color:"#888",    effects:{ability:-0.1,effort:-0.2,mood:+2}},
+  field:      {label:"Field activity",color:"#5acccc", effects:{ability:+0.3,effort:+0.5,mood:+3}}
+};
+function planKey(week,dayIdx,classIdx){return `${classIdx}.${week}.${dayIdx}`;}
+function viewPlanner(){
+  state.lessonPlan=state.lessonPlan||{};
+  state._plannerWeek=state._plannerWeek||state.week;
+  const week=state._plannerWeek;
+  const cls=currentClass();
+  state._plannerAll=state._plannerAll||false;
+  const showAll=state._plannerAll&&state.classes.length>1;
+  return `<h2>Lesson Planner ${showAll?"<small class=\"muted\">All classes</small>":""}</h2>
+    ${classPicker()}
+    <div class="row" style="background:#1b1410;padding:.5em .8em;border-radius:6px;margin-bottom:.6em">
+      <button onclick="state._plannerWeek=Math.max(1,${week}-1);showView('planner')">&larr;</button>
+      <b>Week ${week}</b>
+      <button onclick="state._plannerWeek=${week}+1;showView('planner')">&rarr;</button>
+      <button onclick="state._plannerWeek=state.week;showView('planner')">Today</button>
+      ${state.classes.length>1?`<label style="margin-left:auto"><input type="checkbox" ${showAll?"checked":""} onchange="state._plannerAll=this.checked;showView('planner')"> Show all classes overlaid</label>`:""}
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:.4em">
+      ${DAYS.map((d,di)=>{
+        const cells=showAll?
+          state.classes.map((c,ci)=>renderPlannerCell(week,di,ci,c.name,c.name===cls.name)).join("<hr style='border:none;border-top:1px dashed #3a2b20;margin:.3em 0'>")
+          :renderPlannerCell(week,di,state.activeClassIdx,cls.name,true);
+        const isToday=week===state.week&&di===state.dayIdx;
+        return `<div style="background:${isToday?'#241a14':'#1b1410'};border:1px solid ${isToday?'var(--accent)':'#000'};border-radius:6px;padding:.4em;min-height:140px">
+          <div style="font-weight:bold;color:var(--accent);font-size:.85em;margin-bottom:.3em">${d}${isToday?" · today":""}</div>
+          ${cells}
+        </div>`;
+      }).join("")}
+    </div>
+    <p class="muted" style="margin-top:.6em;font-size:.85em">Click a day to add or edit activities. Each activity tweaks ability, effort, and mood when that day arrives. AI Suggest will draft a balanced week for you.</p>
+    <div class="row">
+      <button onclick="aiSuggestWeekPlan(${week},${state.activeClassIdx})">AI Suggest Full Week</button>
+      <button onclick="clearWeekPlan(${week},${state.activeClassIdx})">Clear Week</button>
+    </div>`;
+}
+function renderPlannerCell(week,dayIdx,classIdx,clsName,isPrimary){
+  const key=planKey(week,dayIdx,classIdx);
+  const acts=state.lessonPlan[key]||[];
+  const inner=acts.map((a,ai)=>{
+    const t=ACTIVITY_TYPES[a.type]||{label:a.type,color:"#888"};
+    return `<div style="background:${t.color}33;border-left:3px solid ${t.color};padding:.2em .4em;margin:.15em 0;border-radius:3px;font-size:.78em;cursor:pointer" onclick="editPlanActivity('${key}',${ai})">
+      <b>${esc(t.label)}</b><br>${esc(a.title||"")}
+    </div>`;
+  }).join("");
+  return `<div style="${isPrimary?'':'opacity:.6'}">
+    ${state.classes.length>1?`<div style="font-size:.7em;opacity:.6">${esc(clsName)}</div>`:""}
+    ${inner}
+    <button class="reroll" onclick="addPlanActivity('${key}')" style="width:100%;font-size:.75em;margin-top:.2em">+ add</button>
+  </div>`;
+}
+function addPlanActivity(key){
+  state._planEditing={key,index:null,draft:{type:"lecture",title:"",body:""}};
+  renderPlanEditor();
+}
+function editPlanActivity(key,ai){
+  const acts=state.lessonPlan[key]||[];
+  state._planEditing={key,index:ai,draft:{...acts[ai]}};
+  renderPlanEditor();
+}
+function renderPlanEditor(){
+  const e=state._planEditing;
+  const m=document.createElement("div");m.className="modal";
+  m.innerHTML=`<div class="box" style="max-width:500px">
+    <h2>${e.index===null?"Add Activity":"Edit Activity"}</h2>
+    <label>Type:
+      <select id="paType">
+        ${Object.entries(ACTIVITY_TYPES).map(([k,v])=>`<option value="${k}" ${e.draft.type===k?"selected":""}>${v.label}</option>`).join("")}
+      </select>
+    </label>
+    <label style="display:block;margin-top:.5em">Title: <input id="paTitle" type="text" value="${esc(e.draft.title||"")}" placeholder="e.g. Intro to fractions" style="width:100%"></label>
+    <label style="display:block;margin-top:.5em">Description:
+      <textarea id="paBody" rows="3" placeholder="What will you cover? Activities, materials, hooks..." style="width:100%">${esc(e.draft.body||"")}</textarea>
+    </label>
+    <div class="row">
+      <button onclick="aiSuggestActivity()">AI Suggest</button>
+      <label style="margin-left:auto"><input type="checkbox" id="paAllClasses" ${state.classes.length>1?"":"disabled"}> Apply to all classes</label>
+    </div>
+    <div class="row" style="justify-content:space-between;margin-top:.6em">
+      <div>${e.index!==null?`<button onclick="deletePlanActivity()" style="background:var(--red);color:#fff">Delete</button>`:""}</div>
+      <div>
+        <button onclick="closeModal()">Cancel</button>
+        <button class="primary" onclick="savePlanActivity()">Save</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.appendChild(m);m.onclick=ev=>{if(ev.target===m)closeModal();};
+}
+function savePlanActivity(){
+  const e=state._planEditing;
+  const type=document.getElementById("paType").value;
+  const title=document.getElementById("paTitle").value.trim();
+  const body=document.getElementById("paBody").value.trim();
+  const all=document.getElementById("paAllClasses")?.checked;
+  if(!title&&!body){toast("Add a title or description.");return;}
+  const act={type,title,body};
+  state.lessonPlan=state.lessonPlan||{};
+  const [classIdx,week,dayIdx]=e.key.split(".").map(Number);
+  const targets=all?state.classes.map((_,i)=>i):[classIdx];
+  targets.forEach(ci=>{
+    const k=planKey(week,dayIdx,ci);
+    state.lessonPlan[k]=state.lessonPlan[k]||[];
+    if(e.index!==null && ci===classIdx)state.lessonPlan[k][e.index]=act;
+    else state.lessonPlan[k].push({...act});
+  });
+  closeModal();showView("planner");saveGame(false);
+}
+function deletePlanActivity(){
+  const e=state._planEditing;
+  const acts=state.lessonPlan[e.key]||[];
+  acts.splice(e.index,1);
+  closeModal();showView("planner");saveGame(false);
+}
+function clearWeekPlan(week,classIdx){
+  if(!confirm("Clear all planned activities for this week?"))return;
+  for(let d=0;d<5;d++)delete state.lessonPlan[planKey(week,d,classIdx)];
+  showView("planner");saveGame(false);
+}
+async function aiSuggestActivity(){
+  const type=document.getElementById("paType").value;
+  const subj=state.subject||"general";
+  const ov=showBusy("Drafting activity");beginCritical("Drafting lesson activity");
+  const prompt=`Suggest ONE ${type} activity for a ${subj} class. Return ONLY a JSON object: {"title":"<short>","body":"<2-3 sentences of what students do and what materials are needed>"}`;
+  const data=await aiJSON(prompt,{retries:2,timeout:18000});
+  ov.close();endCritical();
+  if(!data){toast("AI couldn't draft - try again.");return;}
+  const tEl=document.getElementById("paTitle");
+  const bEl=document.getElementById("paBody");
+  if(tEl&&data.title)tEl.value=data.title;
+  if(bEl&&data.body)bEl.value=data.body;
+}
+async function aiSuggestWeekPlan(week,classIdx){
+  const subj=state.subject||"general";
+  const ov=showBusy("Drafting a full week of lessons");beginCritical("Planning the week");
+  const prompt=`Suggest a balanced week of 5 lessons (Mon-Fri) for a ${subj} class. Mix types: lecture, discussion, practical, groupwork, review, quiz, free, field. Return ONLY a JSON array of exactly 5 objects: [{"type":"<one of: lecture|discussion|practical|groupwork|review|quiz|free|field>","title":"<short>","body":"<one sentence what they do>"}, ...]`;
+  const data=await aiJSON(prompt,{retries:3,timeout:35000});
+  ov.close();endCritical();
+  if(!Array.isArray(data)||data.length<5){toast("AI couldn't plan - try again.");return;}
+  for(let d=0;d<5;d++){
+    const a=data[d];if(!a||!a.type)continue;
+    const k=planKey(week,d,classIdx);
+    state.lessonPlan[k]=state.lessonPlan[k]||[];
+    state.lessonPlan[k].push({type:ACTIVITY_TYPES[a.type]?a.type:"lecture",title:a.title||"",body:a.body||""});
+  }
+  toast("Full week drafted. Edit any cell to refine.");
+  showView("planner");saveGame(false);
+}
+
+// Apply lesson plan effects when a day rolls around.
+function applyLessonPlanForDay(){
+  if(!state.lessonPlan)return;
+  state.classes.forEach((c,ci)=>{
+    const k=planKey(state.week,state.dayIdx,ci);
+    const acts=state.lessonPlan[k];if(!acts)return;
+    acts.forEach(a=>{
+      const t=ACTIVITY_TYPES[a.type]||{effects:{ability:0,effort:0,mood:0}};
+      c.students.forEach(s=>{
+        s.ability=clamp(s.ability+t.effects.ability);
+        s.effort=clamp(s.effort+t.effects.effort);
+        s.mood=clamp(s.mood+t.effects.mood);
+      });
+      logActivity({type:"gossip",text:`${c.name} ${a.title?'"'+a.title+'"':t.label}: lesson run.`});
+    });
+  });
+}
+
 function viewHomework(){
   state.homework=state.homework||[];
   const cls=currentClass();
-  const mine=state.homework.filter(h=>h.classIdx===state.activeClassIdx);
-  if(!mine.length)return `<h2>Homework</h2>${classPicker()}
+  state._hwShowAll=state._hwShowAll||false;
+  const showAll=state._hwShowAll&&state.classes.length>1;
+  const mine=showAll?state.homework:state.homework.filter(h=>h.classIdx===state.activeClassIdx);
+  const toggle=state.classes.length>1?`<div class="row" style="justify-content:flex-end"><button onclick="state._hwShowAll=!state._hwShowAll;showView('homework')">${showAll?"Show only "+cls.name:"Show all classes"}</button></div>`:"";
+  if(!mine.length)return `<h2>Homework</h2>${classPicker()}${toggle}
     <p class="muted">No homework assigned yet. Go to the Classroom and click "Assign Homework".</p>`;
-  return `<h2>Homework - ${cls.name}</h2>${classPicker()}
+  return `<h2>Homework - ${showAll?"All Classes":cls.name}</h2>${classPicker()}${toggle}
     ${mine.slice().reverse().map(h=>{
       const due=h.dueTick;
       const now=tickCounter();
@@ -1464,7 +1654,7 @@ function viewHomework(){
       const cls2=isDue?"":"opacity:.85";
       return `<div style="background:var(--panel);border-left:3px solid ${isDue?(h.settled?'var(--green)':'var(--accent)'):'#888'};padding:.7em .9em;margin:.5em 0;border-radius:6px;${cls2}">
         <div style="display:flex;justify-content:space-between;align-items:center">
-          <div><b>${esc(h.title)}</b> <small class="muted">(${h.difficulty}, assigned wk ${h.assignedWeek} ${DAYS[h.assignedDay]})</small></div>
+          <div><b>${esc(h.title)}</b> <small class="muted">${esc(h.className||"")} · ${h.difficulty} · ${h.type||"practice"}</small></div>
           <div><small class="muted">${isDue?(h.settled?"settled":"due now"):"due wk "+Math.floor(due/5)+" "+DAYS[due%5]}</small></div>
         </div>
         <div style="font-size:.85em;opacity:.85;margin-top:.3em">${esc(h.body)}</div>
@@ -1474,10 +1664,95 @@ function viewHomework(){
           <span><b style="color:var(--red)">${stats.missing}</b> missing</span>
           <span class="muted">of ${total}</span>
         </div>
-        ${isDue&&!h.settled?`<div style="margin-top:.5em"><button class="primary" onclick="settleHomework('${h.id}')">Review &amp; Settle</button></div>`:""}
+        ${isDue&&!h.settled?`<div style="margin-top:.5em;display:flex;gap:.4em">
+          <button class="primary" onclick="openHomeworkReview('${h.id}')">Review (interactive)</button>
+          <button onclick="settleHomework('${h.id}')">Quick Settle</button>
+        </div>`:""}
         ${h.settled?`<div style="margin-top:.5em"><button class="reroll" onclick="viewHomeworkDetail('${h.id}')">Details</button></div>`:""}
       </div>`;
     }).join("")}`;
+}
+
+// Interactive review: focus on the most-deviant students (missing or excellent),
+// let player adjust outcomes per kid with one click.
+function openHomeworkReview(hwId){
+  const hw=state.homework.find(x=>x.id===hwId);if(!hw)return;
+  const cls=state.classes[hw.classIdx];
+  // Surface the most interesting students: all missing + all done + a few partial
+  const studs=cls.students.slice();
+  const flagged=studs.filter(s=>{const c=hw.completion[s.id];return c==="missing"||c==="done";});
+  const partials=studs.filter(s=>hw.completion[s.id]==="partial").slice(0,3);
+  const order=[...flagged,...partials];
+  state._hwReview={hwId,index:0,order:order.map(s=>s.id)};
+  renderHomeworkReviewCard();
+}
+function renderHomeworkReviewCard(){
+  document.querySelectorAll(".modal.hw-review").forEach(x=>x.remove());
+  const rv=state._hwReview;if(!rv)return;
+  const hw=state.homework.find(x=>x.id===rv.hwId);if(!hw)return;
+  const cls=state.classes[hw.classIdx];
+  if(rv.index>=rv.order.length){
+    // Done - settle.
+    finalizeHomeworkReview(rv.hwId);return;
+  }
+  const sid=rv.order[rv.index];
+  const s=cls.students.find(x=>x.id===sid);
+  const cur=hw.completion[sid]||"missing";
+  const m=document.createElement("div");m.className="modal hw-review";
+  // AI generates a one-line note describing how this student did
+  const note=hw._notes?.[sid]||"(reviewing...)";
+  if(!hw._notes)hw._notes={};
+  if(!hw._notes[sid]){
+    hw._notes[sid]="(reviewing...)";
+    aiHomeworkNote(hw,s,cur).then(t=>{if(t){hw._notes[sid]=t;renderHomeworkReviewCard();}});
+  }
+  m.innerHTML=`<div class="box" style="max-width:500px;text-align:center">
+    <div style="font-size:.8em;opacity:.7">Reviewing ${rv.index+1} of ${rv.order.length}</div>
+    <h2 style="margin:.2em 0">${esc(s.name)}</h2>
+    <p class="muted" style="font-style:italic">${esc(hw.title)}</p>
+    <div style="background:#0e0a07;border:1px dashed #555;padding:.7em;border-radius:6px;min-height:60px;font-family:Georgia,serif;margin:.6em 0">${esc(note)}</div>
+    <p style="opacity:.7;font-size:.85em">Outcome: <b style="color:${cur==='done'?'var(--green)':cur==='partial'?'var(--yellow)':'var(--red)'}">${cur}</b></p>
+    <p>Override?</p>
+    <div class="row" style="justify-content:center">
+      <button onclick="hwReviewSet('done')" style="background:var(--green);color:#000">Mark Done</button>
+      <button onclick="hwReviewSet('partial')" style="background:var(--yellow);color:#000">Partial</button>
+      <button onclick="hwReviewSet('missing')" style="background:var(--red);color:#fff">Missing</button>
+    </div>
+    <div class="row" style="justify-content:space-between;margin-top:.8em">
+      <button onclick="hwReviewSkip()">Skip &rarr;</button>
+      <button onclick="hwReviewQuit()">Settle Now</button>
+    </div>
+  </div>`;
+  document.body.appendChild(m);m.onclick=e=>{if(e.target===m){}};
+}
+async function aiHomeworkNote(hw,s,outcome){
+  const tone=outcome==="done"?"praising":outcome==="partial"?"mixed":"disappointed";
+  const prompt=`In ONE sentence (10-16 words), write a teacher's note on a student's ${state.subject||"class"} homework. The homework was "${hw.title}". Outcome: ${outcome}. Tone: ${tone}. Student personality: ${s.personality}. No quotes.`;
+  return await aiLine(prompt,200,{retries:2,timeout:18000});
+}
+function hwReviewSet(outcome){
+  const rv=state._hwReview;const hw=state.homework.find(x=>x.id===rv.hwId);
+  hw.completion[rv.order[rv.index]]=outcome;
+  rv.index++;
+  renderHomeworkReviewCard();
+}
+function hwReviewSkip(){
+  const rv=state._hwReview;rv.index++;
+  renderHomeworkReviewCard();
+}
+function hwReviewQuit(){
+  const rv=state._hwReview;
+  closeModal();
+  finalizeHomeworkReview(rv.hwId);
+}
+function finalizeHomeworkReview(hwId){
+  closeModal();
+  delete state._hwReview;
+  settleHomework(hwId);
+  // small rep bonus for interactive review
+  state.rep+=1;
+  toast("Interactive review complete: +1 rep");
+  renderHud();
 }
 
 function settleHomework(hwId){
@@ -2004,7 +2279,11 @@ function issueCard(id){
   const reason=document.getElementById("cardReason").value.trim();
   if(!reason){toast("A card needs a reason.");return;}
   const s=findStudent(id);
-  s.cards.push({color,reason,week:state.week,by:(state.title||"Ms.")+" "+state.name});
+  // Anti-spam: max 3 cards per student per day from you.
+  const todayKey=`${state.week}.${state.dayIdx}`;
+  const meToday=s.cards.filter(c=>c.by===(state.title||"Ms.")+" "+state.name && `${c.week}.${c.dayIdx||0}`===todayKey).length;
+  if(meToday>=3){toast(`Already gave ${s.first} 3 cards today. That's bullying.`);return;}
+  s.cards.push({color,reason,week:state.week,dayIdx:state.dayIdx,by:(state.title||"Ms.")+" "+state.name});
   state.actionsThisWeek=(state.actionsThisWeek||0)+1;
   // Mood + LONG-TERM ability shift. Investment in a student actually moves the needle.
   if(color==="green"){s.mood=clamp(s.mood+4);s.ability=clamp(s.ability+0.6);state.rep+=1;}
@@ -3999,6 +4278,8 @@ async function advanceDay(){
     s.mood=clamp(s.mood+(Math.random()*6-3));
     s.effort=clamp(s.effort+(Math.random()*4-2));
   }));
+  // Apply any planned lesson activities for the day BEFORE releasing world events.
+  applyLessonPlanForDay();
   releaseDayEvents(state.dayIdx);
   state.dayIdx++;
   if(state.dayIdx>=DAYS.length){
