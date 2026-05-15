@@ -846,7 +846,7 @@ function buildNav(){
     html+=navBtn("grading","Grading");
   }
   html+=`<div class="heading">Reports</div>`;
-  html+=navBtn("grades","Quarterly Grades");
+  if(role==="tutor")html+=navBtn("grades","Quarterly Grades");
   html+=navBtn("activity","Staffroom Feed");
   html+=`<div class="heading">Comms</div>`;
   html+=navBtn("messages","Messages"+msgBadge);
@@ -1093,22 +1093,66 @@ function openStudent(id,canAdminister){
     </div>`:""}`:`<p class="muted"><i>Form Tutors can read cards but not issue them. You can still revoke colleagues' cards (see below).</i></p>`;
   const m=document.createElement("div");
   m.className="modal";
-  m.innerHTML=`<div class="box">
-    <h2>${s.name} <small class="muted">- ${esc(s.personality)}</small></h2>
-    <p style="font-style:italic;background:#1b1410;border-left:3px solid var(--accent);padding:.5em .6em;border-radius:4px">${esc(s.story||"")}</p>
-    <p>Average: <b>${avg(s).toFixed(1)}</b> · Mood: ${s.mood.toFixed(0)} · Effort: ${s.effort.toFixed(0)}</p>
-    ${s.flag?`<p style="color:var(--yellow)"><b>Need:</b> ${esc(s.flag)} <button onclick="resolveNeed(${id})">Address</button></p>`:""}
-    <h3>Card history</h3>
-    <ul>${cardHist}</ul>
+  // Build rich performance picture from real state.
+  const cb=combinedAvg(s);
+  const myGrades=(s.grades||[]).slice(-8);
+  const otherG=(s.otherGrades||[]).slice(-8);
+  const allGrades=[...myGrades.map(g=>({...g,subject:state.subject||"Yours",by:"Ms. "+state.name})),...otherG].sort((a,b)=>(a.week||0)-(b.week||0));
+  const trend=allGrades.length>=3?(()=>{const half=Math.floor(allGrades.length/2);const a=allGrades.slice(0,half).reduce((x,g)=>x+g.score,0)/half;const b=allGrades.slice(half).reduce((x,g)=>x+g.score,0)/(allGrades.length-half);return b>a+3?"↗ improving":b<a-3?"↘ slipping":"→ steady";})():"-";
+  // Attendance stats across recent days
+  const cName=c.name;
+  const att30=[];
+  for(let dw=0;dw<30;dw++){const wAt=state.week-Math.floor(dw/5);const dAt=(state.dayIdx-1-dw%5+50)%5;if(wAt<1)break;const k=`${wAt}.${dAt}.${cName}`;const a=state.attendance?.[k];if(a&&a[s.id])att30.push(a[s.id]);}
+  const attStats={present:att30.filter(v=>v==="present").length,late:att30.filter(v=>v==="late").length,absent:att30.filter(v=>v==="absent").length,excused:att30.filter(v=>v==="excused").length};
+  const attPct=att30.length?Math.round((attStats.present+attStats.late*0.5)/att30.length*100):null;
+  // Recent activity feed
+  const recent=(state.activity||[]).filter(a=>a.text&&a.text.includes(s.first)).slice(0,5);
+  const sig=studentSignal(s);
+  const moodBar=(v,clr)=>`<span style="display:inline-block;width:80px;height:8px;background:#0e0a07;border:1px solid #000;border-radius:4px;overflow:hidden;vertical-align:middle"><span style="display:block;height:100%;width:${v}%;background:${clr}"></span></span>`;
+  m.innerHTML=`<div class="box" style="max-width:640px">
+    <h2 style="margin-bottom:.2em">${s.name}</h2>
+    <div style="display:flex;gap:.5em;flex-wrap:wrap;font-size:.85em;margin-bottom:.5em">
+      <span class="pill">${esc(s.personality)}</span>
+      <span class="pill">${esc(s.voiceKey)}</span>
+      <span class="pill" style="color:${sig.color};background:#1b1410;border-color:${sig.color}">${esc(sig.text)}</span>
+    </div>
+    <p style="font-style:italic;background:#1b1410;border-left:3px solid var(--accent);padding:.5em .6em;border-radius:4px;margin:.4em 0">${esc(s.story||"(no story yet - the AI will draft one as the year progresses)")}</p>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.6em;margin:.6em 0">
+      <div style="background:#1b1410;padding:.5em .7em;border-radius:6px">
+        <div style="font-size:.75em;opacity:.7;text-transform:uppercase;letter-spacing:1px">Academic</div>
+        <div style="font-size:1.4em;font-weight:bold;color:var(--accent)">${cb>0?cb.toFixed(1):"-"}</div>
+        <div style="font-size:.8em;opacity:.8">${myGrades.length} of your grades, ${otherG.length} other · ${trend}</div>
+      </div>
+      <div style="background:#1b1410;padding:.5em .7em;border-radius:6px">
+        <div style="font-size:.75em;opacity:.7;text-transform:uppercase;letter-spacing:1px">Attendance (30 days)</div>
+        <div style="font-size:1.4em;font-weight:bold;color:${attPct==null?"#888":attPct>=85?"var(--green)":attPct>=70?"var(--yellow)":"var(--red)"}">${attPct==null?"-":attPct+"%"}</div>
+        <div style="font-size:.8em;opacity:.8">${attStats.present}P · ${attStats.late}L · ${attStats.absent}A · ${attStats.excused}E</div>
+      </div>
+    </div>
+
+    <div style="margin:.5em 0">
+      <div style="font-size:.8em;opacity:.7">Mood ${moodBar(s.mood,'#9b59ff')} ${s.mood.toFixed(0)}</div>
+      <div style="font-size:.8em;opacity:.7;margin-top:.2em">Effort ${moodBar(s.effort,'#d9a441')} ${s.effort.toFixed(0)}</div>
+    </div>
+
+    ${s.flag?`<p style="color:var(--yellow);background:#241a14;padding:.5em;border-radius:4px"><b>Need:</b> ${esc(s.flag)} <button onclick="resolveNeed(${id})">Address</button></p>`:""}
+
+    <h3>Recent grades (newest first)</h3>
+    <div style="max-height:140px;overflow:auto">${allGrades.length?allGrades.slice().reverse().map(g=>
+      `<div style="padding:.2em 0;border-bottom:1px solid #3a2b20"><b>${g.score.toFixed(0)}</b> · ${esc(g.subject||"")} <small class="muted">${esc(g.by||"")}, wk ${g.week||"?"}</small></div>`).join(""):"<i>No grades yet.</i>"}</div>
+
+    <h3>Cards (${s.cards.length})</h3>
+    <ul style="max-height:140px;overflow:auto">${cardHist}</ul>
+
+    ${recent.length?`<h3>Recent activity</h3>
+      <ul style="max-height:100px;overflow:auto;font-size:.85em">${recent.map(r=>`<li>Wk ${r.week} ${r.day}: ${esc(r.text)}</li>`).join("")}</ul>`:""}
+
     ${adminBtns}
-    <h3>Recent grades (your tests)</h3>
-    <div>${s.grades.slice(-5).map(g=>`<div>Test #${g.testId}: ${fmtScore(g.score,g.scale||"percent")}</div>`).join("")||"<i>None yet.</i>"}</div>
-    ${(s.otherGrades||[]).length?`<h3>Other subjects</h3>
-      <div>${(s.otherGrades||[]).slice(-6).reverse().map(g=>
-        `<div><small class="muted">Wk ${g.week} · ${esc(g.subject)} (${esc(g.by)}):</small> ${g.score.toFixed(0)}</div>`).join("")}</div>`:""}
+
     <h3>Private notes</h3>
     <textarea id="noteBox" rows="3">${esc(s.notes||"")}</textarea>
-    <div class="row" style="justify-content:space-between">
+    <div class="row" style="justify-content:space-between;margin-top:.6em">
       <button onclick="messageStudent(${id})">Message ${esc(s.first)}</button>
       <div>
         <button onclick="saveNote(${id})">Save Note</button>
@@ -1995,18 +2039,21 @@ async function archetypeAnswersForTest(test,writtenIdxs){
     const len=q.type==="sa"?"1 short sentence":q.type==="fib"?"a brief phrase":(q.type==="es"&&wmatch?`~${wmatch[1]} words`:"2-3 sentences");
     return `Q${i+1} (${q.type.toUpperCase()}, ${len}): ${q.prompt}${q.answer?` | rubric: ${q.answer}`:""}`;
   }).join("\n");
-  const prompt=`Write student archetype answers for a ${subj} test. For EACH question below, give FOUR distinct student answers at different skill levels (two wrong, two partial, two correct).
+  const prompt=`Write student archetype answers for a ${subj} test. For EACH question below, give NINE distinct student answers - three wrong, three partial, three correct. Each must sound different (different vocabulary, sentence rhythm, mistakes).
 
 ${blocks}
 
 Output EXACTLY this format - one block per question, in order:
 ===Q1===
-###WRONG-A### <wrong answer in voice 1>
-###WRONG-B### <distinct wrong answer voice 2>
-###PARTIAL-A### <partial voice 3>
-###PARTIAL-B### <partial voice 4>
-###CORRECT-A### <correct voice 5>
-###CORRECT-B### <correct voice 6>
+###WRONG-A### <wrong, voice 1>
+###WRONG-B### <wrong, voice 2 (different mistake)>
+###WRONG-C### <wrong, voice 3 (different again)>
+###PARTIAL-A### <partial, voice 4>
+###PARTIAL-B### <partial, voice 5>
+###PARTIAL-C### <partial, voice 6>
+###CORRECT-A### <correct, voice 7>
+###CORRECT-B### <correct, voice 8>
+###CORRECT-C### <correct, voice 9>
 ===Q2===
 ... and so on for each question.
 
@@ -2020,9 +2067,9 @@ No JSON. No preamble. Begin output with ===Q1===.`;
     if(!m)return;
     const block=m[1];
     const get=(tag)=>{const mm=block.match(new RegExp(`###${tag}###\\s*([\\s\\S]*?)(?=###[A-Z]+-[A-Z]###|$)`,"i"));return (mm?.[1]||"").trim();};
-    const wrong=[get("WRONG-A"),get("WRONG-B")].filter(Boolean);
-    const partial=[get("PARTIAL-A"),get("PARTIAL-B")].filter(Boolean);
-    const correct=[get("CORRECT-A"),get("CORRECT-B")].filter(Boolean);
+    const wrong=[get("WRONG-A"),get("WRONG-B"),get("WRONG-C")].filter(Boolean);
+    const partial=[get("PARTIAL-A"),get("PARTIAL-B"),get("PARTIAL-C")].filter(Boolean);
+    const correct=[get("CORRECT-A"),get("CORRECT-B"),get("CORRECT-C")].filter(Boolean);
     if(wrong.length||partial.length||correct.length){
       out[qi]={
         wrong:wrong.length?wrong:["(answer pending)"],
@@ -2954,10 +3001,19 @@ async function tickPendingReplies(){
       voiceCfg=PARENT_VOICES.find(v=>v.key===c.voiceKey)||PARENT_VOICES[0];
     }
     const brief=c.studentId!=null?studentContextBrief(findStudent(c.studentId)):"";
-    prompt=`Write a SHORT follow-up message FROM ${c.name} (${senderInfo}) TO Ms. ${state.name}, continuing this conversation: """${r.inReplyTo}"""
+    // Full thread context - last 4 messages so AI actually responds to what the player said.
+    const thread=state.messages.filter(m=>m.contactId===c.id).slice(-4);
+    const threadText=thread.map(m=>`${m.fromMe?"Ms. "+state.name:c.name}: ${m.body.slice(0,250)}`).join("\n---\n");
+    prompt=`Write a SHORT follow-up message FROM ${c.name} (${senderInfo}) TO Ms. ${state.name}.
+
+THE CONVERSATION SO FAR (most recent last):
+${threadText}
+
+You must respond DIRECTLY to whatever Ms. ${state.name} just said. If she was dismissive, terse, or rude, react accordingly. If she was warm, be warmer. Do NOT repeat your previous introduction or pretend the prior messages didn't happen.
+
 Voice: ${voiceCfg.style}.
 ${brief}
-Rules: 1-3 sentences. Build on the previous exchange. May agree, push back, ask a clarifying question, or thank. Reference a real recent fact if natural. No markdown. No quotation marks around the body.`;
+Rules: 1-3 sentences. May agree, push back, ask a clarifying question, or thank. Reference a real recent fact if natural. No markdown. No quotation marks around the body.`;
   }else if(r.kind==="gradeReaction"){
     const s=findStudent(r.studentId);if(!s)return;
     senderName=s.first;
