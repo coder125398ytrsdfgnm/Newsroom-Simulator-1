@@ -279,7 +279,14 @@
     </div>
 
     <div class="row">
-      <label>Your name: <input id="setupName" type="text" value="Hale"></label>
+      <label>Title: <select id="setupTitle">
+        <option value="Ms.">Ms.</option>
+        <option value="Mr.">Mr.</option>
+        <option value="Mrs.">Mrs.</option>
+        <option value="Mx.">Mx.</option>
+        <option value="Dr.">Dr.</option>
+      </select></label>
+      <label>Surname: <input id="setupName" type="text" value="Hale"></label>
     </div>
     <div class="row" id="subjectRow">
       <label>Subject:
@@ -319,8 +326,7 @@
       <span>Rating <span id="ratingHud"></span></span>
     </div>
     <div>
-      <button onclick="advanceDay()">Next Day</button>
-      <button class="primary" onclick="advanceWeek()">Next Week</button>
+      <button class="primary" onclick="advanceDay()" id="nextDayBtn">Next Day &rarr;</button>
     </div>
   </header>
   <div class="ticker" id="ticker">&nbsp;</div>
@@ -443,6 +449,20 @@ function updateCriticalUI(){
     el.style.display="none";
     const f=el.querySelector(".gate-flavor");if(f)f.dataset.rotating="";
   }
+}
+// Friendly screen when the player smashes Next Day too fast.
+function showTomorrowPrep(){
+  // Reuse the gate but with a softer message.
+  const el=document.getElementById("criticalGate");
+  if(!el)return;
+  const taskEl=el.querySelector(".gate-task");
+  const flavorEl=el.querySelector(".gate-flavor");
+  if(taskEl)taskEl.textContent="Calculating tomorrow's events...";
+  if(flavorEl)flavorEl.textContent="The school doesn't run on caffeine alone. Pace yourself.";
+  el.style.display="flex";
+  setTimeout(()=>{
+    if(_criticalWork===0)el.style.display="none";
+  },1400);
 }
 function flashGate(){
   const el=document.getElementById("criticalGate");if(!el)return;
@@ -656,10 +676,10 @@ async function generateTeachers(count,excludeSubject){
   })).filter(t=>t.name&&t.subject);
 }
 
-async function newCareer(role,name,subject,className){
+async function newCareer(role,name,subject,className,title){
   const ov=showBusy("Starting the school year...");
   try{
-    return await _newCareerImpl(role,name,subject,className,ov);
+    return await _newCareerImpl(role,name,subject,className,ov,title);
   }catch(e){
     if(window.console)console.error("[newCareer] crashed:",e);
     alert("Something went wrong starting the year. Refresh the page and try again.");
@@ -669,7 +689,7 @@ async function newCareer(role,name,subject,className){
     setTimeout(()=>{try{ov.close();}catch(_){}},200);
   }
 }
-async function _newCareerImpl(role,name,subject,className,ov){
+async function _newCareerImpl(role,name,subject,className,ov,title){
   ov.setProgress(3);
   const perClass=role==="tutor"?22:20;
   const wantedClasses=role==="tutor"?1:3;
@@ -724,7 +744,7 @@ async function _newCareerImpl(role,name,subject,className,ov){
 
   ov.setProgress(96);ov.update("Final setup");
   state={
-    role,name,subject:role==="subject"?subject:null,
+    role,name,title:title||"Ms.",subject:role==="subject"?subject:null,
     formClass:role==="tutor"?className:null,
     year:1,quarter:1,week:1,dayIdx:0,
     rep:10,rank:"Probationary",
@@ -794,9 +814,10 @@ function pickRole(r){
 }
 async function beginCareer(){
   const name=document.getElementById("setupName").value.trim()||"Hale";
+  const title=document.getElementById("setupTitle").value||"Ms.";
   const subject=document.getElementById("setupSubject").value;
   const cls=document.getElementById("setupClass").value;
-  const ok=await newCareer(selectedRole,name,subject,cls);
+  const ok=await newCareer(selectedRole,name,subject,cls,title);
   if(!ok)return;
   document.getElementById("setup").classList.remove("active");
   document.getElementById("game").classList.add("active");
@@ -884,7 +905,7 @@ function showView(v){
 // HUD
 // ============================================================
 function renderHud(){
-  document.getElementById("hudName").textContent="Ms. "+state.name;
+  document.getElementById("hudName").textContent=(state.title||"Ms.")+" "+state.name;
   document.getElementById("hudRole").textContent=
     state.role==="tutor"?`Form Tutor (${state.formClass})`:`Teacher - ${state.subject}`;
   document.getElementById("year").textContent=state.year;
@@ -968,7 +989,7 @@ async function applyAssembly(text){
   const cls=currentClass();
   state.actionsThisWeek=(state.actionsThisWeek||0)+1;
   const ov=showBusy("Class is reacting");beginCritical("Class reacts to your speech");
-  const prompt=`A school form tutor named Ms. ${state.name} just delivered THIS assembly speech to her class ${cls.name}:\n"""${text.slice(0,2000)}"""\n\nRate this speech for impact, tone, and appropriateness on a scale from -3 (disastrous, demoralizing or wildly inappropriate) to +3 (truly uplifting). Also write ONE short sentence describing how the class reacted, in observable terms.\n\nReply with ONLY a JSON object: {"score":<integer>,"reaction":"<one sentence>"}`;
+  const prompt=`A school form tutor named ${state.title||"Ms."} ${state.name} (subject: ${state.subject||"form tutor"}) just delivered THIS assembly speech to her class ${cls.name}:\n"""${text.slice(0,2000)}"""\n\nRate this speech for impact, tone, and appropriateness on a scale from -3 (disastrous, demoralizing or wildly inappropriate) to +3 (truly uplifting). Also write ONE short sentence describing how the class reacted, in observable terms.\n\nReply with ONLY a JSON object: {"score":<integer>,"reaction":"<one sentence>"}`;
   const data=await aiJSON(prompt,{retries:2,timeout:25000});
   ov.close();endCritical();
   const score=data&&typeof data.score==="number"?Math.max(-3,Math.min(3,Math.round(data.score))):1;
@@ -991,7 +1012,7 @@ function applyParentEmail(text){
   if(!parents.length){toast("No parent contacts yet to email.");return;}
   parents.forEach(p=>{
     state.messages.push({id:"m"+Date.now()+Math.floor(Math.random()*999),contactId:p.id,fromMe:true,
-      subject:`Note from Ms. ${state.name}`,body:text,
+      subject:`Note from ${state.title||"Ms."} ${state.name}`,body:text,
       week:state.week,day:DAYS[state.dayIdx],read:true});
     scheduleFollowupFromContact(p,text);
   });
@@ -1025,7 +1046,7 @@ function issueClassCommendation(){
   const top=cls.students.slice().sort((a,b)=>combinedAvg(b)-combinedAvg(a)).filter(s=>combinedAvg(s)>0).slice(0,3);
   if(!top.length){toast("No grades yet to commend.");return;}
   top.forEach(s=>{
-    s.cards.push({color:"green",reason:"Class commendation - top performer this period",week:state.week,by:"Ms. "+state.name});
+    s.cards.push({color:"green",reason:"Class commendation - top performer this period",week:state.week,by:(state.title||"Ms.")+" "+state.name});
     s.mood=clamp(s.mood+6);s.ability=clamp(s.ability+1.0);
   });
   state.rep+=2;state.actionsThisWeek=(state.actionsThisWeek||0)+1;
@@ -1094,32 +1115,127 @@ function runGroupProject(){
 // ============================================================
 function openGroupProject(){
   const cls=currentClass();
-  // Random team formation, 3-4 per team
-  const shuffled=cls.students.slice().sort(()=>Math.random()-0.5);
-  const teams=[];
-  let i=0;const size=Math.ceil(cls.students.length/Math.max(1,Math.floor(cls.students.length/4)));
-  while(i<shuffled.length){teams.push(shuffled.slice(i,i+size));i+=size;}
-  const m=document.createElement("div");m.className="modal";
-  m.innerHTML=`<div class="box" style="max-width:640px">
+  // Initialize team-builder state: 4 empty teams + an unassigned pool of all students.
+  state._gpBuilder={
+    topic:"",
+    teamCount:4,
+    teams:[[],[],[],[]],
+    unassigned:cls.students.map(s=>s.id)
+  };
+  renderGroupBuilder();
+}
+
+function renderGroupBuilder(){
+  const cls=currentClass();
+  const gb=state._gpBuilder;
+  const studById=id=>cls.students.find(s=>s.id===id);
+  document.querySelectorAll(".modal.gp-builder").forEach(x=>x.remove());
+  const m=document.createElement("div");m.className="modal gp-builder";
+  const teamCards=gb.teams.map((team,ti)=>{
+    const studs=team.map(studById).filter(Boolean);
+    const syn=studs.length>=2?teamSynergy(studs):null;
+    const synColor=syn==null?"#888":syn>60?"var(--green)":syn>35?"var(--yellow)":"var(--red)";
+    return `<div class="gp-team" data-team-idx="${ti}" ondragover="event.preventDefault()" ondrop="gpDrop(event,${ti})"
+      style="background:#1b1410;border:2px dashed ${synColor};border-radius:6px;padding:.5em;min-height:80px;flex:1">
+      <div style="font-size:.85em;color:var(--accent);margin-bottom:.3em">
+        Team ${ti+1} ${syn!=null?`<span style="float:right;color:${synColor}">syn ${syn.toFixed(0)}%</span>`:""}
+      </div>
+      ${studs.map(s=>`<div class="gp-chip" draggable="true" ondragstart="gpDrag(event,${s.id})"
+        style="background:var(--panel2);padding:.2em .5em;margin:.2em 0;border-radius:4px;font-size:.85em;cursor:grab;border:1px solid #555">
+        ${esc(s.first)} ${esc(s.last)} <small class="muted">avg ${combinedAvg(s).toFixed(0)}</small>
+      </div>`).join("")}
+      ${studs.length===0?`<small class="muted" style="font-style:italic">drag students here</small>`:""}
+    </div>`;
+  }).join("");
+  const unassigned=gb.unassigned.map(studById).filter(Boolean);
+  m.innerHTML=`<div class="box" style="max-width:840px">
     <h2>Group Project - ${cls.name}</h2>
-    <label>Topic / brief: <input id="gpTopic" type="text" placeholder="e.g. The causes of WW1, in 5 minutes" style="width:100%"></label>
-    <h3>Teams (auto-formed - synergy calculated)</h3>
-    <div style="max-height:280px;overflow:auto">
-      ${teams.map((team,ti)=>{
-        const syn=teamSynergy(team);
-        const cap=team.sort((a,b)=>combinedAvg(b)-combinedAvg(a))[0];
-        return `<div style="background:#1b1410;border-left:3px solid ${syn>60?'var(--green)':syn>35?'var(--yellow)':'var(--red)'};padding:.4em .7em;margin:.3em 0;border-radius:4px">
-          <b>Team ${ti+1}</b> <small class="muted">led by ${esc(cap.first)} · synergy ${syn.toFixed(0)}%</small>
-          <div style="font-size:.85em;opacity:.8">${team.map(s=>esc(s.first)).join(", ")}</div>
-        </div>`;
-      }).join("")}
+    <label>Topic / brief: <input id="gpTopic" type="text" value="${esc(gb.topic)}" oninput="state._gpBuilder.topic=this.value" placeholder="e.g. The causes of WW1, in 5 minutes" style="width:100%"></label>
+    <div class="row">
+      <button onclick="gpAutoTeams()">Auto-form Teams</button>
+      <button onclick="gpResetTeams()">Reset</button>
+      <small class="muted">Drag students from the pool into teams. Synergy updates live.</small>
     </div>
-    <div class="row" style="justify-content:flex-end;margin-top:.6em">
+    <h3>Unassigned (${unassigned.length})</h3>
+    <div ondragover="event.preventDefault()" ondrop="gpDropUnassigned(event)"
+      style="background:#0e0a07;border:1px dashed #555;border-radius:6px;padding:.5em;min-height:60px;display:flex;flex-wrap:wrap;gap:.3em">
+      ${unassigned.map(s=>`<span class="gp-chip" draggable="true" ondragstart="gpDrag(event,${s.id})"
+        style="background:var(--panel2);padding:.2em .5em;border-radius:4px;font-size:.85em;cursor:grab;border:1px solid #555">
+        ${esc(s.first)} ${esc(s.last)} <small class="muted">avg ${combinedAvg(s).toFixed(0)}</small>
+      </span>`).join("")||`<small class="muted">All students placed.</small>`}
+    </div>
+    <h3>Teams</h3>
+    <div style="display:flex;gap:.5em;flex-wrap:wrap">${teamCards}</div>
+    <div class="row" style="justify-content:flex-end;margin-top:.8em">
       <button onclick="closeModal()">Cancel</button>
-      <button class="primary" onclick="runGroupPresentation(${JSON.stringify(teams.map(t=>t.map(s=>s.id))).replace(/\"/g,'&quot;')})">Run Presentation</button>
+      <button class="primary" onclick="gpStartPresentation()">Run Presentation</button>
     </div>
   </div>`;
   document.body.appendChild(m);m.onclick=e=>{if(e.target===m)closeModal();};
+}
+
+function gpDrag(ev,sid){ev.dataTransfer.setData("text/sid",String(sid));}
+function gpDrop(ev,teamIdx){
+  ev.preventDefault();
+  const sid=parseInt(ev.dataTransfer.getData("text/sid"));
+  if(isNaN(sid))return;
+  gpRemoveFrom(sid);
+  state._gpBuilder.teams[teamIdx].push(sid);
+  renderGroupBuilder();
+}
+function gpDropUnassigned(ev){
+  ev.preventDefault();
+  const sid=parseInt(ev.dataTransfer.getData("text/sid"));
+  if(isNaN(sid))return;
+  gpRemoveFrom(sid);
+  state._gpBuilder.unassigned.push(sid);
+  renderGroupBuilder();
+}
+function gpRemoveFrom(sid){
+  const gb=state._gpBuilder;
+  gb.unassigned=gb.unassigned.filter(x=>x!==sid);
+  gb.teams=gb.teams.map(t=>t.filter(x=>x!==sid));
+}
+function gpAutoTeams(){
+  const cls=currentClass();
+  const gb=state._gpBuilder;
+  // Balance by ability across 4 teams.
+  const sorted=cls.students.slice().sort((a,b)=>b.ability-a.ability);
+  gb.teams=[[],[],[],[]];
+  sorted.forEach((s,i)=>{gb.teams[i%4].push(s.id);});
+  gb.unassigned=[];
+  renderGroupBuilder();
+}
+function gpResetTeams(){
+  const cls=currentClass();
+  state._gpBuilder.teams=[[],[],[],[]];
+  state._gpBuilder.unassigned=cls.students.map(s=>s.id);
+  renderGroupBuilder();
+}
+function gpStartPresentation(){
+  const gb=state._gpBuilder;
+  if(!gb.topic.trim()){toast("Set a topic first.");return;}
+  const filled=gb.teams.filter(t=>t.length>0);
+  if(filled.length<2){toast("Need at least 2 teams with members.");return;}
+  closeModal();
+  const cls=currentClass();
+  const teams=filled.map(ids=>ids.map(id=>cls.students.find(s=>s.id===id)).filter(Boolean));
+  state._gpTeams=teams;state._gpTopic=gb.topic;
+  const m=document.createElement("div");m.className="modal";
+  m.innerHTML=`<div class="box" style="max-width:680px">
+    <h2>Group Presentations - "${esc(gb.topic)}"</h2>
+    <p class="muted">Subject: ${esc(state.subject||"General")}</p>
+    <div id="gpPresentation" style="background:#0e0a07;padding:1em;border-radius:6px;min-height:200px;font-family:Georgia,serif"></div>
+    <div id="gpRatingArea" style="display:none">
+      <h3>Rate each team (0-100):</h3>
+      <div id="gpRatings"></div>
+      <div class="row" style="justify-content:flex-end;margin-top:.6em">
+        <button class="primary" onclick="submitGroupRatings()">Submit Ratings</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.appendChild(m);
+  animatePresentations(teams,gb.topic);
 }
 
 function teamSynergy(team){
@@ -1175,7 +1291,7 @@ async function animatePresentations(teams,topic){
       const target=document.getElementById("gpPres"+i);if(!target)return;
       const skill=team.reduce((a,s)=>a+s.ability,0)/team.length;
       const tone=skill>70?"polished and confident":skill>45?"adequate but uneven":"shaky and underprepared";
-      const line=await aiLine(`In ONE sentence (10-18 words), describe how ${tone} a student team's presentation on "${topic}" goes. No quotes.`,200);
+      const line=await aiLine(`In ONE sentence (10-18 words), describe how ${tone} a student team's presentation on "${topic}" goes (this is a ${state.subject||"school"} class - keep it relevant to that subject). No quotes.`,200);
       if(line)typewriterInto(target,line);
     },i*1200);
   }
@@ -1379,7 +1495,7 @@ function settleHomework(hwId){
     }else{
       s.ability=clamp(s.ability-0.3*w);
       s.effort=clamp(s.effort-1*w);
-      s.cards.push({color:"yellow",reason:`Missing homework: ${hw.title}`,week:state.week,by:"Ms. "+state.name});
+      s.cards.push({color:"yellow",reason:`Missing homework: ${hw.title}`,week:state.week,by:(state.title||"Ms.")+" "+state.name});
     }
   });
   hw.settled=true;
@@ -1480,7 +1596,7 @@ function openStudent(id,canAdminister){
   const s=c.students.find(x=>x.id===id);
   const canRevoke=state.role==="tutor";
   const cardHist=s.cards.length?s.cards.map((c,i)=>({c,i})).reverse().map(({c,i})=>{
-    const isMine=c.by==="Ms. "+state.name;
+    const isMine=c.by===(state.title||"Ms.")+" "+state.name;
     const revoke=canRevoke&&!isMine?`<button class="reroll" onclick="revokeCard(${id},${i})">revoke</button>`:"";
     return `<li><span class="pill ${c.color[0]}">${c.color}</span> wk ${c.week} - <i>${esc(c.reason)}</i> <small class="muted">by ${esc(c.by)}</small> ${revoke}</li>`;
   }).join(""):"<li><i>No cards yet.</i></li>";
@@ -1509,7 +1625,7 @@ function openStudent(id,canAdminister){
   const cb=combinedAvg(s);
   const myGrades=(s.grades||[]).slice(-8);
   const otherG=(s.otherGrades||[]).slice(-8);
-  const allGrades=[...myGrades.map(g=>({...g,subject:state.subject||"Yours",by:"Ms. "+state.name})),...otherG].sort((a,b)=>(a.week||0)-(b.week||0));
+  const allGrades=[...myGrades.map(g=>({...g,subject:state.subject||"Yours",by:(state.title||"Ms.")+" "+state.name})),...otherG].sort((a,b)=>(a.week||0)-(b.week||0));
   const trend=allGrades.length>=3?(()=>{const half=Math.floor(allGrades.length/2);const a=allGrades.slice(0,half).reduce((x,g)=>x+g.score,0)/half;const b=allGrades.slice(half).reduce((x,g)=>x+g.score,0)/(allGrades.length-half);return b>a+3?"↗ improving":b<a-3?"↘ slipping":"→ steady";})():"-";
   // Attendance stats across recent days
   const cName=c.name;
@@ -1638,7 +1754,7 @@ async function scheduleDetention(studentId){
   const s=findStudent(studentId);if(!s)return;
   const reason=prompt(`Detention reason for ${s.first}?`);
   if(!reason||!reason.trim()){toast("Detention needs a reason.");return;}
-  s.cards.push({color:"yellow",reason:"DETENTION: "+reason.trim(),week:state.week,by:"Ms. "+state.name});
+  s.cards.push({color:"yellow",reason:"DETENTION: "+reason.trim(),week:state.week,by:(state.title||"Ms.")+" "+state.name});
   s.mood=clamp(s.mood-10);
   s.effort=clamp(s.effort+8);   // shapes up effort over time
   s.ability=clamp(s.ability+0.3);   // discipline modestly boosts ability later
@@ -1662,7 +1778,7 @@ async function scheduleDetention(studentId){
 // Honors (Senior+) - purple card + parent praise + mission to keep avg up.
 async function recommendHonors(studentId){
   const s=findStudent(studentId);if(!s)return;
-  s.cards.push({color:"purple",reason:"HONORS recommendation",week:state.week,by:"Ms. "+state.name});
+  s.cards.push({color:"purple",reason:"HONORS recommendation",week:state.week,by:(state.title||"Ms.")+" "+state.name});
   s.mood=clamp(s.mood+12);
   s.ability=clamp(s.ability+2.5);     // serious recognition raises the ceiling
   s.effort=clamp(s.effort+3);
@@ -1694,7 +1810,7 @@ async function parentConference(studentId){
   const c=spawnParentContactIfMissing(s);
   if(!c){toast("Couldn't find a parent contact.");return;}
   const ov=showBusy("Drafting the meeting summary");
-  const prompt=`Write a SHORT meeting note (4-6 sentences) for a parent conference scheduled between Ms. ${state.name} and ${c.name} regarding their child ${s.first} ${s.last}. Context: ${s.story||s.first+" is in your class."}. Tone: professional, neutral, specific. Plain prose only.`;
+  const prompt=`Write a SHORT meeting note (4-6 sentences) for a parent conference scheduled between ${state.title||"Ms."} ${state.name} and ${c.name} regarding their child ${s.first} ${s.last}. Context: ${s.story||s.first+" is in your class."}. Tone: professional, neutral, specific. Plain prose only.`;
   const note=await aiLine(prompt,800);
   ov.close();
   if(!note){toast("Couldn't draft - try again.");return;}
@@ -1722,7 +1838,7 @@ function revokeCard(studentId,cardIdx){
   if(state.role!=="tutor"){toast("Only form tutors can revoke cards.");return;}
   const s=findStudent(studentId);if(!s)return;
   const c=s.cards[cardIdx];if(!c)return;
-  if(c.by==="Ms. "+state.name){toast("Can't revoke your own card.");return;}
+  if(c.by===(state.title||"Ms.")+" "+state.name){toast("Can't revoke your own card.");return;}
   if(!confirm(`Revoke ${c.by}'s ${c.color} card on ${s.first} ("${c.reason}")? It will annoy them and cost reputation.`))return;
   // restore the mood impact
   if(c.color==="green")s.mood=clamp(s.mood-2);
@@ -1888,7 +2004,7 @@ function issueCard(id){
   const reason=document.getElementById("cardReason").value.trim();
   if(!reason){toast("A card needs a reason.");return;}
   const s=findStudent(id);
-  s.cards.push({color,reason,week:state.week,by:"Ms. "+state.name});
+  s.cards.push({color,reason,week:state.week,by:(state.title||"Ms.")+" "+state.name});
   state.actionsThisWeek=(state.actionsThisWeek||0)+1;
   // Mood + LONG-TERM ability shift. Investment in a student actually moves the needle.
   if(color==="green"){s.mood=clamp(s.mood+4);s.ability=clamp(s.ability+0.6);state.rep+=1;}
@@ -2052,7 +2168,7 @@ function submitAttendance(){
       s._absentDays=(s._absentDays||0)+1;
       s.ability=clamp(s.ability-0.4);     // missing class costs ability over time
       if(s._absentDays>=3 && state.role!=="tutor"){
-        s.cards.push({color:"yellow",reason:"Repeated absence ("+s._absentDays+" days)",week:state.week,by:"Ms. "+state.name});
+        s.cards.push({color:"yellow",reason:"Repeated absence ("+s._absentDays+" days)",week:state.week,by:(state.title||"Ms.")+" "+state.name});
         s._absentDays=0;
         logActivity({type:"card",text:`You issued ${s.first} a yellow card - repeated absence`});
       }
@@ -2965,7 +3081,7 @@ async function writeQuarterReport(){
   const cls=currentClass();
   const overall=cls.students.reduce((a,s)=>a+avg(s),0)/Math.max(1,cls.students.length);
   const ov=showBusy("Drafting Quarter Report");
-  const prompt=`Write a SHORT quarter report (4-6 sentences, professional tone) for ${cls.name} in ${state.subject||"the form group"}. Class average this quarter: ${overall.toFixed(1)}/100. Quarter ${state.quarter}, Year ${state.year}. Note any general trend (positive/negative). Plain prose, no headings. Sign off as Ms. ${state.name}.`;
+  const prompt=`Write a SHORT quarter report (4-6 sentences, professional tone) for ${cls.name} in ${state.subject||"the form group"}. Class average this quarter: ${overall.toFixed(1)}/100. Quarter ${state.quarter}, Year ${state.year}. Note any general trend (positive/negative). Plain prose, no headings. Sign off as ${state.title||"Ms."} ${state.name}.`;
   const txt=await aiLine(prompt,1200);
   ov.close();
   if(!txt){toast("Report drafting failed - try again.");return;}
@@ -3043,16 +3159,16 @@ function studentContextBrief(s){
   if(!s)return "";
   const lines=[];
   // Have you ACTUALLY done anything positive for this kid? If not, parents have no reason to thank you.
-  const myGreenOrPurple=s.cards.filter(c=>c.by==="Ms. "+state.name&&(c.color==="green"||c.color==="purple")).length;
+  const myGreenOrPurple=s.cards.filter(c=>c.by===(state.title||"Ms.")+" "+state.name&&(c.color==="green"||c.color==="purple")).length;
   const conv=state.messages.filter(m=>{
     const c=state.contacts.find(x=>x.id===m.contactId);
     return c && c.studentId===s.id && m.fromMe;
   }).length;
   if(myGreenOrPurple===0 && conv===0){
-    lines.push(`The teacher Ms. ${state.name} has NOT done anything specific for ${s.first} yet - no green/purple cards, no direct messages. Parents should NOT thank her for help that didn't happen.`);
+    lines.push(`The teacher ${state.title||"Ms."} ${state.name} has NOT done anything specific for ${s.first} yet - no green/purple cards, no direct messages. Parents should NOT thank her for help that didn't happen.`);
   }else{
-    if(myGreenOrPurple>0)lines.push(`Ms. ${state.name} has given ${s.first} ${myGreenOrPurple} positive card(s).`);
-    if(conv>0)lines.push(`Ms. ${state.name} has sent ${s.first} ${conv} direct message(s).`);
+    if(myGreenOrPurple>0)lines.push(`${state.title||"Ms."} ${state.name} has given ${s.first} ${myGreenOrPurple} positive card(s).`);
+    if(conv>0)lines.push(`${state.title||"Ms."} ${state.name} has sent ${s.first} ${conv} direct message(s).`);
   }
   // recent grades from your tests
   const lastGrade=(s.grades||[]).slice(-1)[0];
@@ -3094,7 +3210,7 @@ async function generateMessagePair(contact,kind,opts={}){
   else if(kind==="absence")intent=`Inform the teacher of a 1-2 day absence for a family reason.`;
   else intent=`Send a short follow-up.`;
   const subjectLine=state.subject?`The teacher teaches ${state.subject}.`:"";
-  const prompt=`Write ONE email/message FROM ${contact.name} (${contact.relation}) TO Ms. ${state.name}. Voice: ${v.style}. Goal: ${intent}
+  const prompt=`Write ONE email/message FROM ${contact.name} (${contact.relation}) TO ${state.title||"Ms."} ${state.name}. Voice: ${v.style}. Goal: ${intent}
 ${subjectLine}
 ${brief}
 Rules:
@@ -3306,7 +3422,7 @@ async function evaluatePlayerMessage(text,contact){
   const audience=contact?.kind==="student"?`a school student named ${contact.name}`
               :contact?.kind==="staff"?`a colleague (${contact.relation})`
               :contact?.kind==="parent"?`a parent (${contact.relation})`:"a contact";
-  const prompt=`A school teacher named Ms. ${state.name} just wrote this message to ${audience}:
+  const prompt=`A school teacher named ${state.title||"Ms."} ${state.name} just wrote this message to ${audience}:
 """${text.slice(0,800)}"""
 
 Rate the message on professionalism and judgment from -3 to +3 where:
@@ -3456,7 +3572,7 @@ function replyProbability(s){
   const recent=s.cards.slice(-4);
   let bias=0;
   recent.forEach(c=>{
-    if(c.by==="Ms. "+state.name){
+    if(c.by===(state.title||"Ms.")+" "+state.name){
       if(c.color==="green")bias+=.05;
       if(c.color==="purple")bias+=.08;
       if(c.color==="yellow")bias-=.07;
@@ -3490,7 +3606,7 @@ async function tickPendingReplies(){
   if(r.kind==="deptWarning"){
     senderName=r.dept==="HR"?"HR Office":"Principal Vance";
     const tone=r.praise?"warm and brief":"formal and pointed";
-    prompt=`Write a SHORT (2-4 sentence) ${tone} email FROM ${senderName} TO Ms. ${state.name} at a US public school. Context: ${r.blurb} Sign off as ${senderName}. No markdown. No quotes around the body.`;
+    prompt=`Write a SHORT (2-4 sentence) ${tone} email FROM ${senderName} TO ${state.title||"Ms."} ${state.name} at a US public school. Context: ${r.blurb} Sign off as ${senderName}. No markdown. No quotes around the body.`;
     if(!c){
       const cId="c-"+r.dept.toLowerCase().replace(/\s/g,"");
       c=state.contacts.find(x=>x.id===cId);
@@ -3498,7 +3614,7 @@ async function tickPendingReplies(){
     }
   }else if(r.kind==="nudge"){
     senderName="Principal Vance";
-    prompt=`Write a SHORT, dry email FROM Principal Vance TO Ms. ${state.name}, gently calling out a week of inactivity. 2 sentences max. Professional but pointed. No quotes, no markdown.`;
+    prompt=`Write a SHORT, dry email FROM Principal Vance TO ${state.title||"Ms."} ${state.name}, gently calling out a week of inactivity. 2 sentences max. Professional but pointed. No quotes, no markdown.`;
     // Use a synthetic contact if no contacts exist
     if(!c){
       const principal={id:"c-principal",kind:"staff",name:"Principal Vance",voiceKey:"staff",relation:"Principal",msgCount:0,teacherSubject:"Administration"};
@@ -3520,13 +3636,13 @@ async function tickPendingReplies(){
     const brief=c.studentId!=null?studentContextBrief(findStudent(c.studentId)):"";
     // Full thread context - last 4 messages so AI actually responds to what the player said.
     const thread=state.messages.filter(m=>m.contactId===c.id).slice(-4);
-    const threadText=thread.map(m=>`${m.fromMe?"Ms. "+state.name:c.name}: ${m.body.slice(0,250)}`).join("\n---\n");
-    prompt=`Write a SHORT follow-up message FROM ${c.name} (${senderInfo}) TO Ms. ${state.name}.
+    const threadText=thread.map(m=>`${m.fromMe?(state.title||"Ms.")+" "+state.name:c.name}: ${m.body.slice(0,250)}`).join("\n---\n");
+    prompt=`Write a SHORT follow-up message FROM ${c.name} (${senderInfo}) TO ${state.title||"Ms."} ${state.name}.
 
 THE CONVERSATION SO FAR (most recent last):
 ${threadText}
 
-You must respond DIRECTLY to whatever Ms. ${state.name} just said. If she was dismissive, terse, or rude, react accordingly. If she was warm, be warmer. Do NOT repeat your previous introduction or pretend the prior messages didn't happen.
+You must respond DIRECTLY to whatever ${state.title||"Ms."} ${state.name} just said. If she was dismissive, terse, or rude, react accordingly. If she was warm, be warmer. Do NOT repeat your previous introduction or pretend the prior messages didn't happen.
 
 Voice: ${voiceCfg.style}.
 ${brief}
@@ -3539,13 +3655,13 @@ Rules: 1-3 sentences. May agree, push back, ask a clarifying question, or thank.
     const writeHint=s.writing<35?"Bad spelling, drops apostrophes, run-on sentences.":
                     s.writing<70?"OK writing for their age - one tiny slip is fine.":
                                   "Clean for a student - still age-appropriate.";
-    prompt=`Write a SHORT email FROM ${s.first} (a school student, personality: ${s.personality}) TO Ms. ${state.name}, reacting to getting their ${r.testTitle} back with a grade of ${fmtScore(r.score,r.scale)} (${r.score.toFixed(0)}/100). They feel ${tone}.
+    prompt=`Write a SHORT email FROM ${s.first} (a school student, personality: ${s.personality}) TO ${state.title||"Ms."} ${state.name}, reacting to getting their ${r.testTitle} back with a grade of ${fmtScore(r.score,r.scale)} (${r.score.toFixed(0)}/100). They feel ${tone}.
 Voice: ${v.style}. ${writeHint}
 Rules: 1-3 sentences. May ask a follow-up question or thank/complain - choose what fits the personality. No markdown, no quotation marks around the whole thing. Just the body.`;
   }else if(r.kind==="staff"){
     const t=state.npcTeachers[r.teacherIdx];if(!t)return;
     senderName=t.name;
-    prompt=`Write a SHORT reply FROM ${t.name} (${t.subject} teacher, style: ${t.style}, strictness ${t.strict?.toFixed?.(1)||0.5}) TO Ms. ${state.name}, in response to:\n"""${r.inReplyTo}"""\nRules: 1-3 sentences. Professional but with personality matching the style. No markdown. No quotation marks. Just the message body.`;
+    prompt=`Write a SHORT reply FROM ${t.name} (${t.subject} teacher, style: ${t.style}, strictness ${t.strict?.toFixed?.(1)||0.5}) TO ${state.title||"Ms."} ${state.name}, in response to:\n"""${r.inReplyTo}"""\nRules: 1-3 sentences. Professional but with personality matching the style. No markdown. No quotation marks. Just the message body.`;
   }else{
     const s=findStudent(r.studentId);if(!s)return;
     senderName=s.first;
@@ -3554,7 +3670,7 @@ Rules: 1-3 sentences. May ask a follow-up question or thank/complain - choose wh
                     s.writing<70?"OK writing for their age - one tiny slip is fine.":
                                   "Clean for a student - still age-appropriate.";
     const brief=studentContextBrief(s);
-    prompt=`Write a SHORT reply FROM ${s.first} (a school student) TO Ms. ${state.name}, in response to:\n"""${r.inReplyTo}"""\nVoice: ${v.style}. ${writeHint}. Personality: ${s.personality}. ${s.story?`Story context: ${s.story}`:""}\n${brief}\nRules: 1-3 sentences MAX. Reference a real recent fact if it fits naturally. No markdown. No quotation marks around the whole thing.`;
+    prompt=`Write a SHORT reply FROM ${s.first} (a school student) TO ${state.title||"Ms."} ${state.name}, in response to:\n"""${r.inReplyTo}"""\nVoice: ${v.style}. ${writeHint}. Personality: ${s.personality}. ${s.story?`Story context: ${s.story}`:""}\n${brief}\nRules: 1-3 sentences MAX. Reference a real recent fact if it fits naturally. No markdown. No quotation marks around the whole thing.`;
   }
   const body=await aiLine(prompt,700);
   if(!body){
@@ -3860,8 +3976,25 @@ function viewActivity(){
 
 // Daily tick: releases scheduled events for the current day. AI was already called
 // at the START of the week to plan all 5 days, so daily releases are instant.
+let _lastDayAdvance=0;
 async function advanceDay(){
   if(_criticalWork>0){flashGate();return;}
+  // Throttle rapid clicks - if AI is still preparing, show a friendly screen.
+  const now=Date.now();
+  if(now-_lastDayAdvance<400){
+    showTomorrowPrep();return;
+  }
+  _lastDayAdvance=now;
+  // Force-gate: roster must be taken for the active class before advancing.
+  const cls=currentClass();
+  const attKey=`${state.week}.${state.dayIdx}.${cls.name}`;
+  const att=state.attendance?.[attKey]||{};
+  const untaken=cls.students.filter(s=>!att[s.id]).length;
+  if(untaken>0){
+    toast(`Take the register for ${cls.name} first - ${untaken} student${untaken===1?"":"s"} unmarked.`);
+    showView("roster");
+    return;
+  }
   state.classes.forEach(c=>c.students.forEach(s=>{
     s.mood=clamp(s.mood+(Math.random()*6-3));
     s.effort=clamp(s.effort+(Math.random()*4-2));
