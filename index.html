@@ -1529,10 +1529,14 @@ function viewPlanner(){
   const cls=currentClass();
   state._plannerAll=state._plannerAll||false;
   const showAll=state._plannerAll&&state.classes.length>1;
-  // Beautiful journal-style layout: cork board header, color-coded activity legend, day cards.
-  const legend=Object.entries(ACTIVITY_TYPES).map(([k,v])=>
-    `<span style="display:inline-flex;align-items:center;gap:.3em;font-size:.78em;background:${v.color}22;padding:.15em .5em;border-radius:12px;border:1px solid ${v.color}66"><span style="width:10px;height:10px;background:${v.color};border-radius:50%"></span>${esc(v.label)}</span>`
-  ).join(" ");
+  // Drag palette of activity chips (the source).
+  const palette=Object.entries(ACTIVITY_TYPES).map(([k,v])=>
+    `<div draggable="true" ondragstart="event.dataTransfer.setData('text/type','${k}')"
+      style="background:linear-gradient(135deg,${v.color}cc,${v.color}66);color:#0e0a07;padding:.5em .8em;border-radius:8px;font-weight:bold;cursor:grab;user-select:none;text-align:center;border:1px solid #000;box-shadow:0 2px 4px rgba(0,0,0,.4);transition:transform .1s"
+      onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform=''">
+      ${esc(v.label)}
+    </div>`
+  ).join("");
   return `<h2 style="display:flex;align-items:center;gap:.6em">Lesson Planner ${showAll?"<small class=\"muted\" style=\"font-weight:normal\">All classes</small>":""}</h2>
     ${classPicker()}
     <div style="background:linear-gradient(135deg,#3a2b20,#241a14);padding:.8em 1em;border-radius:10px;margin-bottom:.6em;border:1px solid var(--accent);box-shadow:0 4px 10px rgba(0,0,0,.4)">
@@ -1543,7 +1547,10 @@ function viewPlanner(){
         ${week!==state.week?`<button onclick="state._plannerWeek=state.week;showView('planner')">Jump to this week</button>`:""}
         ${state.classes.length>1?`<label style="margin-left:auto;font-size:.85em"><input type="checkbox" ${showAll?"checked":""} onchange="state._plannerAll=this.checked;showView('planner')"> Overlay all classes</label>`:""}
       </div>
-      <div style="margin-top:.5em;font-size:.8em;opacity:.85;display:flex;flex-wrap:wrap;gap:.3em">${legend}</div>
+    </div>
+    <div style="background:#0e0a07;padding:.6em .8em;border-radius:8px;margin-bottom:.6em;border:1px dashed #555">
+      <div style="font-size:.78em;color:var(--accent);text-transform:uppercase;letter-spacing:1px;margin-bottom:.4em">Drag from here ↓</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:.4em">${palette}</div>
     </div>
     <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:.6em">
       ${DAYS.map((d,di)=>{
@@ -1580,20 +1587,49 @@ function renderPlannerCell(week,dayIdx,classIdx,clsName,isPrimary){
   const acts=state.lessonPlan[key]||[];
   const inner=acts.map((a,ai)=>{
     const t=ACTIVITY_TYPES[a.type]||{label:a.type,color:"#888"};
-    return `<div style="background:linear-gradient(135deg,${t.color}55,${t.color}22);border-left:4px solid ${t.color};padding:.4em .5em;margin:.25em 0;border-radius:5px;cursor:pointer;transition:transform .1s,box-shadow .1s"
+    return `<div style="background:linear-gradient(135deg,${t.color}55,${t.color}22);border-left:4px solid ${t.color};padding:.4em .5em;margin:.25em 0;border-radius:5px;cursor:pointer;transition:transform .1s,box-shadow .1s;position:relative"
       onmouseover="this.style.transform='translateX(2px)';this.style.boxShadow='0 2px 6px rgba(0,0,0,.4)'"
       onmouseout="this.style.transform='';this.style.boxShadow=''"
-      onclick="editPlanActivity('${key}',${ai})">
+      onclick="editPlanCenter('${key}',${ai})">
+      <button onclick="event.stopPropagation();removePlanAct('${key}',${ai})" style="position:absolute;top:.2em;right:.2em;background:transparent;border:none;color:#888;font-size:.9em;cursor:pointer;padding:0 .3em">×</button>
       <div style="font-size:.72em;color:${t.color};font-weight:bold;text-transform:uppercase;letter-spacing:.5px">${esc(t.label)}</div>
-      <div style="font-size:.85em;font-weight:600;margin-top:.1em">${esc(a.title||"(no title)")}</div>
-      ${a.body?`<div style="font-size:.75em;opacity:.75;margin-top:.2em;line-height:1.3">${esc(a.body.slice(0,60))}${a.body.length>60?"...":""}</div>`:""}
+      <div style="font-size:.85em;font-weight:600;margin-top:.1em;font-style:${a.center?'normal':'italic'};opacity:${a.center?1:.7}">${esc(a.center||"click to add focus")}</div>
     </div>`;
   }).join("");
-  return `<div style="${isPrimary?'':'opacity:.6'}">
+  return `<div style="${isPrimary?'':'opacity:.6'};min-height:100px"
+    ondragover="event.preventDefault();this.style.background='#241a14'"
+    ondragleave="this.style.background=''"
+    ondrop="plannerDrop(event,'${key}')">
     ${state.classes.length>1?`<div style="font-size:.7em;opacity:.6;font-weight:bold">${esc(clsName)}</div>`:""}
-    ${inner||`<div style="font-style:italic;opacity:.4;font-size:.78em;padding:.5em 0;text-align:center">Empty day</div>`}
-    <button class="reroll" onclick="addPlanActivity('${key}')" style="width:100%;font-size:.78em;margin-top:.3em;background:transparent;border:1px dashed #555;color:var(--accent)">+ Add activity</button>
+    ${inner||`<div style="font-style:italic;opacity:.4;font-size:.78em;padding:1em 0;text-align:center;border:2px dashed #3a2b20;border-radius:6px">drop activity here</div>`}
   </div>`;
+}
+
+function plannerDrop(ev,key){
+  ev.preventDefault();
+  ev.currentTarget.style.background="";
+  const type=ev.dataTransfer.getData("text/type");
+  if(!type||!ACTIVITY_TYPES[type])return;
+  state.lessonPlan[key]=state.lessonPlan[key]||[];
+  state.lessonPlan[key].push({type,center:""});
+  saveGame(false);
+  showView("planner");
+  // Prompt for focus immediately after drop
+  const idx=state.lessonPlan[key].length-1;
+  setTimeout(()=>editPlanCenter(key,idx),50);
+}
+function editPlanCenter(key,ai){
+  const acts=state.lessonPlan[key]||[];const a=acts[ai];if(!a)return;
+  const t=ACTIVITY_TYPES[a.type]||{label:a.type,color:"#888"};
+  const cur=a.center||"";
+  const newVal=prompt(`What will this ${t.label} center on?`,cur);
+  if(newVal===null)return;
+  acts[ai].center=newVal.trim();
+  saveGame(false);showView("planner");
+}
+function removePlanAct(key,ai){
+  state.lessonPlan[key]?.splice(ai,1);
+  saveGame(false);showView("planner");
 }
 function copyLastWeekPlan(week,classIdx){
   if(week<=1){toast("No prior week to copy from.");return;}
