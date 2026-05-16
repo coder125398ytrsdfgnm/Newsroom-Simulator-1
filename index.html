@@ -798,6 +798,11 @@ function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random
 // SETUP
 // ============================================================
 function openSetup(){
+  // Defensive: clear any stuck modals or overlays from a prior session/error.
+  document.querySelectorAll(".modal").forEach(m=>m.remove());
+  const gate=document.getElementById("criticalGate");if(gate)gate.style.display="none";
+  _criticalWork=0;_criticalTask="";
+  const busy=document.getElementById("aiBusy");if(busy)busy.style.display="none";
   document.getElementById("menu").classList.add("hidden");
   document.getElementById("setup").classList.add("active");
   pickRole("tutor");
@@ -813,17 +818,23 @@ function pickRole(r){
   document.getElementById("classRow").style.display=r==="tutor"?"":"none";
 }
 async function beginCareer(){
-  const name=document.getElementById("setupName").value.trim()||"Hale";
-  const title=document.getElementById("setupTitle").value||"Ms.";
-  const subject=document.getElementById("setupSubject").value;
-  const cls=document.getElementById("setupClass").value;
-  const ok=await newCareer(selectedRole,name,subject,cls,title);
-  if(!ok)return;
-  document.getElementById("setup").classList.remove("active");
-  document.getElementById("game").classList.add("active");
-  buildNav();
-  showView(state.role==="tutor"?"formroom":"classroom");
-  renderHud();
+  try{
+    const name=document.getElementById("setupName").value.trim()||"Hale";
+    const title=document.getElementById("setupTitle").value||"Ms.";
+    const subject=document.getElementById("setupSubject").value;
+    const cls=document.getElementById("setupClass").value;
+    const ok=await newCareer(selectedRole,name,subject,cls,title);
+    if(!ok)return;
+    document.getElementById("setup").classList.remove("active");
+    document.getElementById("game").classList.add("active");
+    buildNav();
+    showView(state.role==="tutor"?"formroom":"classroom");
+    renderHud();
+  }catch(e){
+    if(window.console)console.error("[beginCareer] crash:",e);
+    document.querySelectorAll(".modal").forEach(m=>m.remove());
+    alert("Career start failed: "+(e&&e.message||e)+". Check console for details. Try again.");
+  }
 }
 function quitToMenu(){
   if(!confirm("Return to main menu? Your progress is auto-saved."))return;
@@ -1981,7 +1992,7 @@ async function submitPopQuiz(){
   state.popQuizCooldown[cls.name]=state.week;
   // Roll scores
   const scores=cls.students.map(s=>{
-    const ability=(s.ability*.7+s.effort*.2+s.mood*.1)+Math.random()*15-7.5;
+    const ability=effectiveAbilityFor(s,{prompt:topic,answer:topic})+Math.random()*15-7.5;
     return {s,score:clamp(ability)};
   });
   scores.forEach(({s,score})=>{
@@ -2926,7 +2937,7 @@ async function precomputeAnswers(testId,classIdx){
     if(bucket[s.id])continue;
     bucket[s.id]=t.questions.map((q,qi)=>{
       if(q.type==="mc"||q.type==="tf"){
-        const ability=(s.ability*.7+s.effort*.2+s.mood*.1)/100;
+        const ability=effectiveAbilityFor(s,q)/100;
         let idx;
         if(q.type==="mc"){
           idx=Math.random()<ability?q.correct
@@ -2937,7 +2948,7 @@ async function precomputeAnswers(testId,classIdx){
         return {pick:idx,text:q.type==="mc"?(q.options[idx]||""):(idx===0?"True":"False")};
       }
       const a=archs[qi];if(!a||!a.levels)return {text:null};
-      const eff=Math.max(5,Math.min(95,(s.ability*.7+s.effort*.2+s.mood*.1)+(Math.random()*10-5)));
+      const eff=Math.max(5,Math.min(95,effectiveAbilityFor(s,q)+(Math.random()*10-5)));
       return {text:pickFromLevels(a.levels,eff)};
     });
   }
@@ -3100,7 +3111,7 @@ async function _streamFillAnswersImpl(testId,classIdx,test,cls,asn){
       const ans=asn[s.id].answers[qi];
       if(!ans.pending && !ans.writing)continue;
       // Effective ability = blended attributes, with small noise.
-      const eff=Math.max(5,Math.min(95,(s.ability*.7+s.effort*.2+s.mood*.1)+(Math.random()*10-5)));
+      const eff=Math.max(5,Math.min(95,effectiveAbilityFor(s,q)+(Math.random()*10-5)));
       const pick=pickFromLevels(arch.levels,eff);
       // Apply a small writing-skill flavor: weak writers drop apostrophes.
       let txt=pick;
@@ -3203,14 +3214,56 @@ function pickFromTier(tierArr,studentId){
 // Pick an answer from the level map keyed by ability bucket. Falls through to nearest level.
 function pickFromLevels(levels,effective){
   if(!levels||!Object.keys(levels).length)return null;
-  const bucket=Math.round(effective/10)*10;
-  if(levels[bucket])return levels[bucket];
-  // walk outward to find nearest available
-  for(let d=10;d<=80;d+=10){
-    if(levels[bucket-d])return levels[bucket-d];
-    if(levels[bucket+d])return levels[bucket+d];
+  const keys=Object.keys(levels).map(Number).sort((a,b)=>a-b);
+  let best=keys[0],bestD=Math.abs(effective-keys[0]);
+  keys.forEach(k=>{const d=Math.abs(effective-k);if(d<bestD){best=k;bestD=d;}});
+  return levels[best];
+}
+
+// THE CONNECTOR: blends base ability with prep level - homework, attendance, lesson coverage.
+function effectiveAbilityFor(s,question){
+  const base=(s.ability*.7+s.effort*.2+s.mood*.1);
+  let bonus=0;
+  // Homework history
+  const hwList=(state.homework||[]).filter(h=>{
+    const cls=state.classes[h.classIdx];
+    return cls && cls.students.find(x=>x.id===s.id);
+  }).slice(-3);
+  if(hwList.length){
+    const score=hwList.reduce((a,h)=>{const c=h.completion[s.id];return a+(c==="done"?1:c==="partial"?0.3:-0.5);},0)/hwList.length;
+    bonus+=score*8;
   }
-  return Object.values(levels)[0];
+  // Attendance last 10 days
+  const cls=state.classes.find(c=>c.students.find(x=>x.id===s.id));
+  if(cls){
+    const att=[];
+    for(let dw=0;dw<10;dw++){
+      const wAt=state.week-Math.floor(dw/5);const dAt=(state.dayIdx-1-dw%5+50)%5;if(wAt<1)break;
+      const k=`${wAt}.${dAt}.${cls.name}`;const a=state.attendance?.[k]?.[s.id];
+      if(a)att.push(a);
+    }
+    if(att.length){
+      const presPct=att.filter(v=>v==="present"||v==="late").length/att.length;
+      bonus+=(presPct-0.7)*15;
+    }
+  }
+  // Lesson coverage - did your lessons touch this topic in the last 2 weeks?
+  if(question&&(question.prompt||question.answer)){
+    const text=((question.prompt||"")+" "+(question.answer||"")).toLowerCase();
+    const cIdx=state.classes.findIndex(c=>c.students.find(x=>x.id===s.id));
+    let coverage=0;
+    Object.entries(state.lessonPlan||{}).forEach(([k,acts])=>{
+      const [ci,w]=k.split(".").map(Number);
+      if(ci!==cIdx||w>state.week||w<state.week-2)return;
+      acts.forEach(a=>{
+        const focus=(a.center||"").toLowerCase();
+        if(!focus)return;
+        focus.split(/\W+/).filter(w=>w.length>3).forEach(t=>{if(text.includes(t))coverage++;});
+      });
+    });
+    bonus+=Math.min(coverage*4,12);
+  }
+  return Math.max(5,Math.min(95,base+bonus));
 }
 function refreshIfGrading(){
   const on=document.querySelector("nav.side button.on");
