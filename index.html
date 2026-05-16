@@ -660,20 +660,39 @@ async function generateStudents(n){
 
 async function generateTeachers(count,excludeSubject){
   const subjects=["Mathematics","English","Science","History","Geography","Art","Music","P.E.","Drama","Computer Science"].filter(s=>s!==excludeSubject);
-  const prompt=`Return ONLY a JSON array of ${count} school teachers in this compact shape: [["Mr./Ms./Dr. Surname","subject",strict,"style phrase"], ...].
-- subject is a UNIQUE pick from: ${subjects.join("|")}
-- strict is a number between 0.1 and 0.9
-- style phrase under 7 words
+  // Use a robust delimiter format instead of JSON - much more reliable to parse.
+  const prompt=`List ${count} fictional school teachers. Each gets ONE line in this EXACT format:
+NAME | SUBJECT | STRICTNESS | STYLE
+
+Rules:
+- NAME is an honorific + surname (e.g. "Mr. Hollis", "Dr. Reeves", "Ms. Quinn", "Mrs. Khan")
+- SUBJECT must be one of: ${subjects.join(", ")} (each subject used at most once)
+- STRICTNESS is a decimal 0.1 to 0.9
+- STYLE is a short phrase, max 6 words
 - Varied cultural surnames
-- No markdown. ${count} entries exactly.`;
-  const txt=await aiText(prompt,{retries:4,timeout:30000});
-  const arr=extractJSONArray(txt);
-  if(!arr||!arr.length){if(window.console)console.warn("[AI] teachers parse failed; got:",txt?.slice(0,300));return [];}
-  return arr.filter(x=>Array.isArray(x)&&x.length>=4).map(x=>({
-    name:String(x[0]||"").trim(),subject:String(x[1]||"").trim(),
-    strict:Math.max(0.1,Math.min(0.9,parseFloat(x[2])||0.5)),
-    style:String(x[3]||"").trim()
-  })).filter(t=>t.name&&t.subject);
+
+Output ONLY the ${count} lines. No headers. No numbering. No JSON. No markdown.
+
+Example line: Mr. Hollis | Mathematics | 0.45 | soft-spoken but firm`;
+  const txt=await aiText(prompt,{retries:4,timeout:30000,cache:false});
+  if(!txt){if(window.console)console.warn("[AI] teachers: no response");return [];}
+  // Parse line-by-line, robustly
+  const teachers=[];
+  txt.split("\n").forEach(line=>{
+    line=line.replace(/^[*•\-\d.)\s]+/,"").trim();
+    if(!line||line.length<5)return;
+    const parts=line.split("|").map(p=>p.trim());
+    if(parts.length<4)return;
+    const name=parts[0].replace(/^["']|["']$/g,"");
+    const subject=parts[1].replace(/^["']|["']$/g,"");
+    const strict=Math.max(0.1,Math.min(0.9,parseFloat(parts[2])||0.5));
+    const style=parts[3].replace(/^["']|["']$/g,"");
+    if(name && subject && subjects.includes(subject)){
+      teachers.push({name,subject,strict,style});
+    }
+  });
+  if(!teachers.length && window.console)console.warn("[AI] teachers parse failed; raw:",txt?.slice(0,400));
+  return teachers;
 }
 
 async function newCareer(role,name,subject,className,title){
@@ -699,16 +718,20 @@ async function _newCareerImpl(role,name,subject,className,ov,title){
   let done=0;
   const tick=(label,sub)=>{ov.update(label);ov.sub(sub||"");ov.setProgress(Math.round((done/totalCalls)*92)+3);};
 
-  // teacher first (smaller, faster, validates AI is alive)
+  // teacher first (smaller, faster, validates AI is alive). Try up to 3 times.
   tick("Hiring faculty","1 colleagues call");
-  let teachers=await generateTeachers(7,subject);
-  if(!teachers.length){
+  let teachers=await generateTeachers(5,subject);
+  if(teachers.length<3){
     tick("Hiring faculty (retry)","");
-    teachers=await generateTeachers(7,subject);
+    teachers=await generateTeachers(5,subject);
+  }
+  if(teachers.length<2){
+    tick("Hiring faculty (final retry)","");
+    teachers=await generateTeachers(4,subject);
   }
   if(!teachers.length){
     ov.close();
-    alert("Couldn't reach the AI right now. Open the browser console for details, then try New Career again in 20-30 seconds.");
+    alert("The AI keeps timing out. Wait 30-60 seconds and try New Career again. (Pollinations is under load.)");
     return false;
   }
   done++;
