@@ -369,7 +369,7 @@
 // STATE
 // ============================================================
 const DAYS=["Mon","Tue","Wed","Thu","Fri"];
-const VERSION="0.7";
+const VERSION="0.8";
 const SAVE_KEY="chalkdust:save";
 
 // ============ AI helpers (single point for the no-placeholder rule) ============
@@ -1530,13 +1530,17 @@ function viewPlanner(){
   state._plannerAll=state._plannerAll||false;
   const showAll=state._plannerAll&&state.classes.length>1;
   // Drag palette of activity chips (the source).
-  const palette=Object.entries(ACTIVITY_TYPES).map(([k,v])=>
-    `<div draggable="true" ondragstart="event.dataTransfer.setData('text/type','${k}')"
-      style="background:linear-gradient(135deg,${v.color}cc,${v.color}66);color:#0e0a07;padding:.5em .8em;border-radius:8px;font-weight:bold;cursor:grab;user-select:none;text-align:center;border:1px solid #000;box-shadow:0 2px 4px rgba(0,0,0,.4);transition:transform .1s"
+  const fx=(n)=>n>0?`+${n}`:n.toString();
+  const palette=Object.entries(ACTIVITY_TYPES).map(([k,v])=>{
+    const e=v.effects;
+    return `<div draggable="true" ondragstart="event.dataTransfer.setData('text/type','${k}')"
+      title="${v.label}: ability ${fx(e.ability)}, effort ${fx(e.effort)}, mood ${fx(e.mood)} (per student)"
+      style="background:linear-gradient(135deg,${v.color}cc,${v.color}66);color:#0e0a07;padding:.5em .7em;border-radius:8px;font-weight:bold;cursor:grab;user-select:none;text-align:center;border:1px solid #000;box-shadow:0 2px 4px rgba(0,0,0,.4);transition:transform .1s"
       onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform=''">
-      ${esc(v.label)}
-    </div>`
-  ).join("");
+      <div>${esc(v.label)}</div>
+      <div style="font-size:.65em;font-weight:normal;margin-top:.2em;opacity:.85">ability ${fx(e.ability)} · effort ${fx(e.effort)} · mood ${fx(e.mood)}</div>
+    </div>`;
+  }).join("");
   return `<h2 style="display:flex;align-items:center;gap:.6em">Lesson Planner ${showAll?"<small class=\"muted\" style=\"font-weight:normal\">All classes</small>":""}</h2>
     ${classPicker()}
     <div style="background:linear-gradient(135deg,#3a2b20,#241a14);padding:.8em 1em;border-radius:10px;margin-bottom:.6em;border:1px solid var(--accent);box-shadow:0 4px 10px rgba(0,0,0,.4)">
@@ -1803,13 +1807,41 @@ function viewHomework(){
 function openHomeworkReview(hwId){
   const hw=state.homework.find(x=>x.id===hwId);if(!hw)return;
   const cls=state.classes[hw.classIdx];
-  // Surface the most interesting students: all missing + all done + a few partial
   const studs=cls.students.slice();
   const flagged=studs.filter(s=>{const c=hw.completion[s.id];return c==="missing"||c==="done";});
   const partials=studs.filter(s=>hw.completion[s.id]==="partial").slice(0,3);
   const order=[...flagged,...partials];
   state._hwReview={hwId,index:0,order:order.map(s=>s.id)};
+  // BATCH the AI notes for all flagged students in ONE call.
+  if(!hw._notes){
+    hw._notes={};
+    batchHomeworkNotes(hw,order).then(notes=>{
+      order.forEach((s,i)=>{if(notes[i])hw._notes[s.id]=notes[i];});
+      renderHomeworkReviewCard();
+    });
+  }
   renderHomeworkReviewCard();
+}
+
+async function batchHomeworkNotes(hw,students){
+  if(!students.length)return [];
+  const items=students.map((s,i)=>{
+    const c=hw.completion[s.id]||"missing";
+    return `${i+1}. ${s.first} (${s.personality}, outcome: ${c})`;
+  }).join("\n");
+  const prompt=`For each student below, write ONE short teacher's note (10-14 words) on how their ${state.subject||"class"} homework "${hw.title}" went. The note must match their outcome: done=praising, partial=mixed, missing=disappointed.
+
+Students:
+${items}
+
+Output format - one line per student:
+###1### <note>
+###2### <note>
+...
+
+No JSON. No preamble.`;
+  const txt=await aiText(prompt,{retries:2,timeout:25000});
+  return parseDelimited(txt,students.length);
 }
 function renderHomeworkReviewCard(){
   document.querySelectorAll(".modal.hw-review").forEach(x=>x.remove());
@@ -1824,13 +1856,7 @@ function renderHomeworkReviewCard(){
   const s=cls.students.find(x=>x.id===sid);
   const cur=hw.completion[sid]||"missing";
   const m=document.createElement("div");m.className="modal hw-review";
-  // AI generates a one-line note describing how this student did
   const note=hw._notes?.[sid]||"(reviewing...)";
-  if(!hw._notes)hw._notes={};
-  if(!hw._notes[sid]){
-    hw._notes[sid]="(reviewing...)";
-    aiHomeworkNote(hw,s,cur).then(t=>{if(t){hw._notes[sid]=t;renderHomeworkReviewCard();}});
-  }
   m.innerHTML=`<div class="box" style="max-width:500px;text-align:center">
     <div style="font-size:.8em;opacity:.7">Reviewing ${rv.index+1} of ${rv.order.length}</div>
     <h2 style="margin:.2em 0">${esc(s.name)}</h2>
@@ -2151,9 +2177,9 @@ function rankLevel(){
 }
 const RANK_PERKS={
   "Probationary":["Standard teaching duties","Cards: green / yellow / purple"],
-  "Junior Teacher":["UNLOCKED: Schedule Detention","+10% rep gain from green cards","Office Hours session boost doubled"],
-  "Senior Teacher":["UNLOCKED: Recommend for Honors","+15% rep gain from positive messages","Inactivity penalty reduced"],
-  "Master Teacher":["UNLOCKED: Parent Conference","Group Project synergy +10%","Rating decay slowed"]
+  "Junior Teacher":["UNLOCKED: Schedule Detention","UNLOCKED: Subordinates panel (Teaching Assistant)","Office Hours session boost doubled"],
+  "Senior Teacher":["UNLOCKED: Recommend for Honors","UNLOCKED: Hire a TA who auto-grades 1 homework/week","Inactivity penalty reduced"],
+  "Master Teacher":["UNLOCKED: Parent Conference","UNLOCKED: Mentor a Junior Teacher (+rep each week)","Group Project synergy +10%"]
 };
 function applyPromotions(){
   const tier=RANKS[rankLevel()];
@@ -3103,25 +3129,21 @@ async function archetypeAnswersForTest(test,writtenIdxs){
     const len=q.type==="sa"?"1 short sentence":q.type==="fib"?"a brief phrase":(q.type==="es"&&wmatch?`~${wmatch[1]} words`:"2-3 sentences");
     return `Q${i+1} (${q.type.toUpperCase()}, ${len}): ${q.prompt}${q.answer?` | rubric: ${q.answer}`:""}`;
   }).join("\n");
-  const prompt=`Write student answers for a ${subj} test. For EACH question below, write NINE distinct answers from students at ABILITY LEVELS 10, 20, 30, 40, 50, 60, 70, 80, 90 (out of 100). The answer should reflect what a student at that ability level would actually write - lower ability means more mistakes, weaker grasp, possibly off-topic; higher ability means clear, correct, well-reasoned. CRUCIAL: actually answer the question correctly at high levels; actually answer it wrong at low levels. Use the question's correct answer (from rubric) as ground truth.
+  const prompt=`Write student answers for a ${subj} test. For EACH question below, write FIVE answers from students at ABILITY LEVELS 20, 40, 60, 80, 95 (out of 100). Lower levels = wrong/confused, higher = clear and correct. Use the question's correct answer (from rubric) as ground truth. Keep each answer concise.
 
 ${blocks}
 
-Output EXACTLY this format - one block per question:
+Output EXACTLY:
 ===Q1===
-###L10### <answer from a struggling student>
-###L20### ...
-###L30### ...
-###L40### ...
-###L50### ...
-###L60### ...
-###L70### ...
-###L80### ...
-###L90### <answer from a strong student>
+###L20### <wrong/confused>
+###L40### <partial>
+###L60### <mostly right>
+###L80### <correct>
+###L95### <excellent>
 ===Q2===
-... and so on for each question.
+... etc.
 
-No JSON. No preamble. Begin output with ===Q1===.`;
+No JSON. No preamble. Begin with ===Q1===.`;
   const txt=await aiText(prompt,{retries:3,timeout:60000});
   if(!txt)return null;
   const out=new Array(test.questions.length).fill(null);
@@ -3132,7 +3154,7 @@ No JSON. No preamble. Begin output with ===Q1===.`;
     const block=m[1];
     const get=(tag)=>{const mm=block.match(new RegExp(`###${tag}###\\s*([\\s\\S]*?)(?=###L\\d+###|$)`,"i"));return (mm?.[1]||"").trim();};
     const levels={};
-    [10,20,30,40,50,60,70,80,90].forEach(l=>{const t=get("L"+l);if(t)levels[l]=t;});
+    [20,40,60,80,95].forEach(l=>{const t=get("L"+l);if(t)levels[l]=t;});
     if(Object.keys(levels).length){out[qi]={levels};}
   });
   return out;
@@ -4737,6 +4759,18 @@ async function weeklyTick(){
     }
   }
   applyPromotions();
+  // Subordinate perks (Senior+ TA, Master+ mentoring)
+  if(rankLevel()>=2){
+    const due=(state.homework||[]).filter(h=>!h.settled&&tickCounter()>=h.dueTick);
+    if(due.length){
+      settleHomework(due[0].id);
+      logActivity({type:"gossip",text:`Your TA quietly settled "${due[0].title}" for you.`});
+    }
+  }
+  if(rankLevel()>=3){
+    state.rep+=1;
+    logActivity({type:"gossip",text:`Mentoring session - a junior teacher thanks you. +1 rep.`});
+  }
 }
 
 function showQuarterCeremony(info){
