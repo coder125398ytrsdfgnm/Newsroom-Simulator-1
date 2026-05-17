@@ -1495,14 +1495,44 @@ function assignHomework(){
     </div>
     <div class="row">
       <label><input type="checkbox" id="hwAllClasses" ${state.classes.length>1?"":"disabled"}> Apply to all my classes</label>
-      <button onclick="aiSuggestHomework()" style="margin-left:auto">AI Suggest Topic</button>
+      <button onclick="aiSuggestHomework()" title="AI fills the title and instructions" style="margin-left:auto">AI Suggest Topic</button>
+      <button onclick="saveHwTemplate()" title="Save current homework as template">Save as Template</button>
     </div>
+    ${(state.homeworkTemplates||[]).length?`<div style="background:#1b1410;padding:.4em .6em;border-radius:6px;margin-top:.3em;font-size:.85em">
+      <b style="color:var(--accent)">Templates:</b>
+      ${state.homeworkTemplates.map((t,i)=>`<button class="reroll" onclick="loadHwTemplate(${i})" title="Load this template">${esc(t.title)}</button>`).join(" ")}
+    </div>`:""}
     <div class="row" style="justify-content:flex-end">
       <button onclick="closeModal()">Cancel</button>
       <button class="primary" onclick="submitHomework()">Assign</button>
     </div>
   </div>`;
   document.body.appendChild(m);m.onclick=e=>{if(e.target===m)closeModal();};
+}
+function saveHwTemplate(){
+  const title=document.getElementById("hwTitle").value.trim();
+  const body=document.getElementById("hwBody").value.trim();
+  if(!title||!body){toast("Fill title and body first.");return;}
+  state.homeworkTemplates=state.homeworkTemplates||[];
+  state.homeworkTemplates.push({
+    title,body,
+    type:document.getElementById("hwType").value,
+    difficulty:document.getElementById("hwDifficulty").value,
+    dueDays:document.getElementById("hwDue").value,
+    weight:document.getElementById("hwWeight").value
+  });
+  toast(`Template "${title}" saved.`);
+  closeModal();assignHomework();saveGame(false);
+}
+function loadHwTemplate(i){
+  const t=(state.homeworkTemplates||[])[i];if(!t)return;
+  document.getElementById("hwTitle").value=t.title;
+  document.getElementById("hwBody").value=t.body;
+  document.getElementById("hwType").value=t.type;
+  document.getElementById("hwDifficulty").value=t.difficulty;
+  document.getElementById("hwDue").value=t.dueDays;
+  document.getElementById("hwWeight").value=t.weight;
+  toast(`Loaded "${t.title}".`);
 }
 
 async function aiSuggestHomework(){
@@ -1638,22 +1668,42 @@ function viewPlanner(){
 function renderPlannerCell(week,dayIdx,classIdx,clsName,isPrimary){
   const key=planKey(week,dayIdx,classIdx);
   const acts=state.lessonPlan[key]||[];
+  // v1.0: conflict detection - quiz + lab same day = warning
+  const types=acts.map(a=>a.type);
+  const hasConflict=(types.includes("quiz")&&types.includes("practical"))||(types.filter(t=>t==="lecture").length>=2);
+  // v1.0: dots for test/homework due that day for this class
+  const cls=state.classes[classIdx];
+  const tickAt=week*5+dayIdx;
+  let dots="";
+  if(cls){
+    const testsDue=state.tests.filter(t=>{const a=t.assignments?.[classIdx];return a&&Object.values(a).some(x=>!x.scored);}).length;
+    const hwDue=(state.homework||[]).filter(h=>h.classIdx===classIdx&&!h.settled&&h.dueTick===tickAt).length;
+    if(testsDue||hwDue){
+      dots=`<div style="position:absolute;top:.2em;right:.2em;display:flex;gap:.2em">
+        ${hwDue?`<span style="width:8px;height:8px;background:var(--accent);border-radius:50%" title="${hwDue} homework due today"></span>`:""}
+        ${testsDue?`<span style="width:8px;height:8px;background:#5a8acc;border-radius:50%" title="${testsDue} test pending grade"></span>`:""}
+      </div>`;
+    }
+  }
   const inner=acts.map((a,ai)=>{
     const t=ACTIVITY_TYPES[a.type]||{label:a.type,color:"#888"};
     return `<div style="background:linear-gradient(135deg,${t.color}55,${t.color}22);border-left:4px solid ${t.color};padding:.4em .5em;margin:.25em 0;border-radius:5px;cursor:pointer;transition:transform .1s,box-shadow .1s;position:relative"
       onmouseover="this.style.transform='translateX(2px)';this.style.boxShadow='0 2px 6px rgba(0,0,0,.4)'"
       onmouseout="this.style.transform='';this.style.boxShadow=''"
-      onclick="editPlanCenter('${key}',${ai})">
-      <button onclick="event.stopPropagation();removePlanAct('${key}',${ai})" style="position:absolute;top:.2em;right:.2em;background:transparent;border:none;color:#888;font-size:.9em;cursor:pointer;padding:0 .3em">×</button>
+      onclick="editPlanCenter('${key}',${ai})"
+      title="Click to edit focus">
+      <button onclick="event.stopPropagation();removePlanAct('${key}',${ai})" style="position:absolute;top:.2em;right:.2em;background:transparent;border:none;color:#888;font-size:.9em;cursor:pointer;padding:0 .3em" title="Remove">×</button>
       <div style="font-size:.72em;color:${t.color};font-weight:bold;text-transform:uppercase;letter-spacing:.5px">${esc(t.label)}</div>
       <div style="font-size:.85em;font-weight:600;margin-top:.1em;font-style:${a.center?'normal':'italic'};opacity:${a.center?1:.7}">${esc(a.center||"click to add focus")}</div>
     </div>`;
   }).join("");
-  return `<div style="${isPrimary?'':'opacity:.6'};min-height:100px"
+  return `<div style="${isPrimary?'':'opacity:.6'};min-height:100px;position:relative"
     ondragover="event.preventDefault();this.style.background='#241a14'"
     ondragleave="this.style.background=''"
     ondrop="plannerDrop(event,'${key}')">
     ${state.classes.length>1?`<div style="font-size:.7em;opacity:.6;font-weight:bold">${esc(clsName)}</div>`:""}
+    ${dots}
+    ${hasConflict?`<div style="background:#3a1a14;color:#f7c948;padding:.2em .4em;border-radius:3px;font-size:.7em;margin-bottom:.2em" title="Quiz and practical on the same day is rough on the kids; or you've stacked too many lectures">⚠ conflict</div>`:""}
     ${inner||`<div style="font-style:italic;opacity:.4;font-size:.78em;padding:1em 0;text-align:center;border:2px dashed #3a2b20;border-radius:6px">drop activity here</div>`}
   </div>`;
 }
@@ -2181,6 +2231,17 @@ function openStudent(id,canAdminister){
       <div style="font-size:.8em;opacity:.7">Mood ${moodBar(s.mood,'#9b59ff')} ${s.mood.toFixed(0)}</div>
       <div style="font-size:.8em;opacity:.7;margin-top:.2em">Effort ${moodBar(s.effort,'#d9a441')} ${s.effort.toFixed(0)}</div>
     </div>
+    ${(()=>{
+      // v1.0: connector breakdown - show what's pushing effective ability up or down
+      const base=(s.ability*.7+s.effort*.2+s.mood*.1);
+      const eff=effectiveAbilityFor(s,{prompt:"",answer:""});
+      const delta=eff-base;
+      return `<div style="background:#1b1410;padding:.4em .7em;border-radius:6px;font-size:.8em;margin:.4em 0">
+        <div style="opacity:.7;text-transform:uppercase;letter-spacing:1px;font-size:.7em">Effective ability breakdown</div>
+        <div>Base <b>${base.toFixed(0)}</b> + connector <b style="color:${delta>=0?'var(--green)':'var(--red)'}">${delta>=0?"+":""}${delta.toFixed(1)}</b> = <b style="color:var(--accent)">${eff.toFixed(0)}</b></div>
+        <div style="font-size:.85em;opacity:.7">(connector = recent homework completion + 10-day attendance + lesson plan coverage on test topics)</div>
+      </div>`;
+    })()}
 
     ${s.flag?`<p style="color:var(--yellow);background:#241a14;padding:.5em;border-radius:4px"><b>Need:</b> ${esc(s.flag)} <button onclick="resolveNeed(${id})">Address</button></p>`:""}
 
@@ -2764,12 +2825,50 @@ function viewCardRecord(){
   const all=[];
   currentClass().students.forEach(s=>s.cards.forEach(c=>all.push({s,c})));
   all.sort((a,b)=>b.c.week-a.c.week);
+  state._cardFilter=state._cardFilter||{color:"all",giver:"all"};
+  const f=state._cardFilter;
+  const filtered=all.filter(({c})=>{
+    if(f.color!=="all"&&c.color!==f.color)return false;
+    const mine=c.by===(state.title||"Ms.")+" "+state.name;
+    if(f.giver==="me"&&!mine)return false;
+    if(f.giver==="others"&&mine)return false;
+    return true;
+  });
+  // Stats per color and giver
+  const stats={green:0,yellow:0,purple:0,mine:0,others:0};
+  all.forEach(({c})=>{
+    stats[c.color]++;
+    if(c.by===(state.title||"Ms.")+" "+state.name)stats.mine++;else stats.others++;
+  });
   return `<h2>Card Record - ${currentClass().name}</h2>
-    <p class="muted">Read-only view of cards issued by other teachers.</p>
+    <p class="muted">Every card issued in this class.</p>
+    <div style="display:flex;gap:1em;background:#1b1410;padding:.5em .8em;border-radius:6px;margin-bottom:.5em;font-size:.85em">
+      <span>Total: <b>${all.length}</b></span>
+      <span style="color:var(--green)">🟢 ${stats.green}</span>
+      <span style="color:var(--yellow)">🟡 ${stats.yellow}</span>
+      <span style="color:var(--purple)">🟣 ${stats.purple}</span>
+      <span>By you: <b>${stats.mine}</b></span>
+      <span>By NPCs: <b>${stats.others}</b></span>
+    </div>
+    <div class="row" style="margin-bottom:.5em">
+      <label>Color: <select onchange="state._cardFilter.color=this.value;showView('cards')">
+        <option value="all" ${f.color==="all"?"selected":""}>All</option>
+        <option value="green" ${f.color==="green"?"selected":""}>Green</option>
+        <option value="yellow" ${f.color==="yellow"?"selected":""}>Yellow</option>
+        <option value="purple" ${f.color==="purple"?"selected":""}>Purple</option>
+      </select></label>
+      <label>Giver: <select onchange="state._cardFilter.giver=this.value;showView('cards')">
+        <option value="all" ${f.giver==="all"?"selected":""}>All</option>
+        <option value="me" ${f.giver==="me"?"selected":""}>By me</option>
+        <option value="others" ${f.giver==="others"?"selected":""}>By other teachers</option>
+      </select></label>
+      <small class="muted">Showing ${filtered.length} of ${all.length}</small>
+    </div>
     <table><thead><tr><th>Week</th><th>Student</th><th>Card</th><th>Reason</th><th>By</th></tr></thead>
-    <tbody>${all.map(({s,c})=>`<tr><td>${c.week}</td><td>${s.name}</td>
+    <tbody>${filtered.map(({s,c})=>`<tr class="clickable" onclick="openStudent(${s.id},${state.role==='subject'})">
+      <td>${c.week}</td><td>${s.name}</td>
       <td><span class="pill ${c.color[0]}">${c.color}</span></td>
-      <td>${esc(c.reason)}</td><td>${esc(c.by)}</td></tr>`).join("")||"<tr><td colspan=5><i>No cards yet.</i></td></tr>"}</tbody></table>`;
+      <td>${esc(c.reason)}</td><td>${esc(c.by)}</td></tr>`).join("")||"<tr><td colspan=5><i>No cards matching filters.</i></td></tr>"}</tbody></table>`;
 }
 function viewNeeds(){
   const c=currentClass();
