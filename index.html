@@ -369,7 +369,7 @@
 // STATE
 // ============================================================
 const DAYS=["Mon","Tue","Wed","Thu","Fri"];
-const VERSION="0.8";
+const VERSION="1.0";
 const SAVE_KEY="chalkdust:save";
 
 // ============ AI helpers (single point for the no-placeholder rule) ============
@@ -777,7 +777,18 @@ async function _newCareerImpl(role,name,subject,className,ov,title){
     quarterAverages:[null,null,null,null],
     contacts:[],messages:[],missions:[],
     selectedContact:null,lastMsgWeek:0,
-    activity:[],npcTeachers:teachers,pendingReplies:[]
+    activity:[],npcTeachers:teachers,pendingReplies:[],
+    // v1.0 additions
+    drafts:{},                  // {contactId: text} - reply drafts persist across views
+    archivedContacts:{},        // {contactId: true}
+    starredContacts:{},         // {contactId: true}
+    achievements:{},            // {achievementId: {unlockedWeek, year}}
+    settings:{typewriter:true,animSpeed:"normal"},
+    testTemplates:[],
+    homeworkTemplates:[],
+    planTemplates:[],
+    quarterComments:{},         // {quarterNumber:{studentId: comment}}
+    contextualTriggersDone:{}   // dedupe one-time triggers
   };
   await seedContacts();
   ov.setProgress(100);
@@ -905,6 +916,8 @@ function buildNav(){
   html+=`<div class="heading">Reports</div>`;
   if(role==="tutor")html+=navBtn("grades","Quarterly Grades");
   html+=navBtn("activity","Staffroom Feed");
+  html+=navBtn("achievements","Achievements");
+  html+=navBtn("settings","Settings");
   html+=`<div class="heading">Comms</div>`;
   html+=navBtn("messages","Messages"+msgBadge);
   html+=navBtn("missions","Missions"+misBadge);
@@ -943,6 +956,8 @@ function showView(v){
   else if(v==="messages")host.innerHTML=viewMessages();
   else if(v==="missions")host.innerHTML=viewMissions();
   else if(v==="activity")host.innerHTML=viewActivity();
+  else if(v==="achievements")host.innerHTML=viewAchievements();
+  else if(v==="settings")host.innerHTML=viewSettings();
   else if(v==="homework")host.innerHTML=viewHomework();
   else if(v==="planner")host.innerHTML=viewPlanner();
 }
@@ -2097,6 +2112,15 @@ function openStudent(id,canAdminister){
   const canDetain=canAdminister && rankLevel()>=1;     // Junior+
   const canHonors=canAdminister && rankLevel()>=2;     // Senior+
   const canConference=rankLevel()>=3;                  // Master+
+  // v1.0: contextual action chips - special options when game state triggers them
+  const ctxActions=getContextualActions(s);
+  const ctxBlock=ctxActions.length?`<div style="background:linear-gradient(135deg,#3a2b20,#241a14);border:2px solid var(--accent);border-radius:8px;padding:.6em .8em;margin:.6em 0">
+    <div style="font-size:.75em;text-transform:uppercase;letter-spacing:1.2px;color:var(--accent);margin-bottom:.4em">⚡ Situational actions</div>
+    ${ctxActions.map(a=>`<button onclick="window['__ctx_${a.key}'](${id})" title="${esc(a.desc)}" style="margin:.2em .3em .2em 0;background:#5a4028;color:#f3e7d3;padding:.5em .8em;border:1px solid var(--accent);border-radius:6px;cursor:pointer">${a.icon} ${esc(a.label)}</button>`).join("")}
+    <div style="font-size:.78em;opacity:.7;margin-top:.3em;font-style:italic">${esc(ctxActions[0].desc)}</div>
+  </div>`:"";
+  // Wire the run functions to globals so the inline onclick can reach them
+  ctxActions.forEach(a=>{window["__ctx_"+a.key]=()=>{a.run();};});
   const adminBtns=canAdminister?`
     <h3>Issue a card</h3>
     <div class="row">
@@ -2170,6 +2194,7 @@ function openStudent(id,canAdminister){
     ${recent.length?`<h3>Recent activity</h3>
       <ul style="max-height:100px;overflow:auto;font-size:.85em">${recent.map(r=>`<li>Wk ${r.week} ${r.day}: ${esc(r.text)}</li>`).join("")}</ul>`:""}
 
+    ${ctxBlock}
     ${adminBtns}
 
     <h3>Private notes</h3>
@@ -2783,18 +2808,24 @@ function viewBuilder(){
           <option value="test" ${(d.kind||"test")==="test"?"selected":""}>Test (full weight)</option>
         </select>
       </label>
-      <button onclick="aiSuggest()">AI Suggest Question</button>
-      <button onclick="previewTest()">Preview</button>
-      <button onclick="clearDraft()" style="background:#3a1a14">Clear</button>
-      <button class="primary" onclick="saveTest()">Save</button>
+      <button onclick="aiSuggest()" title="AI drafts a question on your subject">AI Suggest Question</button>
+      <button onclick="previewTest()" title="See the test as students will">Preview</button>
+      <button onclick="saveAsTemplate()" title="Save this draft for reuse later">Save as Template</button>
+      <button onclick="clearDraft()" style="background:#3a1a14" title="Discard the draft">Clear</button>
+      <button class="primary" onclick="saveTest()" title="Save as a real test">Save</button>
     </div>
+    ${(state.testTemplates||[]).length?`<div style="background:#1b1410;padding:.5em .7em;border-radius:6px;margin-bottom:.5em;font-size:.85em">
+      <b style="color:var(--accent)">Templates:</b>
+      ${state.testTemplates.map((t,i)=>`<button class="reroll" onclick="loadTemplate(${i})" title="Load this template into the draft">${esc(t.title)} (${t.questions.length}q)</button>`).join(" ")}
+      ${state.testTemplates.length?`<button class="reroll" onclick="clearTemplates()" style="float:right;background:#3a1a14;color:#fff" title="Remove all templates">clear</button>`:""}
+    </div>`:""}
     <div class="builder">
       <div class="palette"><h3>Question Blocks</h3>
-        <div class="block" draggable="true" data-type="mc">Multiple Choice</div>
-        <div class="block" draggable="true" data-type="tf">True / False</div>
-        <div class="block" draggable="true" data-type="sa">Short Answer</div>
-        <div class="block" draggable="true" data-type="fib">Fill-in-the-Blank</div>
-        <div class="block" draggable="true" data-type="es">Essay</div>
+        <div class="block" draggable="true" data-type="mc" title="Single correct answer from multiple options">Multiple Choice</div>
+        <div class="block" draggable="true" data-type="tf" title="True or False">True / False</div>
+        <div class="block" draggable="true" data-type="sa" title="One-sentence answer">Short Answer</div>
+        <div class="block" draggable="true" data-type="fib" title="Fill in the missing word">Fill-in-the-Blank</div>
+        <div class="block" draggable="true" data-type="es" title="Multi-sentence response">Essay</div>
       </div>
       <div class="canvas">
         <h3 id="canvasTitle">${esc(state.draftTest.title)}</h3>
@@ -2920,6 +2951,38 @@ function esc(s){return String(s==null?"":s).replace(/[<>"&]/g,c=>({"<":"&lt;",">
 function upd(i,k,v){state.draftTest.questions[i][k]=v;}
 function updOpt(i,j,v){state.draftTest.questions[i].options[j]=v;}
 function rmQ(i){state.draftTest.questions.splice(i,1);renderDraft();}
+function saveAsTemplate(){
+  if(!state.draftTest.questions.length){toast("Add at least one question first.");return;}
+  state.testTemplates=state.testTemplates||[];
+  const name=prompt("Template name:",state.draftTest.title||"Template");
+  if(!name)return;
+  state.testTemplates.push({
+    title:name,
+    scale:state.draftTest.scale,
+    weight:state.draftTest.weight,
+    kind:state.draftTest.kind,
+    questions:JSON.parse(JSON.stringify(state.draftTest.questions))
+  });
+  toast(`Template "${name}" saved.`);
+  showView("builder");saveGame(false);
+}
+function loadTemplate(i){
+  const t=(state.testTemplates||[])[i];if(!t)return;
+  if(state.draftTest.questions.length && !confirm("Replace current draft with template?"))return;
+  state.draftTest={
+    title:t.title+" (copy)",
+    scale:t.scale||"percent",
+    weight:t.weight||1.0,
+    kind:t.kind||"test",
+    questions:JSON.parse(JSON.stringify(t.questions))
+  };
+  toast(`Loaded "${t.title}".`);
+  showView("builder");
+}
+function clearTemplates(){
+  if(!confirm("Remove all saved templates?"))return;
+  state.testTemplates=[];showView("builder");saveGame(false);
+}
 function saveTest(){
   if(!state.draftTest.questions.length){toast("Add at least one question.");return;}
   const id=state.tests.length+1;
@@ -3013,16 +3076,33 @@ function fmtScore(pct,scale){
 // TESTS - administer (students take it)
 // ============================================================
 function viewTests(){
-  if(!state.tests.length)return `<h2>Tests</h2><p><i>No tests built. Open Test Builder.</i></p>`;
+  if(!state.tests.length)return `<h2>Tests</h2>${classPicker()}
+    <div style="background:#1b1410;border-left:3px solid var(--accent);padding:.8em 1em;border-radius:6px;text-align:center">
+      <p><b>No tests built yet.</b></p>
+      <p class="muted">Head to <button class="reroll" onclick="showView('builder')">Test Builder</button> to draft your first.</p>
+    </div>`;
   return `<h2>Tests</h2>${classPicker()}
-    <table><thead><tr><th>Title</th><th>Type</th><th>Questions</th><th>Weight</th><th>Status</th><th></th></tr></thead>
+    <table><thead><tr><th>Title</th><th>Type</th><th>Questions</th><th>Weight</th><th>Status</th><th>Distribution</th><th></th></tr></thead>
     <tbody>${state.tests.map(t=>{
       const a=t.assignments[state.activeClassIdx];
       const status=!a?"Not given":Object.values(a).every(x=>x.scored)?"Graded":"Awaiting grading";
       const kind=(t.kind||"test")==="quiz"?"<span class='pill g'>Quiz</span>":"<span class='pill p'>Test</span>";
-      return `<tr><td>${esc(t.title)}</td><td>${kind}</td><td>${t.questions.length}</td><td>${t.weight.toFixed(1)}x</td><td>${status}</td>
-        <td>${!a?`<button class="primary" onclick="administer(${t.id})">Administer to ${currentClass().name}</button>`:
-          status==="Awaiting grading"?`<button class="primary" onclick="showView('grading')">Grade</button>`:`<small class="muted">done</small>`}</td></tr>`;
+      // v1.0: score distribution histogram
+      let distHtml="<small class='muted'>-</small>";
+      if(a){
+        const scored=Object.values(a).filter(x=>x.scored);
+        if(scored.length){
+          const buckets=[0,0,0,0,0];
+          scored.forEach(x=>{const b=Math.min(4,Math.floor(x.score/20));buckets[b]++;});
+          const max=Math.max(...buckets,1);
+          distHtml=`<div style="display:flex;align-items:flex-end;gap:1px;height:24px" title="0-20 / 21-40 / 41-60 / 61-80 / 81-100">
+            ${buckets.map((n,i)=>{const h=Math.max(2,n/max*22);const c=["#e26464","#f7c948","#d9a441","#a3c163","#4caf50"][i];return `<div style="width:8px;height:${h}px;background:${c}" title="${n} students"></div>`;}).join("")}
+          </div>`;
+        }
+      }
+      return `<tr><td>${esc(t.title)}</td><td>${kind}</td><td>${t.questions.length}</td><td>${t.weight.toFixed(1)}x</td><td>${status}</td><td>${distHtml}</td>
+        <td>${!a?`<button class="primary" onclick="administer(${t.id})" title="Run the test for the active class">Administer to ${currentClass().name}</button>`:
+          status==="Awaiting grading"?`<button class="primary" onclick="showView('grading')" title="Open the grading view">Grade</button>`:`<small class="muted">done</small>`}</td></tr>`;
     }).join("")}</tbody></table>`;
 }
 
@@ -3055,6 +3135,8 @@ async function administer(testId){
 // Typewriter effect: types `text` into a DOM element. Returns when done.
 async function typewriterInto(el,text){
   if(!el||!text)return;
+  // Honor settings: instant display if typewriter is turned off.
+  if(state?.settings?.typewriter===false){el.textContent=text;return;}
   el.textContent="";
   el.classList.add("typing");
   // Hide the caret while idle text; show during typing.
@@ -3483,7 +3565,9 @@ function viewGrading(){
       onclick="state.gradingPage=${i};showView('grading')" title="${esc(st.name)}${ss.scored?' - '+fmtScore(ss.score,t.scale):''}">${i+1}${dot}</button>`;
   }).join("");
   return `<h2>Grading - "${esc(t.title)}" (${cls.name})
-    <small class="muted">Scale: ${SCALES.find(x=>x.key===t.scale)?.label||t.scale} · Weight: ${t.weight.toFixed(1)}x · Class avg so far: ${classScored.length?fmtScore(classAvg,t.scale):"-"} (${classScored.length}/${cls.students.length} returned)</small></h2>
+    <small class="muted">Scale: ${SCALES.find(x=>x.key===t.scale)?.label||t.scale} · Weight: ${t.weight.toFixed(1)}x · Class avg so far: ${classScored.length?fmtScore(classAvg,t.scale):"-"} (${classScored.length}/${cls.students.length} returned)</small>
+    <button onclick="aiMarkClass(${t.id})" style="float:right;margin-left:.3em" title="AI marks every unscored paper in ONE call - review before returning">AI Mark Class</button>
+    </h2>
     ${classPicker()}
     <p class="muted">Flip through each paper with the arrows, or jump using the buttons below. Score every question, then return the test.</p>
     ${(()=>{
@@ -3560,6 +3644,63 @@ Return ONLY a JSON array of integers, length ${t.questions.length}. Example: [85
     if(!isNaN(v))sub.perQ[i]=Math.max(0,Math.min(100,v));
   });
   toast("AI suggested scores. Review and adjust before returning.");
+  showView("grading");
+}
+
+// v1.0: AI Mark Class - batch-marks every unscored paper in ONE combined AI call.
+async function aiMarkClass(testId){
+  const t=state.tests.find(x=>x.id===testId);if(!t)return;
+  const asn=t.assignments[state.activeClassIdx];if(!asn)return;
+  const cls=currentClass();
+  const targets=cls.students.filter(s=>!asn[s.id]?.scored&&!asn[s.id]?.absent);
+  if(!targets.length){toast("Nothing left to mark.");return;}
+  const ov=showBusy(`AI marking ${targets.length} papers`);beginCritical("AI marking class");
+  // Build a compact prompt: question rubrics + per-student answers per question.
+  const rubric=t.questions.map((q,i)=>{
+    let key="";
+    if(q.type==="mc")key=`correct: ${q.options[q.correct]||"?"}`;
+    else if(q.type==="tf")key=`correct: ${q.correct===0?"True":"False"}`;
+    else key=`rubric: ${q.answer||"open-ended"}`;
+    return `Q${i+1} [${q.type}]: ${q.prompt} | ${key}`;
+  }).join("\n");
+  const answers=targets.map((s,i)=>{
+    const sub=asn[s.id];
+    const lines=t.questions.map((q,qi)=>{
+      const a=sub.answers[qi]||{};
+      if(q.type==="mc")return `Q${qi+1}: ${q.options[a.pick]||"(none)"}`;
+      if(q.type==="tf")return `Q${qi+1}: ${a.pick===0?"True":"False"}`;
+      return `Q${qi+1}: ${(a.text||"(blank)").slice(0,140)}`;
+    }).join(" || ");
+    return `Student ${i+1}: ${lines}`;
+  }).join("\n");
+  const prompt=`Mark these student exam papers. Be fair and consistent.
+
+Questions and rubrics:
+${rubric}
+
+Student answers (one line per student):
+${answers}
+
+For EACH student, output one line with their per-question scores 0-100 separated by pipes:
+###1### 85|60|70
+###2### 40|55|50
+... and so on for all ${targets.length} students.
+
+No JSON. No preamble. Begin with ###1###.`;
+  const txt=await aiText(prompt,{retries:3,timeout:50000});
+  ov.close();endCritical();
+  if(!txt){toast("AI couldn't mark - try again or grade manually.");return;}
+  const lines=parseDelimited(txt,targets.length);
+  let count=0;
+  targets.forEach((s,i)=>{
+    const line=lines[i];if(!line)return;
+    const scores=line.split("|").map(x=>parseInt(x)).filter(x=>!isNaN(x));
+    if(scores.length===t.questions.length){
+      asn[s.id].perQ=scores.map(x=>Math.max(0,Math.min(100,x)));
+      count++;
+    }
+  });
+  toast(`AI marked ${count} papers. Review and return.`);
   showView("grading");
 }
 
@@ -3905,52 +4046,81 @@ async function tickMessages(weekly){
 // ============================================================
 function viewMessages(){
   if(!state.contacts.length){
-    return `<h2>Messages</h2><p class="muted"><i>Inbox empty. People will reach out as the year goes on.</i></p>`;
+    return `<h2>Messages</h2><p class="muted"><i>Inbox empty. People will reach out as the year goes on. Tip: parents usually write within the first two weeks.</i></p>`;
+  }
+  state.drafts=state.drafts||{};
+  state.archivedContacts=state.archivedContacts||{};
+  state.starredContacts=state.starredContacts||{};
+  state._msgSearch=state._msgSearch||"";
+  const search=state._msgSearch.toLowerCase().trim();
+  // Filter contacts based on search query (subject + body match)
+  let visibleIds=null;
+  if(search){
+    visibleIds=new Set();
+    state.messages.forEach(m=>{
+      if((m.subject||"").toLowerCase().includes(search)||(m.body||"").toLowerCase().includes(search)){
+        visibleIds.add(m.contactId);
+      }
+    });
+    state.contacts.forEach(c=>{
+      if(c.name.toLowerCase().includes(search))visibleIds.add(c.id);
+    });
   }
   const sel=state.selectedContact||state.contacts[0].id;
   state.selectedContact=sel;
-  // Group contacts by kind
+  // Group: Starred, Parents, Students, Colleagues, School/HR, Archived
+  const isArchived=cid=>!!state.archivedContacts[cid];
+  const isStarred=cid=>!!state.starredContacts[cid];
+  const filterVisible=(c)=>!visibleIds||visibleIds.has(c.id);
   const groups={
-    "Parents":state.contacts.filter(c=>c.kind==="parent"),
-    "Students":state.contacts.filter(c=>c.kind==="student"),
-    "Colleagues":state.contacts.filter(c=>c.kind==="staff" && !["c-principal","c-hr"].includes(c.id)),
-    "School / HR":state.contacts.filter(c=>c.kind==="staff" && ["c-principal","c-hr"].includes(c.id))
+    "Starred":state.contacts.filter(c=>isStarred(c.id)&&!isArchived(c.id)&&filterVisible(c)),
+    "Parents":state.contacts.filter(c=>c.kind==="parent"&&!isArchived(c.id)&&!isStarred(c.id)&&filterVisible(c)),
+    "Students":state.contacts.filter(c=>c.kind==="student"&&!isArchived(c.id)&&!isStarred(c.id)&&filterVisible(c)),
+    "Colleagues":state.contacts.filter(c=>c.kind==="staff"&&!["c-principal","c-hr"].includes(c.id)&&!isArchived(c.id)&&!isStarred(c.id)&&filterVisible(c)),
+    "School / HR":state.contacts.filter(c=>c.kind==="staff"&&["c-principal","c-hr"].includes(c.id)&&!isArchived(c.id)&&!isStarred(c.id)&&filterVisible(c)),
+    "Archived":state.contacts.filter(c=>isArchived(c.id)&&filterVisible(c))
   };
-  state._msgGroups=state._msgGroups||{};
+  state._msgGroups=state._msgGroups||{Archived:false};
   const renderGroup=(label,arr)=>{
     if(!arr.length)return "";
     const open=state._msgGroups[label]!==false;
     const unreadCount=arr.reduce((a,c)=>a+state.messages.filter(m=>m.contactId===c.id&&!m.fromMe&&!m.read).length,0);
+    const star=label==="Starred"?"★ ":"";
     return `<div style="border-bottom:1px solid #3a2b20">
       <div onclick="state._msgGroups['${label}']=!(${open});showView('messages')"
         style="padding:.4em .6em;cursor:pointer;background:#1b1410;font-size:.8em;text-transform:uppercase;letter-spacing:1px;color:var(--accent);display:flex;justify-content:space-between;align-items:center">
-        <span>${open?"▾":"▸"} ${esc(label)} (${arr.length})</span>
-        ${unreadCount?`<span class="badge">${unreadCount}</span>`:""}
+        <span>${open?"▾":"▸"} ${star}${esc(label)} (${arr.length})</span>
+        ${unreadCount?`<span class="badge urgent">${unreadCount}</span>`:""}
       </div>
       ${open?arr.sort((a,b)=>lastMsgWeek(b)-lastMsgWeek(a)).map(c=>{
         const last=lastMsgFor(c.id);
         const unread=state.messages.filter(m=>m.contactId===c.id&&!m.fromMe&&!m.read).length;
-        return `<div class="contact-row ${c.id===sel?"sel":""}" onclick="selectContact('${c.id}')">
-          <div class="who">${unread?'<span class="dot"></span>':""}${esc(c.name)} ${unread?`<span class="badge">${unread}</span>`:""}</div>
-          <div class="preview">${esc(c.relation)} · ${last?esc(last.subject):"-"}</div>
+        // Pulsing badge if 3+ unreplied messages from this contact
+        const myReplies=state.messages.filter(m=>m.contactId===c.id&&m.fromMe).length;
+        const inbound=state.messages.filter(m=>m.contactId===c.id&&!m.fromMe).length;
+        const urgent=inbound-myReplies>=3;
+        return `<div class="contact-row ${c.id===sel?"sel":""}" onclick="selectContact('${c.id}')"
+          ${urgent?'style="border-left:3px solid var(--red)"':""}>
+          <div class="who">${unread?'<span class="dot"></span>':""}${isStarred(c.id)?"★ ":""}${esc(c.name)} ${unread?`<span class="badge">${unread}</span>`:""}</div>
+          <div class="preview">${esc(c.relation)} · ${last?esc(last.subject||last.body.slice(0,40)):"-"}</div>
         </div>`;
       }).join(""):""}
     </div>`;
   };
-  const contactRows=Object.entries(groups).map(([k,v])=>renderGroup(k,v)).join("");
+  const contactRows=Object.entries(groups).map(([k,v])=>renderGroup(k,v)).join("")||"<p style='padding:1em;font-size:.85em' class='muted'>No matches.</p>";
   const thread=state.messages.filter(m=>m.contactId===sel).sort((a,b)=>a.week-b.week||DAYS.indexOf(a.day)-DAYS.indexOf(b.day));
   thread.forEach(m=>{if(!m.fromMe)m.read=true;});
   const c=state.contacts.find(x=>x.id===sel);
   const linkedMissions=state.missions.filter(m=>m.contactId===sel);
-  // Find the most recent inbound message - that's where we show quick actions.
   const lastInbound=[...thread].reverse().find(m=>!m.fromMe);
+  // Conversation summary - local synthesis, no AI
+  const summary=buildThreadSummary(c,thread);
   const bubbles=thread.map(m=>{
     const isLastInbound=m===lastInbound;
     let actions="";
     if(isLastInbound && !m.fromMe){
-      // Build quick-action buttons based on contact kind
       const acts=[];
-      acts.push(`<button class="reroll" onclick="quickReplyTo('${c.id}')">↩ Reply</button>`);
+      acts.push(`<button class="reroll" onclick="quickReplyTo('${c.id}')" title="Focus the reply box">↩ Reply</button>`);
       if(c.studentId!=null && state.role==="subject"){
         acts.push(`<button class="reroll" onclick="openStudent(${c.studentId},true)">Open ${esc(c.kind==='student'?c.name.split(' ')[0]:findStudent(c.studentId)?.first||'student')}</button>`);
         if(rankLevel()>=1)acts.push(`<button class="reroll" onclick="scheduleDetention(${c.studentId})">Detention</button>`);
@@ -3960,7 +4130,7 @@ function viewMessages(){
       }
       actions=`<div style="margin-top:.4em;display:flex;gap:.3em;flex-wrap:wrap">${acts.join("")}</div>`;
     }
-    return `<div class="bubble ${m.fromMe?"mine":""}">
+    return `<div class="bubble ${m.fromMe?"mine":""}" title="Wk ${m.week} ${m.day}">
       <div class="sender">${m.fromMe?"You":esc(c.name)} · Wk ${m.week} ${m.day}${m.subject?" · "+esc(m.subject):""}</div>
       ${esc(m.body)}
       ${actions}
@@ -3970,22 +4140,60 @@ function viewMessages(){
     `<div style="padding:.5em 1em;background:#1b1410;border-bottom:1px solid #3a2b20">
       ${linkedMissions.map(m=>renderMission(m)).join("")}
     </div>`:"";
+  const draftText=state.drafts[sel]||"";
+  // Canned reply templates
+  const cannedReplies=[
+    "Thanks for letting me know - I'll keep an eye on this.",
+    "I appreciate you reaching out. Let's discuss further at the next opportunity.",
+    "Noted. I'll follow up with more details shortly.",
+    "Thank you for your patience. I'll address this directly."
+  ];
   return `<h2>Messages
-    <button onclick="openComposeStudent()" style="float:right;margin-left:.3em">Compose to Student</button>
-    <button onclick="openComposeTeacher()" style="float:right">Compose to Colleague</button>
+    <button onclick="openComposeStudent()" style="float:right;margin-left:.3em" title="Write to a student">Compose to Student</button>
+    <button onclick="openComposeTeacher()" style="float:right" title="Write to a colleague">Compose to Colleague</button>
     </h2>
+    <div style="margin-bottom:.5em">
+      <input id="msgSearch" type="text" placeholder="Search messages..." value="${esc(search)}"
+        oninput="state._msgSearch=this.value;clearTimeout(state._searchT);state._searchT=setTimeout(()=>showView('messages'),250)" style="width:100%">
+    </div>
     <div class="msg-layout">
       <div class="contacts-list">${contactRows}</div>
       <div class="thread">
-        <div class="head"><b>${esc(c.name)}</b> <small class="muted">- ${esc(c.relation)}</small></div>
+        <div class="head" style="display:flex;justify-content:space-between;align-items:center">
+          <div><b>${esc(c.name)}</b> <small class="muted">- ${esc(c.relation)}</small></div>
+          <div>
+            <button class="reroll" onclick="toggleStarContact('${c.id}')" title="${isStarred(c.id)?'Unstar':'Star'}">${isStarred(c.id)?"★":"☆"}</button>
+            <button class="reroll" onclick="toggleArchiveContact('${c.id}')" title="${isArchived(c.id)?'Unarchive':'Archive'}">${isArchived(c.id)?"unarchive":"archive"}</button>
+          </div>
+        </div>
+        <div style="padding:.3em .8em;background:#0e0a07;font-size:.78em;font-style:italic;color:var(--muted);border-bottom:1px solid #3a2b20">${esc(summary)}</div>
         ${missionsHtml}
         <div class="scroll">${bubbles||"<div class='bubble system'>No messages yet.</div>"}</div>
+        <div style="padding:.3em .5em .1em;background:#1b1410;border-top:1px solid #3a2b20;display:flex;flex-wrap:wrap;gap:.2em">
+          ${cannedReplies.map(r=>`<button class="reroll" onclick="cannedSend('${c.id}',${JSON.stringify(r).replace(/"/g,'&quot;')})" title="Send instantly with no typing" style="font-size:.7em">${esc(r.slice(0,28))}...</button>`).join("")}
+        </div>
         <div class="reply-box">
-          <textarea id="replyBody" placeholder="Type your reply..."></textarea>
+          <textarea id="replyBody" placeholder="Type your reply..." oninput="state.drafts['${c.id}']=this.value">${esc(draftText)}</textarea>
           <button class="primary" onclick="sendReply()">Send</button>
         </div>
       </div>
     </div>`;
+}
+function buildThreadSummary(c,thread){
+  if(!thread.length)return `${c.name}, ${c.relation}. No messages yet.`;
+  const inbound=thread.filter(m=>!m.fromMe).length;
+  const outbound=thread.filter(m=>m.fromMe).length;
+  const last=thread[thread.length-1];
+  return `${c.name}, ${c.relation}. ${inbound} in, ${outbound} out. Last: wk ${last.week} ${last.day}${last.subject?" - "+last.subject:""}.`;
+}
+function toggleStarContact(cid){state.starredContacts[cid]=!state.starredContacts[cid];if(!state.starredContacts[cid])delete state.starredContacts[cid];showView("messages");}
+function toggleArchiveContact(cid){state.archivedContacts[cid]=!state.archivedContacts[cid];if(!state.archivedContacts[cid])delete state.archivedContacts[cid];showView("messages");}
+function cannedSend(cid,body){
+  state.selectedContact=cid;
+  const ta=document.getElementById("replyBody");
+  if(ta)ta.value=body;
+  state.drafts[cid]=body;
+  sendReply();
 }
 function lastMsgFor(cid){const m=state.messages.filter(x=>x.contactId===cid);return m[m.length-1];}
 function lastMsgWeek(c){const m=lastMsgFor(c.id);return m?m.week*10+DAYS.indexOf(m.day):0;}
@@ -4006,6 +4214,8 @@ function sendReply(){
     subject:"(reply)",body,week:state.week,day:DAYS[state.dayIdx],read:true});
   checkReplyMissions(cid);
   ta.value="";
+  // Clear the saved draft for this contact.
+  if(state.drafts)delete state.drafts[cid];
   showView("messages");buildNav();
   toast("Reply sent.");
   evaluatePlayerMessage(body,c);
@@ -4835,6 +5045,7 @@ async function weeklyTick(){
     }
   }
   applyPromotions();
+  checkAchievements();
   // Subordinate perks (Senior+ TA, Master+ mentoring)
   if(rankLevel()>=2){
     const due=(state.homework||[]).filter(h=>!h.settled&&tickCounter()>=h.dueTick);
@@ -4877,6 +5088,285 @@ function toast(msg){
   document.body.appendChild(t);setTimeout(()=>t.remove(),3000);
 }
 window.addEventListener("DOMContentLoaded",refreshContinueButton);
+
+// ============================================================
+// v1.0 - VIEWS: ACHIEVEMENTS + SETTINGS
+// ============================================================
+function viewAchievements(){
+  state.achievements=state.achievements||{};
+  const unlocked=ACHIEVEMENTS.filter(a=>state.achievements[a.id]);
+  const locked=ACHIEVEMENTS.filter(a=>!state.achievements[a.id]);
+  return `<h2>Achievements <small class="muted">${unlocked.length} of ${ACHIEVEMENTS.length}</small></h2>
+    <p class="muted">Milestones you've reached. They unlock automatically.</p>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:.6em;margin-top:.6em">
+      ${unlocked.map(a=>{
+        const u=state.achievements[a.id];
+        return `<div style="background:linear-gradient(135deg,#3a2b20,#241a14);border:1px solid var(--accent);border-radius:8px;padding:.6em;box-shadow:0 2px 6px rgba(0,0,0,.4)">
+          <div style="font-size:.7em;color:var(--accent);text-transform:uppercase;letter-spacing:1px">Unlocked Y${u.year} Wk${u.unlockedWeek}</div>
+          <div style="font-weight:bold;margin:.2em 0">${esc(a.label)}</div>
+          <div style="font-size:.78em;opacity:.75;font-style:italic">${esc(a.flavor)}</div>
+        </div>`;
+      }).join("")}
+      ${locked.map(a=>{
+        return `<div style="background:#1b1410;border:1px dashed #555;border-radius:8px;padding:.6em;opacity:.55">
+          <div style="font-size:.7em;text-transform:uppercase;letter-spacing:1px;opacity:.6">Locked</div>
+          <div style="font-weight:bold;margin:.2em 0">${esc(a.label)}</div>
+          <div style="font-size:.78em;opacity:.7">???</div>
+        </div>`;
+      }).join("")}
+    </div>`;
+}
+function viewSettings(){
+  state.settings=state.settings||{typewriter:true,animSpeed:"normal"};
+  const s=state.settings;
+  return `<h2>Settings</h2>
+    <div style="max-width:600px">
+      <h3>Performance</h3>
+      <label style="display:block;margin:.4em 0">
+        <input type="checkbox" ${s.typewriter?"checked":""} onchange="state.settings.typewriter=this.checked;saveGame(false)">
+        Typewriter effect for AI-generated text (off = instant text)
+      </label>
+      <label style="display:block;margin:.4em 0">
+        Animation speed:
+        <select onchange="state.settings.animSpeed=this.value;document.body.style.setProperty('--anim-speed',this.value==='off'?'0s':this.value==='fast'?'.15s':this.value==='slow'?'.6s':'.3s');saveGame(false)">
+          <option value="off" ${s.animSpeed==="off"?"selected":""}>Off</option>
+          <option value="fast" ${s.animSpeed==="fast"?"selected":""}>Fast</option>
+          <option value="normal" ${s.animSpeed==="normal"||!s.animSpeed?"selected":""}>Normal</option>
+          <option value="slow" ${s.animSpeed==="slow"?"selected":""}>Slow</option>
+        </select>
+      </label>
+      <button onclick="clearAICache()" title="Clears AI response cache - next prompts will fire fresh">Clear AI Cache</button>
+      <h3 style="margin-top:1em">Save</h3>
+      <div class="row">
+        <button onclick="exportSave()">Export Save (download)</button>
+        <button onclick="importSave()">Import Save (upload)</button>
+        <button onclick="resetSave()" style="background:var(--red);color:#fff" title="Permanently delete the current save and return to menu">Delete Save</button>
+      </div>
+      <h3 style="margin-top:1em">About</h3>
+      <p class="muted">Chalkdust v${VERSION} - a teacher dashboard sim. Single HTML file, no build step.</p>
+    </div>`;
+}
+function clearAICache(){
+  try{localStorage.removeItem(AI_CACHE_KEY);_aiCacheMap=null;toast("AI cache cleared.");}
+  catch(e){toast("Couldn't clear cache.");}
+}
+function exportSave(){
+  try{
+    const blob=new Blob([JSON.stringify({version:VERSION,savedAt:new Date().toISOString(),state})],{type:"application/json"});
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(blob);
+    a.download=`chalkdust-save-${Date.now()}.json`;
+    a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+    toast("Save exported.");
+  }catch(e){toast("Export failed: "+e.message);}
+}
+function importSave(){
+  const input=document.createElement("input");input.type="file";input.accept=".json,application/json";
+  input.onchange=()=>{
+    const file=input.files?.[0];if(!file)return;
+    const r=new FileReader();
+    r.onload=()=>{
+      try{
+        const payload=JSON.parse(r.result);
+        if(!payload.state){toast("Invalid save file.");return;}
+        if(!confirm("Replace current save with imported one?"))return;
+        state=migrateSave(payload.state);
+        saveGame(true);
+        showView(state.role==="tutor"?"formroom":"classroom");
+        renderHud();buildNav();
+        toast("Save imported.");
+      }catch(e){toast("Couldn't read save: "+e.message);}
+    };
+    r.readAsText(file);
+  };
+  input.click();
+}
+function resetSave(){
+  if(!confirm("Delete the current save permanently and return to menu?"))return;
+  try{localStorage.removeItem(SAVE_KEY);}catch(e){}
+  state=null;
+  document.getElementById("game").classList.remove("active");
+  document.getElementById("menu").classList.remove("hidden");
+  refreshContinueButton();
+}
+
+// ============================================================
+// v1.0 - ACHIEVEMENTS
+// ============================================================
+const ACHIEVEMENTS=[
+  {id:"first_card",label:"First Card",flavor:"You issued your first card. The kids took notice."},
+  {id:"first_test",label:"First Test Returned",flavor:"You marked a paper and handed it back. The job is real now."},
+  {id:"first_promo",label:"First Promotion",flavor:"Probationary no longer. A new key on your ring."},
+  {id:"first_honors",label:"First Honors Recommendation",flavor:"You championed a student. They will not forget it."},
+  {id:"first_detention",label:"First Detention",flavor:"Discipline issued. The room got a little quieter."},
+  {id:"first_90",label:"First 90+ Score",flavor:"A student crossed ninety. You taught them that."},
+  {id:"first_year",label:"First Year Complete",flavor:"A full school year on the books. Survive next."},
+  {id:"perfect_attendance",label:"Perfect Attendance",flavor:"You took the register every weekday for a quarter."},
+  {id:"ten_assemblies",label:"Ten Assemblies",flavor:"Ten times you stood at the front and spoke. Your voice carries now."},
+  {id:"hundred_cards",label:"Hundred Cards",flavor:"A hundred cards issued in your name. The class knows you watch."},
+  {id:"first_parent_meeting",label:"First Parent Conference",flavor:"You sat across from a parent and held the line."},
+  {id:"master_teacher",label:"Master Teacher",flavor:"The highest rank. A subordinate calls you Dr. now."}
+];
+function unlockAchievement(id){
+  if(!state||state.achievements[id])return;
+  const a=ACHIEVEMENTS.find(x=>x.id===id);if(!a)return;
+  state.achievements[id]={unlockedWeek:state.week,year:state.year};
+  showAchievementToast(a);
+  saveGame(false);
+}
+function showAchievementToast(a){
+  const m=document.createElement("div");m.className="modal";
+  m.innerHTML=`<div class="box" style="max-width:420px;text-align:center;border:2px solid var(--accent);box-shadow:0 0 40px rgba(217,164,65,.4)">
+    <div style="font-size:.8em;text-transform:uppercase;letter-spacing:2px;color:var(--accent);margin-bottom:.2em">Achievement Unlocked</div>
+    <h2 style="margin:.2em 0;font-family:Georgia,serif">${esc(a.label)}</h2>
+    <p style="font-style:italic;opacity:.85">${esc(a.flavor)}</p>
+    <button class="primary" onclick="closeModal()">Nice</button>
+  </div>`;
+  document.body.appendChild(m);m.onclick=e=>{if(e.target===m)closeModal();};
+  setTimeout(()=>closeModal(),5000);
+}
+function checkAchievements(){
+  if(!state)return;
+  // Check all milestones each tick - cheap, idempotent
+  const myCards=state.classes.flatMap(c=>c.students.flatMap(s=>s.cards.filter(c=>c.by===(state.title||"Ms.")+" "+state.name)));
+  if(myCards.length>=1)unlockAchievement("first_card");
+  if(myCards.length>=100)unlockAchievement("hundred_cards");
+  const myReturned=state.tests.some(t=>{const a=t.assignments?.[state.activeClassIdx];return a&&Object.values(a).some(x=>x.scored);});
+  if(myReturned)unlockAchievement("first_test");
+  if(state.rank&&state.rank!=="Probationary")unlockAchievement("first_promo");
+  if(state.rank==="Master Teacher")unlockAchievement("master_teacher");
+  if(myCards.some(c=>c.reason&&c.reason.includes("HONORS")))unlockAchievement("first_honors");
+  if(myCards.some(c=>c.reason&&c.reason.includes("DETENTION")))unlockAchievement("first_detention");
+  if(state.classes.flatMap(c=>c.students).some(s=>(s.grades||[]).some(g=>g.score>=90)))unlockAchievement("first_90");
+  if(state.year>=2)unlockAchievement("first_year");
+}
+
+// ============================================================
+// v1.0 - CONTEXTUAL ACTIONS (triggered by real state)
+// ============================================================
+function getContextualActions(s){
+  const out=[];
+  // Trigger 1: 3 missed homeworks in a row
+  const hws=(state.homework||[]).filter(h=>{
+    const cls=state.classes[h.classIdx];return cls&&cls.students.find(x=>x.id===s.id)&&h.settled;
+  }).slice(-3);
+  if(hws.length===3 && hws.every(h=>h.completion[s.id]==="missing")){
+    out.push({key:"prewarn",label:"Pre-detention Warning",icon:"⚠",
+      run:()=>predetentionWarning(s.id),
+      desc:"3 missed homeworks. Issue a heavier warning."});
+  }
+  // Trigger 2: 3+ NPC yellows this quarter
+  const qStart=(state.quarter-1)*9+1;
+  const npcYellows=s.cards.filter(c=>c.color==="yellow"&&c.by!==(state.title||"Ms.")+" "+state.name&&c.week>=qStart).length;
+  if(npcYellows>=3){
+    out.push({key:"intervene",label:"Schedule Parent Intervention",icon:"🤝",
+      run:()=>parentIntervention(s.id),
+      desc:`${npcYellows} yellows from colleagues this quarter.`});
+  }
+  // Trigger 3: perfect attendance 2+ weeks
+  const cls=state.classes.find(c=>c.students.find(x=>x.id===s.id));
+  if(cls){
+    let perfect=0;
+    for(let dw=0;dw<10;dw++){
+      const wAt=state.week-Math.floor(dw/5);const dAt=(state.dayIdx-1-dw%5+50)%5;if(wAt<1)break;
+      const k=`${wAt}.${dAt}.${cls.name}`;const a=state.attendance?.[k]?.[s.id];
+      if(a==="present")perfect++;else break;
+    }
+    if(perfect>=10){
+      out.push({key:"reliable",label:"Reliability Commendation",icon:"⭐",
+        run:()=>reliabilityCommend(s.id),
+        desc:"Perfect attendance 2+ weeks straight."});
+    }
+  }
+  // Trigger 4: mood dropped >20 in a week (rough proxy: current mood < 35)
+  if(s.mood<35){
+    out.push({key:"wellness",label:"Wellness Check",icon:"💛",
+      run:()=>wellnessCheck(s.id),
+      desc:"Low mood. Take a moment with them."});
+  }
+  // Trigger 5: 3 consecutive 90+ tests
+  const lastGrades=(s.grades||[]).slice(-3);
+  if(lastGrades.length===3 && lastGrades.every(g=>g.score>=90)){
+    out.push({key:"advanced",label:"Recommend Advanced Track",icon:"🚀",
+      run:()=>advancedTrack(s.id),
+      desc:"Three straight 90+. Push further."});
+  }
+  return out;
+}
+
+function predetentionWarning(sid){
+  const s=findStudent(sid);if(!s)return;
+  s.cards.push({color:"yellow",reason:"PRE-DETENTION WARNING: 3 missed homeworks in a row",week:state.week,by:(state.title||"Ms.")+" "+state.name});
+  s.mood=clamp(s.mood-8);s.effort=clamp(s.effort+10);
+  state.rep+=2;state.actionsThisWeek=(state.actionsThisWeek||0)+1;
+  // Alert the parent
+  const c=spawnParentContactIfMissing(s);
+  if(c){
+    state.messages.push({id:"m"+Date.now(),contactId:c.id,fromMe:true,
+      subject:"Pre-detention warning",
+      body:`I'm writing to flag that ${s.first} has missed three homework assignments in a row. One more and I will need to schedule detention.`,
+      week:state.week,day:DAYS[state.dayIdx],read:true});
+    scheduleFollowupFromContact(c,"warning about missed homework");
+  }
+  logActivity({type:"card",text:`Pre-detention warning issued to ${s.first} (3 missed homeworks).`});
+  toast(`${s.first}: pre-detention warning issued. Parent notified.`);
+  closeModal();renderHud();buildNav();refreshCurrentView();saveGame(false);
+}
+function parentIntervention(sid){
+  const s=findStudent(sid);if(!s)return;
+  const c=spawnParentContactIfMissing(s);
+  if(!c){toast("Couldn't find parent contact.");return;}
+  // Spawn a mission to follow through with a conversation
+  state.missions.push({id:"x"+Date.now(),
+    title:`Intervene with ${s.first}'s parents`,
+    desc:`Send a thoughtful message to ${c.name} about ${s.first}'s recent yellow cards and propose a path forward. Mission completes when you send a +1 or higher message.`,
+    kind:"reply",studentId:s.id,contactId:c.id,
+    createdWeek:state.week,deadlineWeek:state.week+2,
+    status:"open",reward:5,sourceMsg:null});
+  state.actionsThisWeek=(state.actionsThisWeek||0)+1;
+  state.selectedContact=c.id;
+  closeModal();showView("messages");
+  toast(`Mission opened: write to ${c.name}.`);
+  saveGame(false);
+}
+async function reliabilityCommend(sid){
+  const s=findStudent(sid);if(!s)return;
+  const reason=await aiLine(`Write a brief teacher's note (6-12 words, no quotes) commending a school student named ${s.first} for perfect attendance over two weeks.`,140)||"Two straight weeks of perfect attendance";
+  s.cards.push({color:"green",reason,week:state.week,by:(state.title||"Ms.")+" "+state.name});
+  s.mood=clamp(s.mood+6);s.ability=clamp(s.ability+0.5);
+  state.rep+=2;state.actionsThisWeek=(state.actionsThisWeek||0)+1;
+  logActivity({type:"card",text:`Reliability commendation for ${s.first}: "${reason}"`});
+  toast(`${s.first} commended. +2 rep.`);
+  closeModal();renderHud();buildNav();refreshCurrentView();saveGame(false);
+}
+async function wellnessCheck(sid){
+  const s=findStudent(sid);if(!s)return;
+  const note=await aiLine(`Write a brief teacher's private note (one short sentence) recording a wellness check-in with a student named ${s.first}. Personality: ${s.personality}. Just the note, no quotes.`,200);
+  s.mood=clamp(s.mood+12);s.ability=clamp(s.ability+0.5);
+  if(note)s.notes=(s.notes||"")+(s.notes?"\n":"")+`Wk ${state.week}: ${note}`;
+  state.rep+=1;state.actionsThisWeek=(state.actionsThisWeek||0)+1;
+  logActivity({type:"gossip",text:`You checked in with ${s.first}. They walked out lighter.`});
+  toast(`Wellness check done with ${s.first}.`);
+  closeModal();renderHud();buildNav();refreshCurrentView();saveGame(false);
+}
+function advancedTrack(sid){
+  const s=findStudent(sid);if(!s)return;
+  s.cards.push({color:"purple",reason:"ADVANCED TRACK recommendation: three consecutive 90+ scores",week:state.week,by:(state.title||"Ms.")+" "+state.name});
+  s.ability=clamp(s.ability+3);s.mood=clamp(s.mood+10);
+  state.rep+=4;state.actionsThisWeek=(state.actionsThisWeek||0)+1;
+  const c=spawnParentContactIfMissing(s);
+  if(c){
+    state.messages.push({id:"m"+Date.now(),contactId:c.id,fromMe:true,
+      subject:"Advanced track recommendation",
+      body:`I'm writing to recommend ${s.first} for our advanced track based on three consecutive high test scores. This places them on a strong path forward.`,
+      week:state.week,day:DAYS[state.dayIdx],read:true});
+    scheduleFollowupFromContact(c,"advanced track recommendation");
+  }
+  logActivity({type:"gossip",text:`${s.first} recommended for advanced track.`});
+  toast(`${s.first} placed on advanced track. +4 rep.`);
+  closeModal();renderHud();buildNav();refreshCurrentView();saveGame(false);
+}
 // ============================================================
 // SAVE / LOAD - localStorage based, single slot
 // ============================================================
@@ -4897,13 +5387,27 @@ function loadGame(){
     return payload;
   }catch(e){return null;}
 }
+function migrateSave(s){
+  // Initialize fields added in v1.0 if loading from older save.
+  s.drafts=s.drafts||{};
+  s.archivedContacts=s.archivedContacts||{};
+  s.starredContacts=s.starredContacts||{};
+  s.achievements=s.achievements||{};
+  s.settings=s.settings||{typewriter:true,animSpeed:"normal"};
+  s.testTemplates=s.testTemplates||[];
+  s.homeworkTemplates=s.homeworkTemplates||[];
+  s.planTemplates=s.planTemplates||[];
+  s.quarterComments=s.quarterComments||{};
+  s.contextualTriggersDone=s.contextualTriggersDone||{};
+  return s;
+}
 function continueGame(){
   const p=loadGame();
   if(!p){toast("No save found.");return;}
   if(p.version!==VERSION){
-    if(!confirm(`Save is from version ${p.version}; current is ${VERSION}. Try loading anyway?`))return;
+    if(!confirm(`Save is from version ${p.version}; current is ${VERSION}. Migrate and load?`))return;
   }
-  state=p.state;
+  state=migrateSave(p.state);
   document.getElementById("menu").classList.add("hidden");
   document.getElementById("game").classList.add("active");
   buildNav();
