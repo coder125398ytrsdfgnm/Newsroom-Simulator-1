@@ -2136,6 +2136,11 @@ function todayPanel(){
   // Open missions
   const openM=state.missions.filter(m=>m.status==="open").length;
   if(openM)tasks.push({tag:"missions",text:`${openM} open mission${openM===1?"":"s"}`,action:`showView('missions')`,btn:"Missions"});
+  // v1.0: contextual prompt - haven't sent any message in 2+ weeks
+  const lastMyMsg=state.messages.slice().reverse().find(m=>m.fromMe);
+  if(state.messages.length>0&&(!lastMyMsg||state.week-lastMyMsg.week>=2)){
+    tasks.push({tag:"catchup",text:"You haven't messaged anyone in 2+ weeks - catch up",action:`showView('messages')`,btn:"Open Inbox"});
+  }
   if(!tasks.length){
     return `<div style="background:#1b1410;border-left:3px solid var(--green);padding:.5em .8em;border-radius:6px;margin-bottom:.6em"><b>All caught up.</b> <span class="muted">Advance the day to move things along.</span></div>`;
   }
@@ -3896,16 +3901,51 @@ function viewGrades(){
     <p class="muted" style="margin-top:.6em">Quarter ${state.quarter}: class avg <b>${overall.toFixed(1)}</b>${trend?" - "+trend:""}</p>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:1em;margin-top:.6em">
       <div class="q"><h4>Top performers</h4>
-        ${top.length?`<table><tbody>${top.map(s=>`<tr><td>${s.name}</td><td><b>${s._avg.toFixed(1)}</b></td></tr>`).join("")}</tbody></table>`:`<p><i>No grades yet.</i></p>`}
+        ${top.length?`<table><tbody>${top.map(s=>`<tr class="clickable" onclick="openStudent(${s.id},${state.role==='subject'})"><td>${s.name}</td><td><b>${s._avg.toFixed(1)}</b></td></tr>`).join("")}</tbody></table>`:`<p><i>No grades yet.</i></p>`}
       </div>
       <div class="q"><h4>Need support</h4>
-        ${bottom.length?`<table><tbody>${bottom.map(s=>`<tr><td>${s.name}</td><td style="color:var(--red)"><b>${s._avg.toFixed(1)}</b></td></tr>`).join("")}</tbody></table>`:`<p class="muted"><i>${sorted.length<6?"Not enough grades yet to spot strugglers.":"Nobody is struggling - everyone is above 60."}</i></p>`}
+        ${bottom.length?`<table><tbody>${bottom.map(s=>`<tr class="clickable" onclick="openStudent(${s.id},${state.role==='subject'})"><td>${s.name}</td><td style="color:var(--red)"><b>${s._avg.toFixed(1)}</b></td></tr>`).join("")}</tbody></table>`:`<p class="muted"><i>${sorted.length<6?"Not enough grades yet to spot strugglers.":"Nobody is struggling - everyone is above 60."}</i></p>`}
       </div>
     </div>
+
+    <h3 style="margin-top:1em">Distribution</h3>
+    ${(()=>{
+      // v1.0: histogram of class scores
+      const buckets=[0,0,0,0,0];
+      sorted.forEach(s=>{const b=Math.min(4,Math.floor(s._avg/20));buckets[b]++;});
+      const max=Math.max(...buckets,1);
+      const labels=["0-20","21-40","41-60","61-80","81-100"];
+      const colors=["#e26464","#f7c948","#d9a441","#a3c163","#4caf50"];
+      return `<div style="display:flex;align-items:flex-end;gap:.5em;height:120px;background:#1b1410;padding:.6em;border-radius:6px">
+        ${buckets.map((n,i)=>{const h=Math.max(8,n/max*100);return `<div style="flex:1;display:flex;flex-direction:column;align-items:center">
+          <div style="font-size:.85em;font-weight:bold">${n}</div>
+          <div style="width:100%;height:${h}px;background:${colors[i]};border-radius:4px 4px 0 0" title="${n} students in ${labels[i]} range"></div>
+          <div style="font-size:.7em;opacity:.7;margin-top:.2em">${labels[i]}</div>
+        </div>`;}).join("")}
+      </div>`;
+    })()}
+
+    ${state.role==="tutor"?`<h3 style="margin-top:1em">Class ranking</h3>
+      <div style="max-height:300px;overflow:auto;background:#1b1410;border-radius:6px;padding:.4em .6em">
+        <table style="width:100%;font-size:.9em"><thead><tr><th>#</th><th>Name</th><th>Avg</th><th>Quarter comment</th></tr></thead>
+        <tbody>${sorted.map((s,i)=>{
+          const qc=(state.quarterComments?.[state.quarter]?.[s.id])||"";
+          return `<tr><td>${i+1}</td><td>${esc(s.name)}</td><td><b>${s._avg.toFixed(1)}</b></td>
+            <td><input type="text" value="${esc(qc)}" placeholder="(comment)" style="width:90%" onchange="setQuarterComment(${s.id},this.value)"></td></tr>`;
+        }).join("")}</tbody></table>
+      </div>`:""}
+
     ${subjectBlock}
     <div class="row" style="margin-top:1em">
-      <button onclick="writeQuarterReport()">Draft Quarter Report</button>
+      <button onclick="writeQuarterReport()" title="AI drafts a class-level quarter report">Draft Quarter Report</button>
     </div>`;
+}
+function setQuarterComment(sid,txt){
+  state.quarterComments=state.quarterComments||{};
+  state.quarterComments[state.quarter]=state.quarterComments[state.quarter]||{};
+  if(txt.trim())state.quarterComments[state.quarter][sid]=txt.trim();
+  else delete state.quarterComments[state.quarter][sid];
+  saveGame(false);
 }
 
 async function writeQuarterReport(){
