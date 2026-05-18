@@ -1218,13 +1218,21 @@ function runOfficeHours(){
 }
 function applyOfficeHours(sid){
   const s=findStudent(sid);if(!s)return;
-  s.ability=clamp(s.ability+3);s.effort=clamp(s.effort+5);s.mood=clamp(s.mood+8);
-  state.rep+=1;state.actionsThisWeek=(state.actionsThisWeek||0)+1;
-  // v1.1: register office hours for daily challenge check
+  // v1.1: critical hit on teacher actions - 12% chance of doubled effect
+  const crit=Math.random()<0.12;
+  const mult=crit?2:1;
+  s.ability=clamp(s.ability+3*mult);s.effort=clamp(s.effort+5*mult);s.mood=clamp(s.mood+8*mult);
+  state.rep+=1+(crit?2:0);state.actionsThisWeek=(state.actionsThisWeek||0)+1;
   state._officeHoursDays=state._officeHoursDays||{};
   state._officeHoursDays[challengeKey()]=true;
-  logActivity({type:"gossip",text:`You held office hours with ${s.first}. They left with a clearer plan.`});
-  toast(`Office hours with ${s.first}: +3 ability, +5 effort, +8 mood, +1 rep.`);
+  if(crit){
+    burstConfetti();
+    logActivity({type:"gossip",text:`★ BREAKTHROUGH in office hours with ${s.first} - something clicked.`});
+    toast(`★ BREAKTHROUGH! ${s.first}: +6 ability, +10 effort, +16 mood, +3 rep.`);
+  }else{
+    logActivity({type:"gossip",text:`You held office hours with ${s.first}. They left with a clearer plan.`});
+    toast(`Office hours with ${s.first}: +3 ability, +5 effort, +8 mood, +1 rep.`);
+  }
   checkChallengeReward();
   closeModal();renderHud();buildNav();refreshCurrentView();saveGame(false);
 }
@@ -2124,8 +2132,13 @@ async function submitPopQuiz(){
   state.popQuizCooldown[cls.name]=state.week;
   // Roll scores
   const scores=cls.students.map(s=>{
-    const ability=effectiveAbilityFor(s,{prompt:topic,answer:topic})+Math.random()*15-7.5;
-    return {s,score:clamp(ability)};
+    let ability=effectiveAbilityFor(s,{prompt:topic,answer:topic})+Math.random()*15-7.5;
+    // v1.1: variance - sometimes a student over- or under-performs dramatically
+    const surprise=Math.random();
+    let surpriseText=null;
+    if(surprise<0.04){ability=Math.min(100,ability+25);surpriseText=s.first+" surprised everyone";}
+    else if(surprise>0.96){ability=Math.max(0,ability-25);surpriseText=s.first+" had a tough day";}
+    return {s,score:clamp(ability),surpriseText};
   });
   scores.forEach(({s,score})=>{
     s.grades.push({testId:"popquiz-"+state.week,score,scale:"percent",weight:0.3,topic});
@@ -2135,6 +2148,9 @@ async function submitPopQuiz(){
   const top=scores.slice().sort((a,b)=>b.score-a.score)[0];
   const bot=scores.slice().sort((a,b)=>a.score-b.score)[0];
   logActivity({type:"grade",text:`Pop quiz on "${topic}" in ${cls.name}: avg ${avg.toFixed(1)}. Top: ${top.s.first} (${top.score.toFixed(0)}). Lowest: ${bot.s.first} (${bot.score.toFixed(0)}).`});
+  // v1.1: surface any dramatic surprises
+  const surprises=scores.filter(x=>x.surpriseText);
+  surprises.forEach(x=>{logActivity({type:"gossip",text:`Pop quiz: ${x.surpriseText} - ${x.score.toFixed(0)}.`});});
   // Show a results modal so it doesn't feel like nothing happened
   const res=document.createElement("div");res.className="modal";
   res.innerHTML=`<div class="box" style="max-width:520px;text-align:center">
@@ -2697,8 +2713,34 @@ function issueCard(id){
   if(color==="purple"){s.mood=clamp(s.mood+10);s.ability=clamp(s.ability+1.4);s.effort=clamp(s.effort+1);state.rep+=3;}
   checkCardMissions(s,color);
   checkChallengeReward();
-  toast(`${color} card issued to ${s.name}`);
+  // v1.1: visible student reaction - tactile feedback
+  const reaction=getCardReaction(s,color);
+  toast(`${color.toUpperCase()} → ${s.first}: ${reaction}`);
+  if(color==="purple")burstConfetti();
   closeModal();renderHud();buildNav();showView(state.role==="tutor"?"formroom":"classroom");
+}
+function getCardReaction(s,color){
+  const p=s.personality||"";
+  if(color==="green"){
+    if(p==="shy")return s.first+" blushes and looks down";
+    if(p==="confident"||p==="class-clown")return s.first+" grins big";
+    if(p==="eager")return s.first+" beams";
+    if(p==="sarcastic")return s.first+' goes "yeah, alright"';
+    return s.first+" nods, pleased";
+  }
+  if(color==="yellow"){
+    if(p==="anxious")return s.first+" looks shaken";
+    if(p==="confident"||p==="class-clown")return s.first+" rolls their eyes";
+    if(p==="withdrawn")return s.first+" stares at the desk";
+    if(p==="sarcastic")return s.first+' mutters "whatever"';
+    return s.first+" frowns and goes quiet";
+  }
+  if(color==="purple"){
+    if(p==="shy")return s.first+" cannot stop smiling";
+    if(p==="perfectionist")return s.first+" stands a little taller";
+    return s.first+" lights up - the class sees it";
+  }
+  return s.first+" reacts";
 }
 function resolveNeed(id){
   const s=findStudent(id);
@@ -5189,6 +5231,8 @@ async function advanceDay(){
   if(state.dayIdx>=DAYS.length){
     state.dayIdx=0;state.week++;
     runWeeklyAI();   // async, doesn't block UI
+    // v1.1: surprise event check on week rollover
+    setTimeout(()=>maybeFireRandomEvent(),400);
   }
   renderHud();buildNav();refreshCurrentView();
   saveGame(false);
@@ -5259,6 +5303,65 @@ function releaseDayEvents(dayIdx){
 }
 
 let _weeklyRunning=false;
+// v1.1: RANDOM EVENTS - one of these may fire at the start of a week.
+// They interrupt the routine with a real decision or a surprise outcome.
+const RANDOM_EVENTS=[
+  {id:"inspector",label:"School Inspector Visit",
+    body:"A district inspector is shadowing your class today. Whatever you do will be judged.",
+    choices:[
+      {label:"Run your scheduled lesson",fn:()=>{const score=40+Math.random()*50;state.rep+=Math.round((score-50)/10);logActivity({type:"gossip",text:`Inspector rated your lesson ${score.toFixed(0)}/100.`});toast(`Inspector left. ${score>=60?"+":""}${Math.round((score-50)/10)} rep.`);}},
+      {label:"Spring a discussion",fn:()=>{const ok=Math.random()<0.6;state.rep+=ok?5:-3;currentClass().students.forEach(s=>s.mood=clamp(s.mood+(ok?5:-2)));logActivity({type:"gossip",text:`Inspector watched your discussion. ${ok?"They left impressed.":"It went sideways."}`});toast(ok?"Inspector impressed. +5 rep.":"Discussion fizzled. -3 rep.");}},
+      {label:"Run a pop quiz to show off",fn:()=>{const avg=currentClass().students.reduce((a,s)=>a+combinedAvg(s),0)/currentClass().students.length;const delta=Math.round((avg-65)/8);state.rep+=delta;logActivity({type:"gossip",text:`Inspector saw quiz results: avg ${avg.toFixed(0)}.`});toast(`Inspector saw real performance. ${delta>=0?"+":""}${delta} rep.`);}}
+    ]},
+  {id:"praise",label:"Surprise Parent Praise",
+    body:"A parent emailed Principal Vance praising your handling of their child. The principal forwarded it to HR.",
+    choices:[{label:"Quietly accept the win",fn:()=>{state.rep+=5;logActivity({type:"gossip",text:"A parent praised you to the principal. +5 rep."});toast("+5 rep");burstConfetti();}}]},
+  {id:"outburst",label:"Student Outburst",
+    body:"A student just slammed their book down and stormed out of class. The room is silent.",
+    choices:[
+      {label:"Send them to the principal",fn:()=>{const s=currentClass().students[Math.floor(Math.random()*currentClass().students.length)];s.mood=clamp(s.mood-15);s.cards.push({color:"yellow",reason:"Sent to principal after outburst",week:state.week,dayIdx:state.dayIdx,by:(state.title||"Ms.")+" "+state.name});state.rep-=1;logActivity({type:"card",text:`${s.first} sent to principal after outburst.`});toast(`${s.first} disciplined. -1 rep but order restored.`);}},
+      {label:"Follow them, talk it out",fn:()=>{const s=currentClass().students.sort((a,b)=>a.mood-b.mood)[0];s.mood=clamp(s.mood+18);s.ability=clamp(s.ability+1);state.rep+=3;logActivity({type:"gossip",text:`You followed ${s.first} into the hall. Quiet conversation. They came back.`});toast(`+3 rep · ${s.first} returned, settled.`);}},
+      {label:"Ignore it and carry on",fn:()=>{currentClass().students.forEach(s=>s.mood=clamp(s.mood-2));state.rep-=2;logActivity({type:"gossip",text:"You let the outburst pass without comment. The class noticed."});toast("-2 rep · the class noticed.");}}
+    ]},
+  {id:"sub",label:"Cover a Sick Colleague",
+    body:"Mr. Lopez is out sick and the office is asking who can cover his next period.",
+    choices:[
+      {label:"Volunteer",fn:()=>{state.rep+=4;state.actionsThisWeek=(state.actionsThisWeek||0)+1;logActivity({type:"gossip",text:"You covered Mr. Lopez's period. The office appreciates it."});toast("+4 rep. Tiring, but earned.");}},
+      {label:"Decline politely",fn:()=>{toast("You decline. No effect.");}}
+    ]},
+  {id:"breakthrough",label:"Quiet Breakthrough",
+    body:"A struggling student in your class shows up with a complete homework set for the first time all year.",
+    choices:[{label:"Make a point of acknowledging it",fn:()=>{const strugglers=state.classes.flatMap(c=>c.students).filter(s=>s.effort<50).sort((a,b)=>a.effort-b.effort);const s=strugglers[0];if(s){s.cards.push({color:"green",reason:"Showed up with a complete assignment for the first time",week:state.week,dayIdx:state.dayIdx,by:(state.title||"Ms.")+" "+state.name});s.mood=clamp(s.mood+15);s.effort=clamp(s.effort+10);s.ability=clamp(s.ability+1.5);state.rep+=3;logActivity({type:"card",text:`${s.first} broke through - you noticed and named it.`});toast(`${s.first} just changed everything. +3 rep.`);burstConfetti();}}}]}
+];
+
+async function maybeFireRandomEvent(){
+  // 30% chance per week. Only fires at the start of week (state.dayIdx === 0).
+  if(state.dayIdx!==0||state.week<2)return;
+  if(Math.random()>0.30)return;
+  const ev=RANDOM_EVENTS[Math.floor(Math.random()*RANDOM_EVENTS.length)];
+  showRandomEventModal(ev);
+}
+function showRandomEventModal(ev){
+  const m=document.createElement("div");m.className="modal";
+  m.innerHTML=`<div class="box" style="max-width:520px;border:2px solid var(--accent);box-shadow:0 0 40px rgba(232,176,74,.3)">
+    <div style="font-size:.75em;text-transform:uppercase;letter-spacing:2px;color:var(--accent)">⚡ Something happens</div>
+    <h2 style="margin:.2em 0;font-family:var(--serif)">${esc(ev.label)}</h2>
+    <p style="font-style:italic;font-size:1.05em">${esc(ev.body)}</p>
+    <div style="display:flex;flex-direction:column;gap:.4em;margin-top:.8em">
+      ${ev.choices.map((c,i)=>`<button onclick="resolveRandomEvent(${i})" style="text-align:left;padding:.7em .9em">${esc(c.label)}</button>`).join("")}
+    </div>
+  </div>`;
+  document.body.appendChild(m);
+  state._activeEvent=ev;
+}
+function resolveRandomEvent(choiceIdx){
+  const ev=state._activeEvent;if(!ev)return;
+  const choice=ev.choices[choiceIdx];if(!choice)return;
+  try{choice.fn();}catch(e){if(window.console)console.warn("[event] fn err",e);}
+  state._activeEvent=null;
+  closeModal();renderHud();buildNav();refreshCurrentView();saveGame(false);
+}
+
 async function runWeeklyAI(){
   if(_weeklyRunning)return;
   _weeklyRunning=true;
