@@ -384,7 +384,7 @@
 // STATE
 // ============================================================
 const DAYS=["Mon","Tue","Wed","Thu","Fri"];
-const VERSION="1.05";
+const VERSION="1.1";
 const SAVE_KEY="chalkdust:save";
 
 // ============ AI helpers (single point for the no-placeholder rule) ============
@@ -1220,8 +1220,12 @@ function applyOfficeHours(sid){
   const s=findStudent(sid);if(!s)return;
   s.ability=clamp(s.ability+3);s.effort=clamp(s.effort+5);s.mood=clamp(s.mood+8);
   state.rep+=1;state.actionsThisWeek=(state.actionsThisWeek||0)+1;
+  // v1.1: register office hours for daily challenge check
+  state._officeHoursDays=state._officeHoursDays||{};
+  state._officeHoursDays[challengeKey()]=true;
   logActivity({type:"gossip",text:`You held office hours with ${s.first}. They left with a clearer plan.`});
   toast(`Office hours with ${s.first}: +3 ability, +5 effort, +8 mood, +1 rep.`);
+  checkChallengeReward();
   closeModal();renderHud();buildNav();refreshCurrentView();saveGame(false);
 }
 function runGroupProject(){
@@ -1260,34 +1264,36 @@ function renderGroupBuilder(){
     const studs=team.map(studById).filter(Boolean);
     const syn=studs.length>=2?teamSynergy(studs):null;
     const synColor=syn==null?"#888":syn>60?"var(--green)":syn>35?"var(--yellow)":"var(--red)";
-    return `<div class="gp-team" data-team-idx="${ti}" ondragover="event.preventDefault()" ondrop="gpDrop(event,${ti})"
-      style="background:#1b1410;border:2px dashed ${synColor};border-radius:6px;padding:.5em;min-height:80px;flex:1">
-      <div style="font-size:.85em;color:var(--accent);margin-bottom:.3em">
-        Team ${ti+1} ${syn!=null?`<span style="float:right;color:${synColor}">syn ${syn.toFixed(0)}%</span>`:""}
+    return `<div class="gp-team" data-team-idx="${ti}"
+      ondragover="gpDragOver(event)" ondragleave="gpDragLeave(event)" ondrop="gpDrop(event,${ti})"
+      style="background:#1b1410;border:2px solid ${synColor}55;border-radius:8px;padding:.5em;min-height:100px;flex:1;transition:background .15s,box-shadow .15s">
+      <div style="font-size:.85em;color:var(--accent);margin-bottom:.4em;display:flex;justify-content:space-between;align-items:center">
+        <span><b>Team ${ti+1}</b></span>
+        ${syn!=null?`<span style="color:${synColor};font-weight:bold">syn ${syn.toFixed(0)}%</span>`:""}
       </div>
-      ${studs.map(s=>`<div class="gp-chip" draggable="true" ondragstart="gpDrag(event,${s.id})"
-        style="background:var(--panel2);padding:.2em .5em;margin:.2em 0;border-radius:4px;font-size:.85em;cursor:grab;border:1px solid #555">
-        ${esc(s.first)} ${esc(s.last)} <small class="muted">avg ${combinedAvg(s).toFixed(0)}</small>
+      ${studs.map(s=>`<div class="gp-chip" draggable="true" ondragstart="gpDrag(event,${s.id})" ondragend="gpDragEnd(event)"
+        style="background:linear-gradient(180deg,var(--panel2),#2a1f18);padding:.35em .6em;margin:.2em 0;border-radius:5px;font-size:.85em;cursor:grab;border:1px solid #555;box-shadow:0 1px 2px rgba(0,0,0,.3);transition:transform .1s">
+        <span style="font-weight:500">${esc(s.first)} ${esc(s.last)}</span> <small class="muted">avg ${combinedAvg(s).toFixed(0)}</small>
       </div>`).join("")}
-      ${studs.length===0?`<small class="muted" style="font-style:italic">drag students here</small>`:""}
+      ${studs.length===0?`<div style="font-style:italic;opacity:.5;font-size:.8em;text-align:center;padding:.5em 0">drop students here</div>`:""}
     </div>`;
   }).join("");
   const unassigned=gb.unassigned.map(studById).filter(Boolean);
-  m.innerHTML=`<div class="box" style="max-width:840px">
-    <h2>Group Project - ${cls.name}</h2>
-    <label>Topic / brief: <input id="gpTopic" type="text" value="${esc(gb.topic)}" oninput="state._gpBuilder.topic=this.value" placeholder="e.g. The causes of WW1, in 5 minutes" style="width:100%"></label>
+  m.innerHTML=`<div class="box" style="max-width:880px">
+    <h2>Group Project · ${cls.name}</h2>
+    <label style="display:block;margin:.4em 0">Topic / brief: <input id="gpTopic" type="text" value="${esc(gb.topic)}" oninput="state._gpBuilder.topic=this.value" placeholder="e.g. The causes of WW1, in 5 minutes" style="width:100%"></label>
     <div class="row">
-      <button onclick="gpAutoTeams()">Auto-form Teams</button>
+      <button onclick="gpAutoTeams()" title="AI-balanced teams by ability">⚖ Auto-form Teams</button>
       <button onclick="gpResetTeams()">Reset</button>
-      <small class="muted">Drag students from the pool into teams. Synergy updates live.</small>
+      <small class="muted" style="margin-left:auto">Drag students between teams. Synergy updates live.</small>
     </div>
-    <h3>Unassigned (${unassigned.length})</h3>
-    <div ondragover="event.preventDefault()" ondrop="gpDropUnassigned(event)"
-      style="background:#0e0a07;border:1px dashed #555;border-radius:6px;padding:.5em;min-height:60px;display:flex;flex-wrap:wrap;gap:.3em">
-      ${unassigned.map(s=>`<span class="gp-chip" draggable="true" ondragstart="gpDrag(event,${s.id})"
-        style="background:var(--panel2);padding:.2em .5em;border-radius:4px;font-size:.85em;cursor:grab;border:1px solid #555">
-        ${esc(s.first)} ${esc(s.last)} <small class="muted">avg ${combinedAvg(s).toFixed(0)}</small>
-      </span>`).join("")||`<small class="muted">All students placed.</small>`}
+    <h3>Pool · ${unassigned.length} unassigned</h3>
+    <div class="gp-pool" ondragover="gpDragOver(event)" ondragleave="gpDragLeave(event)" ondrop="gpDropUnassigned(event)"
+      style="background:#0e0a07;border:2px dashed #555;border-radius:8px;padding:.6em;min-height:60px;display:flex;flex-wrap:wrap;gap:.4em;transition:background .15s,box-shadow .15s">
+      ${unassigned.map(s=>`<span class="gp-chip" draggable="true" ondragstart="gpDrag(event,${s.id})" ondragend="gpDragEnd(event)"
+        style="background:linear-gradient(180deg,var(--panel2),#2a1f18);padding:.35em .6em;border-radius:5px;font-size:.85em;cursor:grab;border:1px solid #555;box-shadow:0 1px 2px rgba(0,0,0,.3)">
+        <span style="font-weight:500">${esc(s.first)} ${esc(s.last)}</span> <small class="muted">avg ${combinedAvg(s).toFixed(0)}</small>
+      </span>`).join("")||`<small class="muted" style="font-style:italic">All students placed.</small>`}
     </div>
     <h3>Teams</h3>
     <div style="display:flex;gap:.5em;flex-wrap:wrap">${teamCards}</div>
@@ -1299,9 +1305,30 @@ function renderGroupBuilder(){
   document.body.appendChild(m);m.onclick=e=>{if(e.target===m)closeModal();};
 }
 
-function gpDrag(ev,sid){ev.dataTransfer.setData("text/sid",String(sid));}
+function gpDrag(ev,sid){
+  ev.dataTransfer.setData("text/sid",String(sid));
+  ev.dataTransfer.effectAllowed="move";
+  ev.currentTarget.style.opacity="0.4";
+}
+function gpDragEnd(ev){
+  ev.currentTarget.style.opacity="";
+  document.querySelectorAll(".gp-team,.gp-pool").forEach(el=>{el.style.background="";el.style.boxShadow="";});
+}
+function gpDragOver(ev){
+  ev.preventDefault();
+  ev.dataTransfer.dropEffect="move";
+  const el=ev.currentTarget;
+  el.style.background="rgba(232,176,74,.1)";
+  el.style.boxShadow="inset 0 0 0 2px var(--accent)";
+}
+function gpDragLeave(ev){
+  ev.currentTarget.style.background="";
+  ev.currentTarget.style.boxShadow="";
+}
 function gpDrop(ev,teamIdx){
   ev.preventDefault();
+  ev.currentTarget.style.background="";
+  ev.currentTarget.style.boxShadow="";
   const sid=parseInt(ev.dataTransfer.getData("text/sid"));
   if(isNaN(sid))return;
   gpRemoveFrom(sid);
@@ -1627,12 +1654,14 @@ function viewPlanner(){
   const fx=(n)=>n>0?`+${n}`:n.toString();
   const palette=Object.entries(ACTIVITY_TYPES).map(([k,v])=>{
     const e=v.effects;
-    return `<div draggable="true" ondragstart="event.dataTransfer.setData('text/type','${k}')"
+    return `<div draggable="true" ondragstart="event.dataTransfer.setData('text/type','${k}');this.style.opacity='.5'" ondragend="this.style.opacity=''"
       title="${v.label}: ability ${fx(e.ability)}, effort ${fx(e.effort)}, mood ${fx(e.mood)} (per student)"
-      style="background:linear-gradient(135deg,${v.color}cc,${v.color}66);color:#0e0a07;padding:.5em .7em;border-radius:8px;font-weight:bold;cursor:grab;user-select:none;text-align:center;border:1px solid #000;box-shadow:0 2px 4px rgba(0,0,0,.4);transition:transform .1s"
-      onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform=''">
-      <div>${esc(v.label)}</div>
-      <div style="font-size:.65em;font-weight:normal;margin-top:.2em;opacity:.85">ability ${fx(e.ability)} · effort ${fx(e.effort)} · mood ${fx(e.mood)}</div>
+      class="planner-chip"
+      style="background:linear-gradient(180deg,${v.color}dd,${v.color}88);color:#0e0a07;padding:.6em .8em;border-radius:10px;font-weight:700;cursor:grab;user-select:none;text-align:center;border:1px solid rgba(0,0,0,.3);box-shadow:0 3px 8px rgba(0,0,0,.4),inset 0 1px 0 rgba(255,255,255,.2);transition:transform .12s ease,box-shadow .12s ease;font-family:var(--sans)"
+      onmouseover="this.style.transform='translateY(-3px) scale(1.03)';this.style.boxShadow='0 6px 14px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.3)'"
+      onmouseout="this.style.transform='';this.style.boxShadow='0 3px 8px rgba(0,0,0,.4),inset 0 1px 0 rgba(255,255,255,.2)'">
+      <div style="font-size:.95em">${esc(v.label)}</div>
+      <div style="font-size:.7em;font-weight:500;margin-top:.25em;opacity:.85;letter-spacing:.3px">A${fx(e.ability)} · E${fx(e.effort)} · M${fx(e.mood)}</div>
     </div>`;
   }).join("");
   return `<h2 style="display:flex;align-items:center;gap:.6em">Lesson Planner ${showAll?"<small class=\"muted\" style=\"font-weight:normal\">All classes</small>":""}</h2>
@@ -1712,14 +1741,14 @@ function renderPlannerCell(week,dayIdx,classIdx,clsName,isPrimary){
       <div style="font-size:.85em;font-weight:600;margin-top:.1em;font-style:${a.center?'normal':'italic'};opacity:${a.center?1:.7}">${esc(a.center||"click to add focus")}</div>
     </div>`;
   }).join("");
-  return `<div style="${isPrimary?'':'opacity:.6'};min-height:100px;position:relative"
-    ondragover="event.preventDefault();this.style.background='#241a14'"
-    ondragleave="this.style.background=''"
-    ondrop="plannerDrop(event,'${key}')">
+  return `<div style="${isPrimary?'':'opacity:.6'};min-height:110px;position:relative;border-radius:6px;transition:background .15s,box-shadow .15s"
+    ondragover="event.preventDefault();this.style.background='rgba(232,176,74,.12)';this.style.boxShadow='inset 0 0 0 2px var(--accent)'"
+    ondragleave="this.style.background='';this.style.boxShadow=''"
+    ondrop="this.style.background='';this.style.boxShadow='';plannerDrop(event,'${key}')">
     ${state.classes.length>1?`<div style="font-size:.7em;opacity:.6;font-weight:bold">${esc(clsName)}</div>`:""}
     ${dots}
-    ${hasConflict?`<div style="background:#3a1a14;color:#f7c948;padding:.2em .4em;border-radius:3px;font-size:.7em;margin-bottom:.2em" title="Quiz and practical on the same day is rough on the kids; or you've stacked too many lectures">⚠ conflict</div>`:""}
-    ${inner||`<div style="font-style:italic;opacity:.4;font-size:.78em;padding:1em 0;text-align:center;border:2px dashed #3a2b20;border-radius:6px">drop activity here</div>`}
+    ${hasConflict?`<div style="background:#3a1a14;color:#f7c948;padding:.25em .5em;border-radius:4px;font-size:.72em;margin-bottom:.3em;font-weight:600" title="Quiz and practical on the same day is rough on the kids; or you've stacked too many lectures">⚠ schedule conflict</div>`:""}
+    ${inner||`<div style="font-style:italic;opacity:.45;font-size:.78em;padding:1.2em 0;text-align:center;border:2px dashed #3a2b20;border-radius:8px;background:rgba(255,255,255,.01)">drop an activity here</div>`}
   </div>`;
 }
 
@@ -2124,6 +2153,46 @@ async function submitPopQuiz(){
 }
 
 // "Today" panel: surface every pending task across all systems in one place.
+// v1.1: DAILY CHALLENGE - a random small objective that refreshes each day.
+// Completing it = bonus rep + a little tactile satisfaction. Ignore it = nothing lost.
+const CHALLENGES=[
+  {id:"green3",label:"Issue 3 green cards today",check:()=>countTodayCardsByMe("green")>=3,reward:3,bonus:"green_streak"},
+  {id:"replyparent",label:"Reply to a parent today",check:()=>state.messages.some(m=>m.fromMe&&m.week===state.week&&DAYS.indexOf(m.day)===state.dayIdx&&state.contacts.find(c=>c.id===m.contactId)?.kind==="parent"),reward:2},
+  {id:"register",label:"Take register before lunch (now)",check:()=>{const k=`${state.week}.${state.dayIdx}.${currentClass().name}`;const a=state.attendance?.[k]||{};return currentClass().students.every(s=>a[s.id]);},reward:1},
+  {id:"office",label:"Hold office hours for a struggling student",check:()=>!!state._officeHoursDays?.[challengeKey()],reward:3,manual:true},
+  {id:"plan",label:"Plan an activity for tomorrow",check:()=>{const tk=state.dayIdx<4?planKey(state.week,state.dayIdx+1,state.activeClassIdx):planKey(state.week+1,0,state.activeClassIdx);return (state.lessonPlan?.[tk]||[]).length>0;},reward:2},
+  {id:"praise",label:"Send a praise message to a student",check:()=>state.messages.some(m=>m.fromMe&&m.week===state.week&&DAYS.indexOf(m.day)===state.dayIdx&&state.contacts.find(c=>c.id===m.contactId)?.kind==="student"),reward:3}
+];
+function challengeKey(){return `${state.week}.${state.dayIdx}`;}
+function todayChallenge(){
+  state._dailyChallenge=state._dailyChallenge||{};
+  const k=challengeKey();
+  if(!state._dailyChallenge[k]){
+    // Pick a random challenge for the day, seeded so re-renders are stable
+    const seed=(state.week*7+state.dayIdx*3)%CHALLENGES.length;
+    state._dailyChallenge[k]=CHALLENGES[seed].id;
+  }
+  return CHALLENGES.find(c=>c.id===state._dailyChallenge[k]);
+}
+function countTodayCardsByMe(color){
+  const me=(state.title||"Ms.")+" "+state.name;
+  return state.classes.flatMap(c=>c.students).reduce((a,s)=>a+s.cards.filter(c=>c.by===me&&c.week===state.week&&c.dayIdx===state.dayIdx&&c.color===color).length,0);
+}
+function checkChallengeReward(){
+  state._dailyChallenge=state._dailyChallenge||{};
+  state._challengeCompleted=state._challengeCompleted||{};
+  const k=challengeKey();
+  if(state._challengeCompleted[k]===true)return;
+  const c=todayChallenge();if(!c)return;
+  if(c.check()){
+    state._challengeCompleted[k]=true;
+    state.rep+=c.reward;
+    burstConfetti();
+    toast(`✓ Daily challenge complete: ${c.label} · +${c.reward} rep`);
+    renderHud();saveGame(false);
+  }
+}
+
 function todayPanel(){
   const cls=currentClass();
   const tasks=[];
@@ -2156,11 +2225,22 @@ function todayPanel(){
   if(state.messages.length>0&&(!lastMyMsg||state.week-lastMyMsg.week>=2)){
     tasks.push({tag:"catchup",text:"You haven't messaged anyone in 2+ weeks - catch up",action:`showView('messages')`,btn:"Open Inbox"});
   }
+  // v1.1: daily challenge banner - the FUN bit
+  const ch=todayChallenge();
+  const done=state._challengeCompleted?.[challengeKey()]===true;
+  const challengeBanner=ch?`<div style="background:linear-gradient(135deg,#3a2b20,#241a14);border:1px solid var(--accent);border-radius:8px;padding:.5em .8em;margin-bottom:.6em;display:flex;align-items:center;gap:.7em;box-shadow:0 2px 8px rgba(232,176,74,.1)">
+    <div style="font-size:1.4em">${done?"✓":"🎯"}</div>
+    <div style="flex:1">
+      <div style="font-size:.7em;text-transform:uppercase;letter-spacing:1.5px;color:var(--accent)">Today's Challenge</div>
+      <div style="font-weight:600;${done?'text-decoration:line-through;opacity:.6':''}">${esc(ch.label)}</div>
+    </div>
+    <div style="font-size:.8em;color:${done?'var(--green)':'var(--accent)'};font-weight:bold">+${ch.reward} rep</div>
+  </div>`:"";
   if(!tasks.length){
-    return `<div style="background:#1b1410;border-left:3px solid var(--green);padding:.5em .8em;border-radius:6px;margin-bottom:.6em"><b>All caught up.</b> <span class="muted">Advance the day to move things along.</span></div>`;
+    return `${challengeBanner}<div style="background:#1b1410;border-left:3px solid var(--green);padding:.5em .8em;border-radius:6px;margin-bottom:.6em"><b>All caught up.</b> <span class="muted">Advance the day to move things along.</span></div>`;
   }
-  return `<div style="background:#1b1410;border-left:3px solid var(--accent);padding:.5em .8em;border-radius:6px;margin-bottom:.6em">
-    <b>Today (${DAYS[state.dayIdx]} of Week ${state.week})</b>
+  return `${challengeBanner}<div style="background:#1b1410;border-left:3px solid var(--accent);padding:.5em .8em;border-radius:6px;margin-bottom:.6em">
+    <b>${DAYS[state.dayIdx]} · Week ${state.week}</b>
     <ul style="margin:.3em 0 0 0;padding-left:1.2em">
       ${tasks.map(t=>`<li>${esc(t.text)} <button class="reroll" style="margin-left:.4em" onclick="${t.action}">${esc(t.btn)}</button></li>`).join("")}
     </ul>
@@ -2616,6 +2696,7 @@ function issueCard(id){
   if(color==="yellow"){s.mood=clamp(s.mood-6);s.ability=clamp(s.ability-0.3);state.rep-=1;}
   if(color==="purple"){s.mood=clamp(s.mood+10);s.ability=clamp(s.ability+1.4);s.effort=clamp(s.effort+1);state.rep+=3;}
   checkCardMissions(s,color);
+  checkChallengeReward();
   toast(`${color} card issued to ${s.name}`);
   closeModal();renderHud();buildNav();showView(state.role==="tutor"?"formroom":"classroom");
 }
@@ -3147,10 +3228,13 @@ async function precomputeAnswers(testId,classIdx){
         const ability=effectiveAbilityFor(s,q)/100;
         let idx;
         if(q.type==="mc"){
-          idx=Math.random()<ability?q.correct
+          // v1.1: correctness floor of 50% + ability scaling, so obvious questions get obvious answers.
+          const pCorrect=Math.min(0.97,0.55+ability*0.42);
+          idx=Math.random()<pCorrect?q.correct
             :q.options.map((_,i)=>i).filter(i=>i!==q.correct)[Math.floor(Math.random()*Math.max(1,q.options.length-1))]??0;
         }else{
-          idx=Math.random()<ability?q.correct:(q.correct===0?1:0);
+          const pCorrect=Math.min(0.95,0.6+ability*0.35);
+          idx=Math.random()<pCorrect?q.correct:(q.correct===0?1:0);
         }
         return {pick:idx,text:q.type==="mc"?(q.options[idx]||""):(idx===0?"True":"False")};
       }
@@ -3294,10 +3378,13 @@ async function _streamFillAnswersImpl(testId,classIdx,test,cls,asn){
         const ability=(s.ability*.7+s.effort*.2+s.mood*.1)/100;
         let idx;
         if(q.type==="mc"){
-          idx=Math.random()<ability?q.correct
+          // v1.1: correctness floor of 50% + ability scaling, so obvious questions get obvious answers.
+          const pCorrect=Math.min(0.97,0.55+ability*0.42);
+          idx=Math.random()<pCorrect?q.correct
             :q.options.map((_,i)=>i).filter(i=>i!==q.correct)[Math.floor(Math.random()*Math.max(1,q.options.length-1))]??0;
         }else{
-          idx=Math.random()<ability?q.correct:(q.correct===0?1:0);
+          const pCorrect=Math.min(0.95,0.6+ability*0.35);
+          idx=Math.random()<pCorrect?q.correct:(q.correct===0?1:0);
         }
         asn[s.id].answers[qi]={pick:idx,text:q.type==="mc"?(q.options[idx]||""):(idx===0?"True":"False"),pending:false};
       }
@@ -3593,12 +3680,14 @@ async function studentAnswer(s,q){
   const ability=(s.ability*.7 + s.effort*.2 + s.mood*.1)/100; // 0..1 academic
   const writing=s.writing/100;                                 // 0..1 written style
   if(q.type==="mc"){
-    const idx=Math.random()<ability?q.correct
+    const pCorrect=Math.min(0.97,0.55+ability*0.42);
+    const idx=Math.random()<pCorrect?q.correct
       :q.options.map((_,i)=>i).filter(i=>i!==q.correct)[Math.floor(Math.random()*Math.max(1,q.options.length-1))]??0;
     return {pick:idx,text:q.options[idx]||""};
   }
   if(q.type==="tf"){
-    const idx=Math.random()<ability?q.correct:(q.correct===0?1:0);
+    const pCorrect=Math.min(0.95,0.6+ability*0.35);
+    const idx=Math.random()<pCorrect?q.correct:(q.correct===0?1:0);
     return {pick:idx,text:idx===0?"True":"False"};
   }
   return {text:await generateWrittenAnswer(s,q,ability,writing)};
@@ -3648,26 +3737,43 @@ function viewGrading(){
       respText=`<span data-ans="${t.id}-${s.id}-${i}">${esc(ans.text||"(left blank)")}</span>`;
     }
     const cur=sub.perQ[i];
-    const tiers=TIERS.map(tr=>`<button class="tier t-${tr.key} ${cur===tr.pct?"sel":""}"
-      ${sub.scored?"disabled":""}
-      onclick="setQScore(${t.id},${s.id},${i},${tr.pct},true)">${tr.label} <small>(${fmtScore(tr.pct,t.scale)})</small></button>`).join("");
+    // v1.1: TF/MC get binary Correct/Wrong (with auto-pre-fill), written gets the tier ladder.
+    let scoreControls="";
+    if(q.type==="mc"||q.type==="tf"){
+      const correctChosen=q.type==="mc"?(ans.pick===q.correct):(ans.pick===q.correct);
+      const isCorrect=cur===100;
+      const isWrong=cur===0;
+      // Auto-fill on first render based on student's actual pick.
+      if(cur===null && !sub.scored && !sub.absent && ans.pick!==undefined){
+        sub.perQ[i]=correctChosen?100:0;
+      }
+      scoreControls=`<div style="display:flex;gap:.5em;margin-top:.4em">
+        <button class="tier t-perfect ${isCorrect?'sel':''}" ${sub.scored?"disabled":""} onclick="setQScore(${t.id},${s.id},${i},100,true)" style="flex:1">✓ Correct (100)</button>
+        <button class="tier t-blank ${isWrong?'sel':''}" ${sub.scored?"disabled":""} onclick="setQScore(${t.id},${s.id},${i},0,true)" style="flex:1">✗ Wrong (0)</button>
+      </div>`;
+    } else {
+      const tiers=TIERS.map(tr=>`<button class="tier t-${tr.key} ${cur===tr.pct?"sel":""}"
+        ${sub.scored?"disabled":""}
+        onclick="setQScore(${t.id},${s.id},${i},${tr.pct},true)">${tr.label} <small>(${fmtScore(tr.pct,t.scale)})</small></button>`).join("");
+      scoreControls=`<div class="tiers">${tiers}</div>
+        <div class="scorer">
+          <label>Fine-tune:</label>
+          <input type="number" min="0" max="100" value="${cur==null?"":cur}"
+            ${sub.scored?"disabled":""}
+            oninput="setQScore(${t.id},${s.id},${i},this.value,false)"
+            placeholder="0-100" style="width:5em">
+          <span class="max">${t.scale!=="percent"?"= "+fmtScore(cur==null?0:cur,t.scale):"/ 100"}</span>
+        </div>`;
+    }
     const rerollBtn=(q.type==="sa"||q.type==="es"||q.type==="fib")&&!sub.scored?
-      `<button class="reroll" onclick="rerollAnswer(${t.id},${s.id},${i})">reroll answer</button>`:"";
+      `<button class="reroll" onclick="rerollAnswer(${t.id},${s.id},${i})" title="Generate a fresh per-student answer for this question">↻ reroll</button>`:"";
     return `<div class="qp">
       <div class="prompt">Q${i+1}. ${esc(q.prompt)} <small style="opacity:.6">(${meta[q.type]})</small>${rerollBtn}</div>
       ${q.type==="mc"?`<div style="font-size:.85em;opacity:.7">Options: ${q.options.map((o,j)=>`${j===q.correct?"<b>":""}${esc(o)}${j===q.correct?" (key)</b>":""}`).join(" / ")}</div>`:""}
       ${q.type==="tf"?`<div style="font-size:.85em;opacity:.7">Key: <b>${q.correct===0?"True":"False"}</b></div>`:""}
-      ${(q.type==="sa"||q.type==="es")&&q.answer?`<div style="font-size:.85em;opacity:.7">Model: <i>${esc(q.answer)}</i></div>`:""}
+      ${(q.type==="sa"||q.type==="es"||q.type==="fib")&&q.answer?`<div style="font-size:.85em;opacity:.7">Model: <i>${esc(q.answer)}</i></div>`:""}
       <div class="resp">${respText}</div>
-      <div class="tiers">${tiers}</div>
-      <div class="scorer">
-        <label>Fine-tune:</label>
-        <input type="number" min="0" max="100" value="${cur==null?"":cur}"
-          ${sub.scored?"disabled":""}
-          oninput="setQScore(${t.id},${s.id},${i},this.value,false)"
-          placeholder="0-100">
-        <span class="max">${t.scale!=="percent"?"= "+fmtScore(cur==null?0:cur,t.scale):"/ 100"}</span>
-      </div>
+      ${scoreControls}
     </div>`;
   }).join("");
   const totalSoFar=sub.perQ.reduce((a,v)=>a+(v==null?0:v),0);
@@ -3685,10 +3791,23 @@ function viewGrading(){
     return `<button class="${cls2}" style="padding:.2em .4em;${isHere?'outline:2px solid var(--accent);':''}font-size:.78em;min-width:2em"
       onclick="state.gradingPage=${i};showView('grading')" title="${esc(st.name)}${ss.scored?' - '+fmtScore(ss.score,t.scale):''}">${i+1}${dot}</button>`;
   }).join("");
-  return `<h2>Grading - "${esc(t.title)}" (${cls.name})
-    <small class="muted">Scale: ${SCALES.find(x=>x.key===t.scale)?.label||t.scale} · Weight: ${t.weight.toFixed(1)}x · Class avg so far: ${classScored.length?fmtScore(classAvg,t.scale):"-"} (${classScored.length}/${cls.students.length} returned)</small>
-    <button onclick="aiMarkClass(${t.id})" style="float:right;margin-left:.3em" title="AI marks every unscored paper in ONE call - review before returning">AI Mark Class</button>
+  const progressPct=(classScored.length/Math.max(1,cls.students.length))*100;
+  return `<h2 style="margin-bottom:.3em">Grading - "${esc(t.title)}" <small class="muted">${cls.name}</small>
+    <button onclick="aiMarkClass(${t.id})" class="primary" style="float:right;margin-left:.3em" title="AI marks every unscored paper in ONE call - review before returning">⚡ AI Mark Class</button>
     </h2>
+    <div style="background:#1b1410;padding:.5em .8em;border-radius:8px;margin-bottom:.6em;display:flex;align-items:center;gap:.8em">
+      <div style="flex:1">
+        <div style="font-size:.8em;opacity:.75;margin-bottom:.25em">Returned ${classScored.length} of ${cls.students.length}</div>
+        <div style="height:10px;background:#0e0a07;border-radius:5px;overflow:hidden;border:1px solid #000">
+          <div style="height:100%;width:${progressPct}%;background:linear-gradient(90deg,var(--accent-dim),var(--accent));transition:width .4s"></div>
+        </div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:.7em;text-transform:uppercase;letter-spacing:1px;opacity:.7">Class avg</div>
+        <div style="font-size:1.6em;font-weight:bold;color:var(--accent);font-family:var(--serif)">${classScored.length?fmtScore(classAvg,t.scale):"-"}</div>
+        <div style="font-size:.7em;opacity:.6">${SCALES.find(x=>x.key===t.scale)?.label} · ${t.weight.toFixed(1)}x</div>
+      </div>
+    </div>
     ${classPicker()}
     <p class="muted">Flip through each paper with the arrows, or jump using the buttons below. Score every question, then return the test.</p>
     ${(()=>{
@@ -4376,6 +4495,7 @@ function sendReply(){
   toast("Reply sent.");
   evaluatePlayerMessage(body,c);
   _trackAction();
+  checkChallengeReward();
   // Schedule a follow-up from the contact - keeps conversations going.
   scheduleFollowupFromContact(c,body);
 }
@@ -5056,6 +5176,8 @@ async function advanceDay(){
     s.mood=clamp(s.mood+(Math.random()*6-3));
     s.effort=clamp(s.effort+(Math.random()*4-2));
   }));
+  // v1.1: check daily challenge reward at the moment of day advance
+  checkChallengeReward();
   // Check for sneakily-late kids who got marked absent (parent gets angry)
   checkLatePunishments();
   // Apply any planned lesson activities for the day BEFORE releasing world events.
@@ -5070,11 +5192,6 @@ async function advanceDay(){
   }
   renderHud();buildNav();refreshCurrentView();
   saveGame(false);
-  // v1.05: random tiny flavor toast - 35% chance, Friday gets its own pool
-  if(Math.random()<.35){
-    const pool=state.dayIdx===4?FRIDAY_FLAVOR:DAY_FLAVOR;
-    toast(pool[Math.floor(Math.random()*pool.length)]);
-  }
   // Pending replies should ALWAYS fire when due - don't throttle them.
   tickPendingReplies().catch(()=>{});
   // New inbound messages can be throttled if the queue is busy.
