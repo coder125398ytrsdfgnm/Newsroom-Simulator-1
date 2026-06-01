@@ -270,7 +270,7 @@
 
 <div id="menu">
   <h1>CHALKDUST</h1>
-  <div class="sub">A teacher's life at Rust Hollow Public School #14</div>
+  <div class="sub">Rust Hollow Public School #14 · from Probationary to a legacy</div>
   <button class="primary" onclick="openSetup()">New Career</button>
   <button id="continueBtn" onclick="continueGame()">Continue</button>
   <button onclick="showHowToPlay()">How to Play</button>
@@ -341,6 +341,7 @@
       <span>Rating <span id="ratingHud"></span></span>
     </div>
     <div>
+      <button onclick="retireWithHonors()" id="retireBtn" style="display:none;background:linear-gradient(180deg,#e8b04a,#a87a2c);color:#1b1410;font-weight:700;margin-right:.4em" title="You've reached the summit. End your career and write your legacy.">★ Retire with Honors</button>
       <button class="primary" onclick="advanceDay()" id="nextDayBtn">Next Day &rarr;</button>
     </div>
   </header>
@@ -384,7 +385,7 @@
 // STATE
 // ============================================================
 const DAYS=["Mon","Tue","Wed","Thu","Fri"];
-const VERSION="1.1";
+const VERSION="1.2";
 const SAVE_KEY="chalkdust:save";
 
 // ============ AI helpers (single point for the no-placeholder rule) ============
@@ -803,7 +804,13 @@ async function _newCareerImpl(role,name,subject,className,ov,title){
     homeworkTemplates:[],
     planTemplates:[],
     quarterComments:{},         // {quarterNumber:{studentId: comment}}
-    contextualTriggersDone:{}   // dedupe one-time triggers
+    contextualTriggersDone:{},  // dedupe one-time triggers
+    // v1.2 - career legacy / endgame
+    peakRating:0, peakRep:10, highestRankLevel:0,
+    careerStartReal:Date.now(),
+    notableMoments:[],          // {week,year,text}
+    careerOver:false,
+    seenWelcome:false
   };
   await seedContacts();
   ov.setProgress(100);
@@ -879,6 +886,8 @@ async function beginCareer(){
     buildNav();
     showView(state.role==="tutor"?"formroom":"classroom");
     renderHud();
+    // First-career onboarding - frame the goal so the player knows where they're headed.
+    if(!state.seenWelcome){state.seenWelcome=true;showWelcome();saveGame(false);}
   }catch(e){
     if(window.console)console.error("[beginCareer] crash:",e);
     document.querySelectorAll(".modal").forEach(m=>m.remove());
@@ -930,6 +939,7 @@ function buildNav(){
   }
   html+=`<div class="heading">Reports</div>`;
   if(role==="tutor")html+=navBtn("grades","Quarterly Grades");
+  html+=navBtn("career","My Career");
   html+=navBtn("activity","Staffroom Feed");
   html+=navBtn("achievements","Achievements");
   html+=navBtn("settings","Settings");
@@ -972,6 +982,7 @@ function showView(v){
   else if(v==="missions")host.innerHTML=viewMissions();
   else if(v==="activity")host.innerHTML=viewActivity();
   else if(v==="achievements")host.innerHTML=viewAchievements();
+  else if(v==="career")host.innerHTML=viewCareer();
   else if(v==="settings")host.innerHTML=viewSettings();
   else if(v==="homework")host.innerHTML=viewHomework();
   else if(v==="planner")host.innerHTML=viewPlanner();
@@ -1002,9 +1013,16 @@ function renderHud(){
       </span>`;
   }
   const r=computeRating();state.rating=r;
+  // v1.2: track career peaks
+  if(r>(state.peakRating||0))state.peakRating=Math.round(r);
+  if(state.rep>(state.peakRep||0))state.peakRep=state.rep;
+  if(rl>(state.highestRankLevel||0))state.highestRankLevel=rl;
   const lab=ratingLabel(r);
   const el=document.getElementById("ratingHud");
   if(el)el.innerHTML=`<span class="pill ${lab.cls}">${r.toFixed(0)} · ${lab.label}</span>`;
+  // Surface the retirement option the moment it becomes available
+  const retBtn=document.getElementById("retireBtn");
+  if(retBtn)retBtn.style.display=canRetire()?"inline-block":"none";
 }
 
 // ============================================================
@@ -1228,6 +1246,7 @@ function applyOfficeHours(sid){
   if(crit){
     burstConfetti();
     logActivity({type:"gossip",text:`★ BREAKTHROUGH in office hours with ${s.first} - something clicked.`});
+    recordMoment(`Breakthrough with ${s.first} in office hours - something finally clicked.`);
     toast(`★ BREAKTHROUGH! ${s.first}: +6 ability, +10 effort, +16 mood, +3 rep.`);
   }else{
     logActivity({type:"gossip",text:`You held office hours with ${s.first}. They left with a clearer plan.`});
@@ -2423,6 +2442,7 @@ function applyPromotions(){
     const prev=state.rank;
     state.rank=tier.key;
     showPromotionCeremony(prev,tier.key);
+    recordMoment(`Promoted to ${tier.key}.`);
     logActivity({type:"gossip",text:`${prev?"Promoted from "+prev+" ":"Promoted "}to ${tier.key}. New abilities unlocked.`});
     // Also drop a celebratory email from Principal
     queueDeptWarning("Principal",`Congratulations on your promotion to ${tier.key}. Your dedication has been noticed. Keep it up.`,"praise");
@@ -2481,6 +2501,7 @@ async function recommendHonors(studentId){
   s.effort=clamp(s.effort+3);
   state.rep+=4;
   logActivity({type:"gossip",text:`You nominated ${s.first} for honors.`});
+  recordMoment(`Nominated ${s.first} for honors.`);
   toast(`${s.first} recommended for honors. +4 rep.`);
   const c=spawnParentContactIfMissing(s);
   if(c){
@@ -2626,6 +2647,104 @@ function closeFireScreen(){
   document.getElementById("game").classList.remove("active");
   document.getElementById("menu").classList.remove("hidden");
   refreshContinueButton();
+}
+
+// ============================================================
+// v1.2 - CAREER LEGACY & RETIREMENT (the endgame)
+// ============================================================
+function recordMoment(text){
+  if(!state)return;
+  state.notableMoments=state.notableMoments||[];
+  state.notableMoments.push({week:state.week,year:state.year,text});
+  if(state.notableMoments.length>40)state.notableMoments.shift();
+}
+function lifetimeStats(){
+  const me=(state.title||"Ms.")+" "+state.name;
+  const allStudents=state.classes.flatMap(c=>c.students);
+  let green=0,yellow=0,purple=0,honors=0,detentions=0,advanced=0;
+  allStudents.forEach(s=>s.cards.forEach(c=>{
+    if(c.by!==me)return;
+    if(c.color==="green")green++;
+    if(c.color==="yellow")yellow++;
+    if(c.color==="purple")purple++;
+    if(/HONORS/i.test(c.reason||""))honors++;
+    if(/DETENTION/i.test(c.reason||""))detentions++;
+    if(/ADVANCED TRACK/i.test(c.reason||""))advanced++;
+  }));
+  const testsGraded=state.tests.reduce((a,t)=>a+Object.values(t.assignments||{}).reduce((b,asn)=>b+Object.values(asn).filter(x=>x.scored).length,0),0);
+  const achUnlocked=Object.keys(state.achievements||{}).length;
+  return {
+    studentsTaught:allStudents.length,
+    green,yellow,purple,honors,detentions,advanced,
+    testsGraded,
+    peakRating:state.peakRating||0,
+    peakRep:state.peakRep||0,
+    years:state.year,
+    rank:state.rank,
+    achUnlocked,achTotal:ACHIEVEMENTS.length,
+    moments:state.notableMoments||[]
+  };
+}
+// Retirement is the WIN state: top rank, sustained excellence, and time served.
+function canRetire(){
+  if(!state||state.careerOver)return false;
+  return rankLevel()>=3 && (state.rating||0)>=75 && state.year>=2;
+}
+function retirementProgress(){
+  // Returns {rank, rating, years} each 0..1 toward the retirement bar.
+  return {
+    rank:Math.min(1,rankLevel()/3),
+    rating:Math.min(1,(state.rating||0)/75),
+    years:Math.min(1,(state.year-1)/1)
+  };
+}
+async function retireWithHonors(){
+  if(!canRetire()){toast("Not yet eligible to retire with honors.");return;}
+  if(!confirm("Retire with honors? This ends your career and writes your legacy. There's no coming back.")){return;}
+  state.careerOver=true;
+  const st=lifetimeStats();
+  const ov=showBusy("Writing your legacy...");
+  // AI reflection in the voice of those you leave behind. Templated fallback.
+  let reflection=null;
+  try{
+    const prompt=`Write a SHORT warm retirement tribute (3-4 sentences) for a teacher named ${(state.title||"Ms.")+" "+state.name} retiring from Rust Hollow Public School after ${st.years} years. They reached the rank of ${st.rank}, recommended ${st.honors} students for honors, and were known for their dedication. Write it as if read aloud at their farewell by a colleague. Plain prose, no markdown, no quotes around the body.`;
+    reflection=await aiLine(prompt,600);
+  }catch(e){}
+  ov.close();
+  if(!reflection){
+    reflection=`${st.years} years. Hundreds of small mornings, a thousand quiet decisions. The students you reached carry pieces of you into rooms you'll never see. That is the whole job, and you did it.`;
+  }
+  showLegacyEnding(st,reflection);
+}
+function showLegacyEnding(st,reflection){
+  burstConfetti();setTimeout(burstConfetti,400);setTimeout(burstConfetti,800);
+  const m=document.createElement("div");m.className="modal";
+  m.style.background="rgba(11,8,5,.97)";
+  m.innerHTML=`<div class="box" style="max-width:600px;border:3px solid var(--accent);background:linear-gradient(180deg,#3a2b20,#1b1410);box-shadow:0 0 60px rgba(232,176,74,.35);text-align:center">
+    <div style="font-size:.8em;text-transform:uppercase;letter-spacing:3px;color:var(--accent)">A Life in Teaching</div>
+    <h1 style="font-family:var(--serif);font-size:2.6em;margin:.15em 0;color:var(--accent);text-shadow:0 0 24px rgba(232,176,74,.4)">Retired with Honors</h1>
+    <p style="font-size:1.1em">${esc((state.title||"Ms.")+" "+state.name)} · ${esc(st.rank)}</p>
+    <div style="background:#0e0a07;border-radius:8px;padding:1em;margin:1em 0;font-family:var(--serif);text-align:left;font-style:italic;line-height:1.5">${esc(reflection)}</div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.6em;margin:1em 0">
+      ${legacyStat("Years served",st.years)}
+      ${legacyStat("Students taught",st.studentsTaught)}
+      ${legacyStat("Peak rating",st.peakRating)}
+      ${legacyStat("Green cards",st.green)}
+      ${legacyStat("Honors given",st.honors)}
+      ${legacyStat("Achievements",st.achUnlocked+"/"+st.achTotal)}
+    </div>
+    ${st.moments.length?`<details style="text-align:left;margin:.5em 0"><summary style="cursor:pointer;color:var(--accent)">Moments that mattered (${st.moments.length})</summary>
+      <ul style="font-size:.85em;max-height:160px;overflow:auto;margin:.4em 0">${st.moments.slice().reverse().map(mo=>`<li>Y${mo.year} Wk${mo.week}: ${esc(mo.text)}</li>`).join("")}</ul></details>`:""}
+    <p class="muted" style="margin-top:1em">The hallway is quiet now. Someone has already taken your room. The work goes on - it always does - but it remembers you.</p>
+    <button class="primary" onclick="closeFireScreen()" style="font-size:1.1em;padding:.6em 1.4em">Close the book</button>
+  </div>`;
+  document.body.appendChild(m);
+}
+function legacyStat(label,val){
+  return `<div style="background:#0e0a07;border-radius:6px;padding:.5em">
+    <div style="font-size:1.5em;font-weight:bold;color:var(--accent);font-family:var(--serif)">${val}</div>
+    <div style="font-size:.7em;opacity:.7;text-transform:uppercase;letter-spacing:.5px">${label}</div>
+  </div>`;
 }
 
 // ============================================================
@@ -3782,13 +3901,14 @@ function viewGrading(){
     // v1.1: TF/MC get binary Correct/Wrong (with auto-pre-fill), written gets the tier ladder.
     let scoreControls="";
     if(q.type==="mc"||q.type==="tf"){
-      const correctChosen=q.type==="mc"?(ans.pick===q.correct):(ans.pick===q.correct);
-      const isCorrect=cur===100;
-      const isWrong=cur===0;
-      // Auto-fill on first render based on student's actual pick.
+      const correctChosen=ans.pick===q.correct;
+      // Auto-fill on first render based on the student's actual pick, THEN derive selection.
       if(cur===null && !sub.scored && !sub.absent && ans.pick!==undefined){
         sub.perQ[i]=correctChosen?100:0;
       }
+      const eff=sub.perQ[i];
+      const isCorrect=eff===100;
+      const isWrong=eff===0;
       scoreControls=`<div style="display:flex;gap:.5em;margin-top:.4em">
         <button class="tier t-perfect ${isCorrect?'sel':''}" ${sub.scored?"disabled":""} onclick="setQScore(${t.id},${s.id},${i},100,true)" style="flex:1">✓ Correct (100)</button>
         <button class="tier t-blank ${isWrong?'sel':''}" ${sub.scored?"disabled":""} onclick="setQScore(${t.id},${s.id},${i},0,true)" style="flex:1">✗ Wrong (0)</button>
@@ -5181,20 +5301,6 @@ function viewActivity(){
 // TIME
 // ============================================================
 
-// v1.05: random tiny flavor lines that pop on day advances - make it feel alive
-const DAY_FLAVOR=[
-  "Someone in the back is humming.","Marker squeak fills the silence.","A chair scrapes.",
-  "Someone forgot their pencil. Again.","A folded note travels three desks.",
-  "Outside, a leaf blower whirs.","The clock above the door is two minutes fast.",
-  "A backpack zipper buzzes.","Coffee from the staffroom is still warm.",
-  "The fluorescent in row three flickers.","Someone yawns spectacularly.",
-  "A pen taps out a rhythm.","Sneakers squeak on the linoleum.",
-  "Half the class is staring at the window.","The kid in the corner is drawing dragons again."
-];
-const FRIDAY_FLAVOR=[
-  "Friday energy is in the air.","Weekend whispers in the hallways.","A weight lifts at lunch.",
-  "Half-attention, half-anticipation.","The clock crawls toward 3."
-];
 let _lastDayAdvance=0;
 async function advanceDay(){
   if(_criticalWork>0){flashGate();return;}
@@ -5331,7 +5437,7 @@ const RANDOM_EVENTS=[
     ]},
   {id:"breakthrough",label:"Quiet Breakthrough",
     body:"A struggling student in your class shows up with a complete homework set for the first time all year.",
-    choices:[{label:"Make a point of acknowledging it",fn:()=>{const strugglers=state.classes.flatMap(c=>c.students).filter(s=>s.effort<50).sort((a,b)=>a.effort-b.effort);const s=strugglers[0];if(s){s.cards.push({color:"green",reason:"Showed up with a complete assignment for the first time",week:state.week,dayIdx:state.dayIdx,by:(state.title||"Ms.")+" "+state.name});s.mood=clamp(s.mood+15);s.effort=clamp(s.effort+10);s.ability=clamp(s.ability+1.5);state.rep+=3;logActivity({type:"card",text:`${s.first} broke through - you noticed and named it.`});toast(`${s.first} just changed everything. +3 rep.`);burstConfetti();}}}]}
+    choices:[{label:"Make a point of acknowledging it",fn:()=>{const strugglers=state.classes.flatMap(c=>c.students).filter(s=>s.effort<50).sort((a,b)=>a.effort-b.effort);const s=strugglers[0];if(s){s.cards.push({color:"green",reason:"Showed up with a complete assignment for the first time",week:state.week,dayIdx:state.dayIdx,by:(state.title||"Ms.")+" "+state.name});s.mood=clamp(s.mood+15);s.effort=clamp(s.effort+10);s.ability=clamp(s.ability+1.5);state.rep+=3;logActivity({type:"card",text:`${s.first} broke through - you noticed and named it.`});recordMoment(`${s.first} turned a corner - the first complete assignment all year.`);toast(`${s.first} just changed everything. +3 rep.`);burstConfetti();}}}]}
 ];
 
 async function maybeFireRandomEvent(){
@@ -5503,6 +5609,50 @@ window.addEventListener("DOMContentLoaded",refreshContinueButton);
 // ============================================================
 // v1.0 - VIEWS: ACHIEVEMENTS + SETTINGS
 // ============================================================
+function viewCareer(){
+  const st=lifetimeStats();
+  const prog=retirementProgress();
+  const eligible=canRetire();
+  const bar=(pct,label,met)=>`<div style="margin:.4em 0">
+    <div style="display:flex;justify-content:space-between;font-size:.85em;margin-bottom:.2em">
+      <span>${met?"✓ ":""}${esc(label)}</span><span class="muted">${Math.round(pct*100)}%</span>
+    </div>
+    <div style="height:9px;background:#0e0a07;border:1px solid #000;border-radius:5px;overflow:hidden">
+      <div style="height:100%;width:${pct*100}%;background:${met?'var(--green)':'linear-gradient(90deg,var(--accent-dim),var(--accent))'};transition:width .4s"></div>
+    </div>
+  </div>`;
+  return `<h2>My Career</h2>
+    <p class="muted">${esc((state.title||"Ms.")+" "+state.name)} · ${esc(st.rank)} · Year ${st.years}</p>
+
+    <div style="background:linear-gradient(135deg,#3a2b20,#241a14);border:1px solid var(--accent);border-radius:10px;padding:1em;margin:.6em 0">
+      <h3 style="margin-top:0">${eligible?"★ Ready to retire with honors":"The road to a legacy"}</h3>
+      <p class="muted" style="font-size:.85em;margin:.2em 0 .6em">Reach <b>Master Teacher</b>, sustain a rating of <b>75+</b>, and serve into your <b>second year</b>. Then you may retire with honors - the game's true ending.</p>
+      ${bar(prog.rank,"Rank: "+st.rank+(rankLevel()>=3?"":" (need Master Teacher)"),rankLevel()>=3)}
+      ${bar(prog.rating,"Rating: "+Math.round(state.rating||0)+" / 75",(state.rating||0)>=75)}
+      ${bar(prog.years,"Tenure: Year "+st.years+" / 2",state.year>=2)}
+      ${eligible?`<button class="primary" onclick="retireWithHonors()" style="margin-top:.6em;width:100%;font-size:1.05em;padding:.6em">★ Retire with Honors</button>`:`<p class="muted" style="font-size:.8em;margin-top:.5em;font-style:italic">Keep teaching. The summit is closer than it looks.</p>`}
+    </div>
+
+    <h3>Lifetime record</h3>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:.5em">
+      ${legacyStat("Students taught",st.studentsTaught)}
+      ${legacyStat("Peak rating",st.peakRating)}
+      ${legacyStat("Peak reputation",st.peakRep)}
+      ${legacyStat("Green cards",st.green)}
+      ${legacyStat("Yellow cards",st.yellow)}
+      ${legacyStat("Purple cards",st.purple)}
+      ${legacyStat("Honors given",st.honors)}
+      ${legacyStat("Detentions",st.detentions)}
+      ${legacyStat("Tests graded",st.testsGraded)}
+      ${legacyStat("Achievements",st.achUnlocked+"/"+st.achTotal)}
+    </div>
+
+    ${st.moments.length?`<h3 style="margin-top:1em">Moments that mattered</h3>
+      <div style="background:#1b1410;border-radius:8px;padding:.5em .8em;max-height:240px;overflow:auto">
+        ${st.moments.slice().reverse().map(mo=>`<div style="padding:.25em 0;border-bottom:1px solid #2a1f18;font-size:.88em"><span class="muted">Y${mo.year} Wk${mo.week}</span> · ${esc(mo.text)}</div>`).join("")}
+      </div>`:`<p class="muted" style="margin-top:1em;font-style:italic">No standout moments yet. Breakthroughs, honors, and turning points will land here.</p>`}`;
+}
+
 function viewAchievements(){
   state.achievements=state.achievements||{};
   const unlocked=ACHIEVEMENTS.filter(a=>state.achievements[a.id]);
@@ -5776,6 +5926,7 @@ function advancedTrack(sid){
     scheduleFollowupFromContact(c,"advanced track recommendation");
   }
   logActivity({type:"gossip",text:`${s.first} recommended for advanced track.`});
+  recordMoment(`Placed ${s.first} on the advanced track after three straight 90+ scores.`);
   toast(`${s.first} placed on advanced track. +4 rep.`);
   closeModal();renderHud();buildNav();refreshCurrentView();saveGame(false);
 }
@@ -5811,6 +5962,14 @@ function migrateSave(s){
   s.planTemplates=s.planTemplates||[];
   s.quarterComments=s.quarterComments||{};
   s.contextualTriggersDone=s.contextualTriggersDone||{};
+  // v1.2 legacy fields
+  if(s.peakRating==null)s.peakRating=Math.round(s.rating||0);
+  if(s.peakRep==null)s.peakRep=s.rep||0;
+  if(s.highestRankLevel==null)s.highestRankLevel=0;
+  if(s.careerStartReal==null)s.careerStartReal=Date.now();
+  s.notableMoments=s.notableMoments||[];
+  if(s.careerOver==null)s.careerOver=false;
+  s.seenWelcome=true; // returning players don't need the intro
   return s;
 }
 function continueGame(){
@@ -5843,10 +6002,34 @@ function refreshContinueButton(){
 // ============================================================
 // CREDITS / HOW TO PLAY
 // ============================================================
+function showWelcome(){
+  const m=document.createElement("div");m.className="modal";
+  m.innerHTML=`<div class="box" style="max-width:540px;border:2px solid var(--accent);box-shadow:0 0 40px rgba(232,176,74,.2)">
+    <div style="font-size:.8em;text-transform:uppercase;letter-spacing:2px;color:var(--accent)">Your first morning</div>
+    <h2 style="font-family:var(--serif);margin:.2em 0">Welcome to Rust Hollow</h2>
+    <p>The paint is peeling and the coffee is bad, but the kids are yours now. You start at the bottom rung: <b>Probationary</b>.</p>
+    <p><b>Your goal:</b> climb to <b>Master Teacher</b>, earn a sterling reputation, and ultimately <b>retire with honors</b> - the legacy ending. Get there by being the teacher these students need.</p>
+    <div style="background:#1b1410;border-radius:8px;padding:.7em 1em;margin:.6em 0;font-size:.9em">
+      <b style="color:var(--accent)">Each day, the basics:</b>
+      <ul style="margin:.3em 0;padding-left:1.2em">
+        <li>Take the <b>register</b> (Roster) before advancing</li>
+        <li>${state.role==="tutor"?"Address <b>student needs</b> as they surface":"Run <b>tests</b>, set <b>homework</b>, plan <b>lessons</b>"}</li>
+        <li>Reply to <b>parents and students</b> who write in</li>
+        <li>Issue <b>cards</b> - they shape mood, ability, and your rep</li>
+        <li>Watch the <b>Today</b> banner and the <b>daily challenge</b></li>
+      </ul>
+    </div>
+    <p class="muted" style="font-size:.85em">Everything connects: attendance, homework, and your lesson plan all feed into how students perform. Check <b>My Career</b> any time to see your progress toward retirement.</p>
+    <div class="row" style="justify-content:flex-end"><button class="primary" onclick="closeModal()">Ring the bell</button></div>
+  </div>`;
+  document.body.appendChild(m);
+  m.onclick=e=>{if(e.target===m)closeModal();};
+}
 function showHowToPlay(){
   const m=document.createElement("div");m.className="modal";
   m.innerHTML=`<div class="box">
     <h2>How to Play</h2>
+    <p><b>The goal:</b> climb from Probationary to <b>Master Teacher</b> and retire with honors. Track it under <b>My Career</b>.</p>
     <p><b>Pick a role.</b> Form Tutor guides one class and reads cards other teachers write. Subject Teacher teaches their subject across multiple classes, builds tests, grades them, and writes cards.</p>
     <p><b>Cards</b> need a reason. They affect the student's mood and your reputation. Green for good, Yellow for trouble, Purple for outstanding.</p>
     <p><b>Tests</b>: drag question blocks onto the canvas in Test Builder. Pick a scale (Percentage, Letter, Points, Stars, Pass/Fail) and weight. Students attempt the test (AI writes their answers in voice). You grade every paper, flipping with the arrows.</p>
@@ -5862,7 +6045,8 @@ function showCredits(){
   const m=document.createElement("div");m.className="modal";
   m.innerHTML=`<div class="box">
     <h2>Chalkdust</h2>
-    <p style="opacity:.7">A teacher dashboard sim, version ${VERSION}</p>
+    <p style="opacity:.7">A teacher dashboard sim · v${VERSION} (complete)</p>
+    <p><b>The arc:</b> Start Probationary. Teach, grade, mentor, and weather the chaos. Climb to Master Teacher and retire with honors - or burn out and get walked to the door.</p>
     <p><b>Setting:</b> Rust Hollow Public School #14, a struggling public school somewhere out past the highway.</p>
     <p><b>Engine:</b> Hand-built browser game in a single HTML file. No framework, no build step.</p>
     <p><b>AI:</b> All in-game creative content - student names and stories, teacher rosters, card reasons, parent and student messages, gossip - is generated live via <a href="https://pollinations.ai" target="_blank" rel="noopener" style="color:var(--accent)">Pollinations.ai</a> (keyless text endpoint, OpenAI model). No placeholders.</p>
