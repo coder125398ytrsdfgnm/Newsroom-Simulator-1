@@ -385,7 +385,7 @@
 // STATE
 // ============================================================
 const DAYS=["Mon","Tue","Wed","Thu","Fri"];
-const VERSION="1.2";
+const VERSION="1.3";
 const SAVE_KEY="chalkdust:save";
 
 // ============ AI helpers (single point for the no-placeholder rule) ============
@@ -509,7 +509,7 @@ async function _aiOnce(prompt,opts={}){
   const url="https://text.pollinations.ai/"+encodeURIComponent(prompt)+
     "?model="+AI_MODEL+"&seed="+Math.floor(Math.random()*1e6);
   const ctrl=new AbortController();
-  const to=setTimeout(()=>ctrl.abort(),opts.timeout||40000);
+  const to=setTimeout(()=>ctrl.abort(),opts.timeout||28000);
   let resp;
   try{resp=await fetch(url,{signal:ctrl.signal});}
   finally{clearTimeout(to);}
@@ -541,11 +541,11 @@ async function aiText(prompt,opts={},extras={}){
           if(_criticalWork>0)gateLiveShow(t);
           return t;
         }
-        await new Promise(r=>setTimeout(r,700+i*500));
+        await new Promise(r=>setTimeout(r,400+i*350));
       }catch(e){
         lastErr=e;
         const code=e.status||0;
-        const wait=code===429?3000+i*1200:code>=500?1800+i*1000:1000+i*700;
+        const wait=code===429?2200+i*900:code>=500?1200+i*700:700+i*450;
         await new Promise(r=>setTimeout(r,wait));
       }
     }
@@ -1626,6 +1626,11 @@ function submitHomework(){
   const weight=parseFloat(document.getElementById("hwWeight").value)||1.0;
   const applyAll=document.getElementById("hwAllClasses")?.checked;
   if(!body){toast("Add some instructions.");return;}
+  // Conduct: homework instructions are seen by students and parents.
+  if(screenConduct(title+" "+body)){
+    registerConduct("Homework you set contained inappropriate content.");
+    closeModal();return;
+  }
   state.homework=state.homework||[];
   const targets=applyAll?state.classes.map((_,i)=>i):[state.activeClassIdx];
   targets.forEach(classIdx=>{
@@ -2412,7 +2417,7 @@ function messageStudent(id){
   // preselect the student
   setTimeout(()=>{const sel=document.getElementById("composeStudent");if(sel)sel.value=id;},10);
 }
-function closeModal(){document.querySelectorAll(".modal").forEach(m=>m.remove());}
+function closeModal(){document.querySelectorAll(".modal:not(.terminal)").forEach(m=>m.remove());}
 
 // ============================================================
 // PROMOTIONS - rank-gated abilities
@@ -2471,6 +2476,7 @@ async function scheduleDetention(studentId){
   const s=findStudent(studentId);if(!s)return;
   const reason=prompt(`Detention reason for ${s.first}?`);
   if(!reason||!reason.trim()){toast("Detention needs a reason.");return;}
+  if(screenConduct(reason)){registerConduct("You logged an abusive detention reason on a student's record.");return;}
   s.cards.push({color:"yellow",reason:"DETENTION: "+reason.trim(),week:state.week,by:(state.title||"Ms.")+" "+state.name});
   s.mood=clamp(s.mood-10);
   s.effort=clamp(s.effort+8);   // shapes up effort over time
@@ -2623,7 +2629,8 @@ function fireMe(reason){
     rank:state.rank,
     cards:state.classes.reduce((a,c)=>a+c.students.reduce((b,s)=>b+s.cards.length,0),0)
   }:null;
-  const m=document.createElement("div");m.className="modal";
+  closeModal(); // clear any non-terminal modals behind the fire screen
+  const m=document.createElement("div");m.className="modal terminal";
   m.style.background="rgba(0,0,0,.95)";
   m.innerHTML=`<div class="box" style="max-width:560px;border:3px solid var(--red);background:#1b1410;text-align:center">
     <div style="font-size:4em;color:var(--red);text-shadow:0 0 20px rgba(226,100,100,.5);letter-spacing:6px;font-weight:bold;margin:.2em 0;animation:bubble-in .8s ease-out">TERMINATED</div>
@@ -2718,7 +2725,8 @@ async function retireWithHonors(){
 }
 function showLegacyEnding(st,reflection){
   burstConfetti();setTimeout(burstConfetti,400);setTimeout(burstConfetti,800);
-  const m=document.createElement("div");m.className="modal";
+  closeModal();
+  const m=document.createElement("div");m.className="modal terminal";
   m.style.background="rgba(11,8,5,.97)";
   m.innerHTML=`<div class="box" style="max-width:600px;border:3px solid var(--accent);background:linear-gradient(180deg,#3a2b20,#1b1410);box-shadow:0 0 60px rgba(232,176,74,.35);text-align:center">
     <div style="font-size:.8em;text-transform:uppercase;letter-spacing:3px;color:var(--accent)">A Life in Teaching</div>
@@ -2819,6 +2827,11 @@ function issueCard(id){
   const color=document.getElementById("cardColor").value;
   const reason=document.getElementById("cardReason").value.trim();
   if(!reason){toast("A card needs a reason.");return;}
+  // Conduct: a card written on a student's permanent record can't be abusive.
+  if(screenConduct(reason)){
+    registerConduct("You tried to write an abusive card on a student's record.");
+    closeModal();return;
+  }
   const s=findStudent(id);
   // Anti-spam: max 3 cards per student per day from you.
   const todayKey=`${state.week}.${state.dayIdx}`;
@@ -3347,6 +3360,12 @@ function clearTemplates(){
 }
 function saveTest(){
   if(!state.draftTest.questions.length){toast("Add at least one question.");return;}
+  // Conduct: screen every question's text instantly. Offensive content = straight to HR.
+  const allText=state.draftTest.questions.map(q=>(q.prompt||"")+" "+((q.options||[]).join(" "))+" "+(q.answer||"")).join("  ");
+  if(screenConduct(allText)){
+    registerConduct("A test you tried to publish contained profane or inappropriate content.");
+    return; // do not publish the offensive test (and possibly fired)
+  }
   const id=state.tests.length+1;
   const t={id,
     title:state.draftTest.title||"Untitled Test",
@@ -3363,8 +3382,11 @@ function saveTest(){
   toast("✓ Test saved. Students are already getting a head-start...");
   burstConfetti();
   showView("tests");
-  // Kick off background pre-computation for the current class so Administer is instant later.
+  // Kick off background pre-computation FIRST (gameplay-critical) so Administer is instant later.
   precomputeAnswers(t.id,state.activeClassIdx).catch(()=>{});
+  // Then a background AI quality review - a nonsensical or inappropriate test still has consequences.
+  const reviewText=t.questions.map((q,i)=>`Q${i+1} (${q.type}): ${q.prompt||"(blank)"}${q.options&&q.options.length?" [options: "+q.options.join(", ")+"]":""}`).join("\n");
+  reviewContentQuality(reviewText,`${state.subject||"class"} test ("${t.title}")`).catch(()=>{});
 }
 
 // Background pre-compute: generate per-student answers and stash in t.cache.
@@ -4686,21 +4708,72 @@ function scheduleFollowupFromContact(c,playerBody){
 
 // Send the player's message text to AI for a professionalism rating.
 // Result adjusts reputation accordingly. Fire-and-forget.
+// ============================================================
+// v1.3 - UNIFIED CONDUCT PIPELINE
+// Every free-text creative input the player writes (messages, test
+// questions, card reasons, homework, assembly speeches) routes through
+// the same conduct escalation. No more dead-ends: write something
+// offensive anywhere and HR notices, then fires you.
+// ============================================================
+// HARD list: unambiguous profanity, slurs, and threats - instant conduct strike.
+// Milder insults ("stupid", "dumb") are left to the AI quality review, which
+// judges them in context (so "don't make a stupid mistake" isn't a firing).
+const PROFANE_RE=/\b(fuck\w*|fuk|shit\w*|cunt|bitch\w*|pussy|cock|asshole|bastards?|whores?|sluts?|retards?|nigg\w*|faggot|kill yourself|kys|stfu|piss off|screw you|shut the)\b/i;
+function screenConduct(text){
+  if(!text)return null;
+  const m=text.match(PROFANE_RE);
+  return m?m[0]:null;
+}
+// Escalating discipline shared across all content channels.
+// Returns true if the player was FIRED (caller should abort).
+function registerConduct(label){
+  state.conductStrikes=(state.conductStrikes||0)+1;
+  if(state.conductStrikes>=2){
+    fireMe(`${label} After a prior warning, the school has no choice. This is the end of the road.`);
+    return true;
+  }
+  queueDeptWarning("HR",`URGENT: ${label} This is a formal warning. ONE more incident of any kind and your employment is terminated.`);
+  state.rep=Math.max(0,state.rep-15);
+  toast(`⚠ SERIOUS HR WARNING (-15 rep). One more and you're FIRED.`);
+  logActivity({type:"gossip",text:`HR opened a file on you. ${label}`});
+  renderHud();buildNav();saveGame(false);
+  return false;
+}
+// Background AI quality/appropriateness review for a chunk of authored content.
+// Non-blocking: the save already happened; consequences land a beat later.
+async function reviewContentQuality(text,contextLabel,opts={}){
+  if(!text||text.length<3)return;
+  const prompt=`A school teacher wrote the following ${contextLabel}:
+"""${text.slice(0,900)}"""
+
+Judge it as a school administrator would, for appropriateness and basic professional quality (is it a real, suitable ${contextLabel} for a school, or is it offensive, nonsensical, cruel, or wildly inappropriate?). Score -3 to +3:
+- +2/+3 = solid, appropriate, well-formed
+- 0/+1 = fine or merely clumsy
+- -1 = unprofessional, sloppy, or borderline
+- -3 = offensive, cruel, or grossly inappropriate for a school (fireable)
+Reply with ONLY: {"score":<int -3..3>,"note":"<6-12 word reason>"}`;
+  const data=await aiJSON(prompt,{retries:1,timeout:22000});
+  if(!data||typeof data.score!=="number")return;
+  const score=Math.max(-3,Math.min(3,Math.round(data.score)));
+  if(score<=-3){
+    registerConduct(`Your ${contextLabel} was flagged as offensive or grossly inappropriate (${data.note||"serious misconduct"}).`);
+    return;
+  }
+  if(score<=-1){
+    state.rep=Math.max(0,state.rep-3);
+    toast(`Your ${contextLabel} raised eyebrows: ${data.note||"unprofessional"}. -3 rep.`);
+    logActivity({type:"gossip",text:`Word is your ${contextLabel} wasn't up to standard.`});
+    renderHud();buildNav();saveGame(false);
+  }else if(score>=2 && opts.rewardGood){
+    state.rep+=2;
+  }
+}
+
 async function evaluatePlayerMessage(text,contact){
   if(!text||text.length<3)return;
-  // Hard-coded safety net for obvious offenses - AI sometimes scores these too leniently.
-  const profane=/\b(fuck|shit|cunt|bitch|dick|pussy|cock|asshole|bastards?|whores?|sluts?|retards?|nigg|fag|piss off|kill yourself|kys|stfu)\b/i;
-  if(profane.test(text)){
-    state.badMessageCount=(state.badMessageCount||0)+1;
-    const note=`Profane or hostile content in a message to ${contact?.name||"a contact"}`;
-    if(state.badMessageCount===1){
-      queueDeptWarning("HR",`URGENT: A message you sent contained profane or threatening content. ONE MORE incident and you are out. This is your only warning.`);
-      state.rep=Math.max(0,state.rep-15);
-      toast(`SERIOUS HR WARNING (-15 rep). One more like that and you are FIRED.`);
-      renderHud();buildNav();saveGame(false);
-    }else{
-      fireMe(`You sent another message containing profane or threatening content (${note}). After a prior warning, this is the end.`);
-    }
+  // Instant conduct screen - profanity/hostility goes straight to HR, no AI needed (fast).
+  if(screenConduct(text)){
+    registerConduct(`A message you sent ${contact?.name?"to "+contact.name:""} contained profane or hostile content.`);
     return;
   }
   const audience=contact?.kind==="student"?`a school student named ${contact.name}`
@@ -4721,17 +4794,8 @@ Reply with ONLY a compact JSON object: {"score":<integer -3..3>,"note":"<6-12 wo
   if(!data||typeof data.score!=="number")return;
   const score=Math.max(-3,Math.min(3,Math.round(data.score)));
   if(data.score<=-3){
-    // Terminable offense - immediate fire after one warning, or instant if pattern
-    state.badMessageCount=(state.badMessageCount||0)+1;
-    if(state.badMessageCount===1){
-      queueDeptWarning("HR",`URGENT: A message you sent to ${audience} was flagged as a fireable offense. One more and you are out. Reason: ${data.note||"serious misconduct"}.`);
-      state.rep=Math.max(0,state.rep-10);
-      toast(`SERIOUS WARNING from HR (-10 rep). One more and you're out.`);
-    }else{
-      // Already warned - fire immediately
-      fireMe(`A message you sent to ${audience} contained: "${data.note||'serious misconduct'}". After a prior warning, this is the end of the road.`);
-    }
-    renderHud();buildNav();saveGame(false);
+    // Terminable offense - unified escalation (warn then fire).
+    registerConduct(`A message you sent to ${audience} was flagged as a fireable offense (${data.note||"serious misconduct"}).`);
     return;
   }
   if(score===0)return;
@@ -5970,6 +6034,8 @@ function migrateSave(s){
   s.notableMoments=s.notableMoments||[];
   if(s.careerOver==null)s.careerOver=false;
   s.seenWelcome=true; // returning players don't need the intro
+  // v1.3 conduct - carry over any prior message strikes
+  if(s.conductStrikes==null)s.conductStrikes=s.badMessageCount||0;
   return s;
 }
 function continueGame(){
@@ -6035,6 +6101,7 @@ function showHowToPlay(){
     <p><b>Tests</b>: drag question blocks onto the canvas in Test Builder. Pick a scale (Percentage, Letter, Points, Stars, Pass/Fail) and weight. Students attempt the test (AI writes their answers in voice). You grade every paper, flipping with the arrows.</p>
     <p><b>Messages</b>: parents and students reach out. You can compose to a student too - whether they reply depends on who they are. Missions arrive with some messages.</p>
     <p><b>Time</b>: Next Day or Next Week. The school keeps moving with or without you - other teachers issue cards, post grades, gossip happens.</p>
+    <p><b>Conduct matters.</b> Everything you write - messages, test questions, card reasons, homework, detention notes - is held to professional standards. Offensive or inappropriate content gets you a formal HR warning; a second strike of any kind ends your career.</p>
     <p><b>Save</b> from the sidebar at any time. Continue from the main menu.</p>
     <div class="row" style="justify-content:flex-end"><button class="primary" onclick="closeModal()">Got it</button></div>
   </div>`;
