@@ -385,7 +385,7 @@
 // STATE
 // ============================================================
 const DAYS=["Mon","Tue","Wed","Thu","Fri"];
-const VERSION="1.3";
+const VERSION="1.4";
 const SAVE_KEY="chalkdust:save";
 
 // ============ AI helpers (single point for the no-placeholder rule) ============
@@ -810,9 +810,11 @@ async function _newCareerImpl(role,name,subject,className,ov,title){
     careerStartReal:Date.now(),
     notableMoments:[],          // {week,year,text}
     careerOver:false,
-    seenWelcome:false
+    seenWelcome:false,
+    turnarounds:0
   };
   await seedContacts();
+  recordArcSnapshots(); // baseline week-1 snapshot - arcs measure from day one
   ov.setProgress(100);
   ov.close();
   // Seed an empty plan so Monday clicks don't break before AI returns.
@@ -939,6 +941,7 @@ function buildNav(){
   }
   html+=`<div class="heading">Reports</div>`;
   if(role==="tutor")html+=navBtn("grades","Quarterly Grades");
+  html+=navBtn("album","Class Album");
   html+=navBtn("career","My Career");
   html+=navBtn("activity","Staffroom Feed");
   html+=navBtn("achievements","Achievements");
@@ -982,6 +985,7 @@ function showView(v){
   else if(v==="missions")host.innerHTML=viewMissions();
   else if(v==="activity")host.innerHTML=viewActivity();
   else if(v==="achievements")host.innerHTML=viewAchievements();
+  else if(v==="album")host.innerHTML=viewAlbum();
   else if(v==="career")host.innerHTML=viewCareer();
   else if(v==="settings")host.innerHTML=viewSettings();
   else if(v==="homework")host.innerHTML=viewHomework();
@@ -1053,10 +1057,15 @@ function setClass(i){
 
 function seatGrid(canAdminister){
   const c=currentClass();
+  // v1.4: the classroom shows its emotional weather. Seat border = mood,
+  // arrow = 3-week ability trend, turnaround kids get a green star.
   return `<div class="seats">${c.students.map(s=>{
     const cs=s.cards.slice(-4).map(c=>`<i class="ci-${c.color}"></i>`).join("");
-    return `<div class="seat" onclick="openStudent(${s.id},${canAdminister})">
-      <div class="name">${s.name}</div>
+    const moodCol=s.mood>=65?"rgba(90,193,126,.55)":s.mood>=40?"rgba(232,176,74,.35)":"rgba(239,110,110,.6)";
+    const trend=arcTrend(s);
+    const trendCol=trend==="↗"?"var(--green)":trend==="↘"?"var(--red)":"#777";
+    return `<div class="seat" onclick="openStudent(${s.id},${canAdminister})" style="border-color:${moodCol};box-shadow:inset 0 0 12px ${s.mood<40?"rgba(239,110,110,.12)":"transparent"}" title="mood ${Math.round(s.mood)} · trend ${trend}">
+      <div class="name">${s.turnedAround?"<span style='color:var(--green)'>★</span> ":""}${s.name} <span style="color:${trendCol};font-size:.9em">${trend}</span></div>
       <div class="gr">Avg: ${avg(s).toFixed(0)}</div>
       <div class="cstrip">${cs}</div>
     </div>`;
@@ -2736,8 +2745,8 @@ function showLegacyEnding(st,reflection){
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.6em;margin:1em 0">
       ${legacyStat("Years served",st.years)}
       ${legacyStat("Students taught",st.studentsTaught)}
+      ${legacyStat("★ Turnarounds",state.turnarounds||0)}
       ${legacyStat("Peak rating",st.peakRating)}
-      ${legacyStat("Green cards",st.green)}
       ${legacyStat("Honors given",st.honors)}
       ${legacyStat("Achievements",st.achUnlocked+"/"+st.achTotal)}
     </div>
@@ -5555,8 +5564,126 @@ async function runWeeklyAI(){
     saveGame(false);
   }finally{_weeklyRunning=false;}
 }
+// ============================================================
+// v1.4 - STUDENT ARCS
+// The heart of the revamp: the game watches every student's trajectory,
+// notices when a kid crosses from struggling to steady to thriving (or
+// slips back), and tells you. Turnarounds - struggling kids who reach
+// thriving under your watch - are the game's deepest win, counted in
+// your legacy. Zero AI cost: pure recorded history.
+// ============================================================
+const ARC_BANDS=["Struggling","Steady","Thriving"];
+const ARC_COLORS=["var(--red)","var(--accent)","var(--green)"];
+// Hysteresis thresholds so kids hovering at a boundary don't flicker bands:
+// climb at 43/68, fall at 37/62.
+function nextArcBand(cur,a){
+  if(cur==null)return a<40?0:a<=65?1:2;
+  if(cur===0)return a>=68?2:(a>=43?1:0);
+  if(cur===1)return a>=68?2:(a<37?0:1);
+  return a<37?0:(a<62?1:2);
+}
+function recordArcSnapshots(){
+  const transitions=[];
+  state.classes.forEach(c=>c.students.forEach(s=>{
+    // lazy init for old saves
+    s.history=s.history||[];
+    s.history.push({week:state.week,year:state.year,ability:Math.round(s.ability),mood:Math.round(s.mood),effort:Math.round(s.effort)});
+    if(s.history.length>45)s.history.shift();
+    const band=nextArcBand(s.arcBand,s.ability);
+    if(s.arcBand==null){s.arcBand=band;if(band===0)s.everStruggled=true;return;}
+    if(band===0)s.everStruggled=true;
+    if(band!==s.arcBand){
+      transitions.push({s,from:s.arcBand,to:band});
+      s.arcBand=band;
+    }
+  }));
+  // Narrate transitions: log all, toast the most dramatic two.
+  transitions.sort((a,b)=>(Math.abs(b.to-b.from))-(Math.abs(a.to-a.from)));
+  transitions.forEach((t,i)=>{
+    const up=t.to>t.from;
+    const line=up
+      ?`${t.s.first} has climbed from ${ARC_BANDS[t.from].toLowerCase()} to ${ARC_BANDS[t.to].toLowerCase()}.`
+      :`${t.s.first} is slipping - ${ARC_BANDS[t.from].toLowerCase()} down to ${ARC_BANDS[t.to].toLowerCase()}.`;
+    logActivity({type:"gossip",text:(up?"↗ ":"↘ ")+line});
+    if(i<2)toast((up?"↗ ":"↘ ")+line);
+    // THE TURNAROUND: a kid who was ever struggling reaches thriving. Once per student.
+    if(up && t.to===2 && t.s.everStruggled && !t.s.turnedAround){
+      t.s.turnedAround=true;
+      state.turnarounds=(state.turnarounds||0)+1;
+      recordMoment(`${t.s.first} ${t.s.last} turned it all the way around - struggling to thriving.`);
+      burstConfetti();
+      toast(`★ TURNAROUND: ${t.s.first} went from struggling to thriving. This is why you teach.`);
+      state.rep+=5;
+      unlockAchievement("first_turnaround");
+    }
+  });
+}
+// Tiny inline SVG sparkline of a student's recorded ability history.
+function arcSparkline(s,w=110,h=26){
+  const hist=(s.history||[]).slice(-30);
+  if(hist.length<2)return `<span class="muted" style="font-size:.7em;font-style:italic">history builds weekly</span>`;
+  const pts=hist.map((p,i)=>`${(i/(hist.length-1)*w).toFixed(1)},${(h-2-(p.ability/100)*(h-4)).toFixed(1)}`).join(" ");
+  const last=hist[hist.length-1].ability, first=hist[0].ability;
+  const col=last>first+3?"var(--green)":last<first-3?"var(--red)":"var(--accent)";
+  return `<svg width="${w}" height="${h}" style="display:block"><polyline points="${pts}" fill="none" stroke="${col}" stroke-width="1.6" stroke-linejoin="round"/></svg>`;
+}
+function arcTrend(s){
+  const hist=s.history||[];
+  if(hist.length<4)return "→";
+  const now=hist[hist.length-1].ability, then=hist[hist.length-4].ability;
+  return now>then+2?"↗":now<then-2?"↘":"→";
+}
+
+// ============================================================
+// v1.4 - CLASS ALBUM
+// One page that tells the story of every kid: arc badge, ability
+// sparkline, their evolving story, and your fingerprints on them.
+// ============================================================
+function viewAlbum(){
+  const cls=currentClass();
+  const me=(state.title||"Ms.")+" "+state.name;
+  const tiles=cls.students.slice()
+    .sort((a,b)=>(b.turnedAround?1:0)-(a.turnedAround?1:0)||(a.arcBand??1)-(b.arcBand??1))
+    .map(s=>{
+      const band=s.arcBand??nextArcBand(null,s.ability);
+      const myCards=s.cards.filter(c=>c.by===me).length;
+      const myMsgs=state.messages.filter(m=>{
+        const c=state.contacts.find(x=>x.id===m.contactId);
+        return m.fromMe&&c&&c.studentId===s.id;
+      }).length;
+      const influence=myCards+myMsgs;
+      return `<div onclick="openStudent(${s.id},${state.role==='subject'})" style="background:#1b1410;border:1px solid ${s.turnedAround?'var(--green)':'#2a1f18'};border-radius:10px;padding:.7em;cursor:pointer;transition:transform .12s,box-shadow .12s;position:relative"
+        onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 4px 12px rgba(0,0,0,.4)'"
+        onmouseout="this.style.transform='';this.style.boxShadow=''">
+        ${s.turnedAround?`<div style="position:absolute;top:-1px;right:10px;background:var(--green);color:#0e0a07;font-size:.62em;font-weight:700;padding:.15em .5em;border-radius:0 0 5px 5px;letter-spacing:.5px">★ TURNAROUND</div>`:""}
+        <div style="display:flex;justify-content:space-between;align-items:baseline">
+          <b style="font-family:var(--serif);font-size:1.05em">${esc(s.name)}</b>
+          <span style="font-size:1.1em" title="3-week ability trend">${arcTrend(s)}</span>
+        </div>
+        <div style="margin:.25em 0"><span style="font-size:.7em;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:${ARC_COLORS[band]}">${ARC_BANDS[band]}</span>
+          <span class="muted" style="font-size:.72em"> · ability ${Math.round(s.ability)} · ${esc(s.personality||"")}</span></div>
+        ${arcSparkline(s)}
+        <div style="font-size:.76em;font-style:italic;opacity:.75;margin-top:.35em;font-family:var(--serif);min-height:2.2em">${esc((s.story||"Their story is still being written.").slice(0,90))}${(s.story||"").length>90?"...":""}</div>
+        <div style="font-size:.7em;opacity:.6;margin-top:.3em">Your influence: ${influence?`${myCards} card${myCards===1?"":"s"}, ${myMsgs} message${myMsgs===1?"":"s"}`:"none yet - reach out"}</div>
+      </div>`;
+    }).join("");
+  const counts=[0,0,0];
+  cls.students.forEach(s=>{counts[s.arcBand??nextArcBand(null,s.ability)]++;});
+  return `<h2>Class Album <small class="muted">${cls.name}</small></h2>
+    ${classPicker()}
+    <div style="display:flex;gap:1em;background:#1b1410;padding:.5em .8em;border-radius:8px;margin-bottom:.7em;font-size:.88em">
+      <span style="color:var(--red)">${counts[0]} struggling</span>
+      <span style="color:var(--accent)">${counts[1]} steady</span>
+      <span style="color:var(--green)">${counts[2]} thriving</span>
+      <span style="margin-left:auto;color:var(--green);font-weight:700">★ ${state.turnarounds||0} turnaround${(state.turnarounds||0)===1?"":"s"} all-time</span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(215px,1fr));gap:.6em">${tiles}</div>
+    <p class="muted" style="margin-top:.8em;font-size:.82em;font-style:italic">A turnaround is a student who was once struggling and reached thriving under your watch. They count toward your legacy.</p>`;
+}
+
 async function weeklyTick(){
   tickMissions();
+  recordArcSnapshots();
   // Inactivity check: if the player didn't do anything notable this week,
   // someone will reach out and rep takes a hit.
   if((state.actionsThisWeek||0)===0 && state.week>1){
@@ -5700,6 +5827,7 @@ function viewCareer(){
     <h3>Lifetime record</h3>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:.5em">
       ${legacyStat("Students taught",st.studentsTaught)}
+      ${legacyStat("★ Turnarounds",state.turnarounds||0)}
       ${legacyStat("Peak rating",st.peakRating)}
       ${legacyStat("Peak reputation",st.peakRep)}
       ${legacyStat("Green cards",st.green)}
@@ -5831,7 +5959,9 @@ const ACHIEVEMENTS=[
   {id:"ten_assemblies",label:"Ten Assemblies",flavor:"Ten times you stood at the front and spoke. Your voice carries now."},
   {id:"hundred_cards",label:"Hundred Cards",flavor:"A hundred cards issued in your name. The class knows you watch."},
   {id:"first_parent_meeting",label:"First Parent Conference",flavor:"You sat across from a parent and held the line."},
-  {id:"master_teacher",label:"Master Teacher",flavor:"The highest rank. A subordinate calls you Dr. now."}
+  {id:"master_teacher",label:"Master Teacher",flavor:"The highest rank. A subordinate calls you Dr. now."},
+  {id:"first_turnaround",label:"The Turnaround",flavor:"A kid who was drowning is now thriving. Frame this one."},
+  {id:"five_turnarounds",label:"Lighthouse",flavor:"Five lives redirected. Whole futures, bent toward better."}
 ];
 function unlockAchievement(id){
   if(!state||state.achievements[id])return;
@@ -5866,6 +5996,7 @@ function checkAchievements(){
   if(myCards.some(c=>c.reason&&c.reason.includes("DETENTION")))unlockAchievement("first_detention");
   if(state.classes.flatMap(c=>c.students).some(s=>(s.grades||[]).some(g=>g.score>=90)))unlockAchievement("first_90");
   if(state.year>=2)unlockAchievement("first_year");
+  if((state.turnarounds||0)>=5)unlockAchievement("five_turnarounds");
 }
 
 // ============================================================
@@ -6036,6 +6167,8 @@ function migrateSave(s){
   s.seenWelcome=true; // returning players don't need the intro
   // v1.3 conduct - carry over any prior message strikes
   if(s.conductStrikes==null)s.conductStrikes=s.badMessageCount||0;
+  // v1.4 arcs - per-student history initializes lazily in recordArcSnapshots
+  if(s.turnarounds==null)s.turnarounds=0;
   return s;
 }
 function continueGame(){
