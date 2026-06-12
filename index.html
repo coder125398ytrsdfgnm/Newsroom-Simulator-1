@@ -385,7 +385,7 @@
 // STATE
 // ============================================================
 const DAYS=["Mon","Tue","Wed","Thu","Fri"];
-const VERSION="1.4";
+const VERSION="1.5";
 const SAVE_KEY="chalkdust:save";
 
 // ============ AI helpers (single point for the no-placeholder rule) ============
@@ -493,9 +493,40 @@ function flashGate(){
 
 let _aiChain=Promise.resolve();
 let _aiInFlight=0;
+// v1.5 CIRCUIT BREAKER: when Pollinations is saturated (persistent 429s) or down,
+// stop hammering it. After 3 consecutive total failures the circuit opens for 90s:
+// every aiText call returns null instantly and the game runs in local mode.
+// One probe is allowed when the window expires; success closes the circuit.
+let _aiFailStreak=0;
+let _aiCircuitUntil=0;
+function aiCircuitOpen(){return Date.now()<_aiCircuitUntil;}
+function _aiNoteFailure(){
+  _aiFailStreak++;
+  if(_aiFailStreak>=3){
+    _aiCircuitUntil=Date.now()+90000;
+    _aiFailStreak=0;
+    if(window.console)console.warn("[AI] circuit OPEN for 90s - running in local mode");
+  }
+  _aiBusyUpdate();
+}
+function _aiNoteSuccess(){
+  _aiFailStreak=0;
+  if(_aiCircuitUntil){_aiCircuitUntil=0;if(window.console)console.log("[AI] circuit closed - service recovered");}
+  _aiBusyUpdate();
+}
 function _aiBusyUpdate(){
   const el=document.getElementById("aiBusy");if(!el)return;
-  el.style.display=_aiInFlight>0?"block":"none";
+  if(aiCircuitOpen()){
+    el.style.display="block";
+    el.style.borderColor="var(--red)";el.style.color="var(--red)";
+    el.innerHTML=`<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--red);margin-right:.4em"></span>AI resting - local mode`;
+  }else if(_aiInFlight>0){
+    el.style.display="block";
+    el.style.borderColor="var(--accent)";el.style.color="var(--accent)";
+    el.innerHTML=`<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent);margin-right:.4em;animation:pulse-red 1.4s infinite"></span>AI working...`;
+  }else{
+    el.style.display="none";
+  }
 }
 function aiEnqueue(task){
   _aiInFlight++;_aiBusyUpdate();
@@ -530,13 +561,17 @@ async function aiText(prompt,opts={},extras={}){
     const cached=aiCacheGet(prompt);
     if(cached)return cached;
   }
-  const tries=opts.retries??3;
+  // Circuit open: fail instantly so callers use their local fallbacks. No queue, no wait.
+  if(aiCircuitOpen() && !opts.probe)return null;
+  const tries=opts.retries??2;
   return aiEnqueue(async ()=>{
+    if(aiCircuitOpen() && !opts.probe)return null; // re-check: may have opened while queued
     let lastErr=null;
     for(let i=0;i<=tries;i++){
       try{
         const t=await _aiOnce(prompt,opts);
         if(t){
+          _aiNoteSuccess();
           if(opts.cache!==false)aiCacheSet(prompt,t);
           if(_criticalWork>0)gateLiveShow(t);
           return t;
@@ -545,10 +580,11 @@ async function aiText(prompt,opts={},extras={}){
       }catch(e){
         lastErr=e;
         const code=e.status||0;
-        const wait=code===429?2200+i*900:code>=500?1200+i*700:700+i*450;
+        const wait=code===429?1800+i*800:code>=500?1000+i*600:600+i*400;
         await new Promise(r=>setTimeout(r,wait));
       }
     }
+    _aiNoteFailure();
     if(window.console)console.warn("[AI] gave up:",lastErr?.status,lastErr?.message,lastErr?.body);
     return null;
   });
@@ -657,58 +693,67 @@ function extractJSONArray(txt){
   return null;
 }
 
-async function generateStudents(n){
-  const pers=PERSONALITIES.join("|");
-  const voices=STUDENT_VOICES.map(v=>v.key).join("|");
-  const prompt=`Return ONLY a JSON array of ${n} school students in this compact shape: [["First","Last","personality","voiceKey"], ...].
-- personality: one of ${pers}
-- voiceKey: one of ${voices}
-- Diverse cultural first and surnames.
-- No markdown. No prose. ${n} entries exactly.`;
-  const txt=await aiText(prompt,{retries:4,timeout:40000});
-  const arr=extractJSONArray(txt);
-  if(!arr||!arr.length){if(window.console)console.warn("[AI] students parse failed; got:",txt?.slice(0,300));return [];}
-  return arr.filter(x=>Array.isArray(x)&&x.length>=4).map(x=>({
-    first:String(x[0]||"").trim(),last:String(x[1]||"").trim(),
-    personality:String(x[2]||"").trim(),voiceKey:String(x[3]||"").trim()
-  })).filter(d=>d.first&&d.last&&d.personality&&d.voiceKey);
+// v1.5 - PROCEDURAL ROSTER (instant, zero network)
+// Pollinations' anonymous tier is being deprecated and 429s under load, which
+// kept killing the boot. Names are data, not prose: the game now builds its
+// roster locally in <1ms and saves the AI budget for what it's actually good
+// at - stories, messages, and student answers, which all enrich in background.
+const NAME_FIRST=["Aaliyah","Amara","Andre","Aisha","Bao","Carlos","Camila","Dmitri","Darnell","Elena","Emeka","Farah","Gabriel","Hana","Hassan","Imani","Ivan","Jaden","Jasmine","Kai","Keisha","Liam","Lucia","Mateo","Mei","Malik","Nadia","Noah","Omar","Paola","Priya","Quinn","Rosa","Ravi","Santiago","Sana","Tariq","Tessa","Wei","Yusuf","Zara","Zofia"];
+const NAME_LAST=["Abara","Alvarez","Bennett","Chen","Cohen","Diallo","Dubois","Esposito","Fischer","Garcia","Haddad","Hernandez","Ivanov","Jackson","Kaur","Kim","Kowalski","Lindqvist","Mahmoud","Mbeki","Nguyen","Okafor","O'Connor","Petrov","Popescu","Reyes","Rossi","Santos","Singh","Silva","Tanaka","Tremblay","Vasquez","Yamada","Zhao"];
+function generateStudentsLocal(n){
+  const firsts=shuffle(NAME_FIRST.slice());
+  const lasts=shuffle(NAME_LAST.slice());
+  const out=[];const seen=new Set();
+  let i=0;
+  while(out.length<n && i<400){
+    const first=firsts[i%firsts.length];
+    const last=lasts[(i*7+Math.floor(i/firsts.length))%lasts.length];
+    const key=(first+" "+last).toLowerCase();
+    i++;
+    if(seen.has(key))continue;
+    seen.add(key);
+    out.push({first,last,
+      personality:PERSONALITIES[Math.floor(Math.random()*PERSONALITIES.length)],
+      voiceKey:STUDENT_VOICES[Math.floor(Math.random()*STUDENT_VOICES.length)].key});
+  }
+  return out;
 }
+const TEACHER_STYLES=["soft-spoken but firm","all energy, no notes","dry wit, sharp standards","kind eyes, brutal rubrics","runs the room like a ship","never raises their voice","theatrical to a fault","quietly relentless","old-school chalk-and-talk","warm until you're late","grades like a court reporter","coaches more than teaches"];
+const TEACHER_HONORIFICS=["Mr.","Ms.","Mrs.","Dr.","Mx."];
+function generateTeachersLocal(count,excludeSubject){
+  const subjects=shuffle(["Mathematics","English","Science","History","Geography","Art","Music","P.E.","Drama","Computer Science"].filter(s=>s!==excludeSubject));
+  const lasts=shuffle(NAME_LAST.slice());
+  const styles=shuffle(TEACHER_STYLES.slice());
+  return subjects.slice(0,count).map((subject,i)=>({
+    name:TEACHER_HONORIFICS[Math.floor(Math.random()*TEACHER_HONORIFICS.length)]+" "+lasts[i],
+    subject,
+    strict:Math.round((0.15+Math.random()*0.7)*100)/100,
+    style:styles[i%styles.length]
+  }));
+}
+// Background story enrichment: when AI is reachable, batch-write one-line stories
+// for students who don't have one yet (8 per call, delimiter format). Quietly
+// retried by the weekly tick, so stories trickle in as the service allows.
+async function enrichStoriesInBackground(){
+  if(aiCircuitOpen()||!state)return;
+  const missing=state.classes.flatMap(c=>c.students).filter(s=>!s.story).slice(0,8);
+  if(!missing.length)return;
+  const lines=missing.map((s,i)=>`${i+1}. ${s.first} ${s.last} (${s.personality})`).join("\n");
+  const prompt=`For each school student below, write ONE grounded sentence (12-20 words) about what they're going through right now at school or home. Vary: some neutral, some struggling, some thriving.
 
-async function generateTeachers(count,excludeSubject){
-  const subjects=["Mathematics","English","Science","History","Geography","Art","Music","P.E.","Drama","Computer Science"].filter(s=>s!==excludeSubject);
-  // Use a robust delimiter format instead of JSON - much more reliable to parse.
-  const prompt=`List ${count} fictional school teachers. Each gets ONE line in this EXACT format:
-NAME | SUBJECT | STRICTNESS | STYLE
+${lines}
 
-Rules:
-- NAME is an honorific + surname (e.g. "Mr. Hollis", "Dr. Reeves", "Ms. Quinn", "Mrs. Khan")
-- SUBJECT must be one of: ${subjects.join(", ")} (each subject used at most once)
-- STRICTNESS is a decimal 0.1 to 0.9
-- STYLE is a short phrase, max 6 words
-- Varied cultural surnames
-
-Output ONLY the ${count} lines. No headers. No numbering. No JSON. No markdown.
-
-Example line: Mr. Hollis | Mathematics | 0.45 | soft-spoken but firm`;
-  const txt=await aiText(prompt,{retries:4,timeout:30000,cache:false});
-  if(!txt){if(window.console)console.warn("[AI] teachers: no response");return [];}
-  // Parse line-by-line, robustly
-  const teachers=[];
-  txt.split("\n").forEach(line=>{
-    line=line.replace(/^[*•\-\d.)\s]+/,"").trim();
-    if(!line||line.length<5)return;
-    const parts=line.split("|").map(p=>p.trim());
-    if(parts.length<4)return;
-    const name=parts[0].replace(/^["']|["']$/g,"");
-    const subject=parts[1].replace(/^["']|["']$/g,"");
-    const strict=Math.max(0.1,Math.min(0.9,parseFloat(parts[2])||0.5));
-    const style=parts[3].replace(/^["']|["']$/g,"");
-    if(name && subject && subjects.includes(subject)){
-      teachers.push({name,subject,strict,style});
-    }
-  });
-  if(!teachers.length && window.console)console.warn("[AI] teachers parse failed; raw:",txt?.slice(0,400));
-  return teachers;
+Output format - one per line, nothing else:
+###1### <sentence>
+###2### <sentence>
+...for all ${missing.length} students.`;
+  const txt=await aiText(prompt,{retries:1,timeout:25000});
+  if(!txt)return;
+  const parsed=parseDelimited(txt,missing.length);
+  let got=0;
+  missing.forEach((s,i)=>{if(parsed[i]){s.story=parsed[i].slice(0,220);s.storyUpdatedWeek=state.week;got++;}});
+  if(got&&window.console)console.log(`[enrich] ${got} student stories written`);
+  if(got)saveGame(false);
 }
 
 async function newCareer(role,name,subject,className,title){
@@ -728,60 +773,22 @@ async function _newCareerImpl(role,name,subject,className,ov,title){
   ov.setProgress(3);
   const perClass=role==="tutor"?22:20;
   const wantedClasses=role==="tutor"?1:3;
-  // For form tutor: 1 students-call (22) + 1 teachers-call = 2 calls (~6-10s).
-  // For subject teacher: 3 students-calls (20 each) + 1 teachers-call = 4 calls.
-  const totalCalls=wantedClasses+1;
-  let done=0;
-  const tick=(label,sub)=>{ov.update(label);ov.sub(sub||"");ov.setProgress(Math.round((done/totalCalls)*92)+3);};
-
-  // teacher first (smaller, faster, validates AI is alive). Try up to 3 times.
-  tick("Hiring faculty","1 colleagues call");
-  let teachers=await generateTeachers(5,subject);
-  if(teachers.length<3){
-    tick("Hiring faculty (retry)","");
-    teachers=await generateTeachers(5,subject);
-  }
-  if(teachers.length<2){
-    tick("Hiring faculty (final retry)","");
-    teachers=await generateTeachers(4,subject);
-  }
-  if(!teachers.length){
-    ov.close();
-    alert("The AI keeps timing out. Wait 30-60 seconds and try New Career again. (Pollinations is under load.)");
-    return false;
-  }
-  done++;
-
+  // v1.5: the boot is now PROCEDURAL and instant - no network, no failure mode.
+  // The roster and faculty come from local pools; the AI enriches stories,
+  // messages, and answers in the background once it's reachable.
+  ov.update("Opening the school");ov.sub("Assembling roster and faculty");
+  ov.setProgress(30);
+  const teachers=generateTeachersLocal(5,subject);
   const classes=[];
   let idx=0;
+  // One contiguous pool so names never repeat ACROSS classes either.
+  const pool=generateStudentsLocal(perClass*wantedClasses);
   for(let i=0;i<wantedClasses;i++){
-    tick(`Class ${i+1} of ${wantedClasses}`,`Loading roster of ${perClass}`);
-    let stus=await generateStudents(perClass);
-    // accept ANY non-empty result; only retry on total failure
-    if(!stus.length)stus=await generateStudents(perClass);
-    // if we got at least 50% of what we asked for, proceed; otherwise top up.
-    if(stus.length && stus.length<Math.floor(perClass*0.6)){
-      const extra=await generateStudents(perClass-stus.length);
-      stus=stus.concat(extra);
-    }
-    done++;
-    if(!stus.length){
-      // accept smaller class rather than failing the whole game
-      continue;
-    }
-    const seen=new Set();
-    const uniq=stus.filter(s=>{const k=(s.first+" "+s.last).toLowerCase();if(seen.has(k))return false;seen.add(k);return true;});
     const cname=role==="tutor"?(className||"7A"):(["7A","8B","9A"][i]);
-    const built=uniq.slice(0,perClass).map((d,j)=>makeStudent(idx++*97+j,d)).filter(Boolean);
-    if(built.length)classes.push({name:cname,students:built});
+    const built=pool.slice(i*perClass,(i+1)*perClass).map((d,j)=>makeStudent(idx++*97+j,d)).filter(Boolean);
+    classes.push({name:cname,students:built});
   }
-  if(!classes.length){
-    ov.close();
-    alert("Couldn't load any classes. The AI is having a rough moment. Try again in 20-30s.");
-    return false;
-  }
-
-  ov.setProgress(96);ov.update("Final setup");
+  ov.setProgress(70);ov.update("Final setup");
   state={
     role,name,title:title||"Ms.",subject:role==="subject"?subject:null,
     formClass:role==="tutor"?className:null,
@@ -819,10 +826,10 @@ async function _newCareerImpl(role,name,subject,className,ov,title){
   ov.close();
   // Seed an empty plan so Monday clicks don't break before AI returns.
   state.weekPlan=[[],[],[],[],[]];
-  // Plan week 1 in the BACKGROUND. Game opens immediately - events fill in as you play.
+  // Background enrichment - all optional, all non-blocking, all circuit-aware.
   planWeek().catch(e=>{if(window.console)console.warn("[planWeek] failed:",e);});
-  // Pre-plan week 2 also in background.
   preplanNextWeek();
+  enrichStoriesInBackground().catch(()=>{});
   return true;
 }
 
@@ -3409,7 +3416,7 @@ async function precomputeAnswers(testId,classIdx){
   for(let qi=0;qi<t.questions.length;qi++){
     const q=t.questions[qi];
     if(q.type==="sa"||q.type==="es"||q.type==="fib"){
-      archs[qi]=await archetypeAnswers(q);
+      archs[qi]=(await archetypeAnswers(q))||localArchetypesFromRubric(q);
     }else archs[qi]=null;
   }
   // Now assign every student
@@ -3600,9 +3607,13 @@ async function _streamFillAnswersImpl(testId,classIdx,test,cls,asn){
   for(let qi=0;qi<test.questions.length;qi++){
     const q=test.questions[qi];
     if(q.type!=="sa"&&q.type!=="es"&&q.type!=="fib")continue;
-    const arch=allArchs?.[qi];
+    let arch=allArchs?.[qi];
     if(!arch){
-      // AI failure - leave them pending; user can reroll individually.
+      // v1.5: AI unreachable - synthesize ability-banded answers FROM THE
+      // TEACHER'S OWN RUBRIC so the test stays fully playable offline.
+      arch=localArchetypesFromRubric(q);
+    }
+    if(!arch){
       cls.students.forEach(s=>{
         if(asn[s.id].absent)return;
         const ans=asn[s.id].answers[qi];
@@ -3637,6 +3648,26 @@ async function _streamFillAnswersImpl(testId,classIdx,test,cls,asn){
 
 // ONE call for the WHOLE TEST - returns archetypes for every written question at once.
 // Returns array indexed by question position, each entry {wrong:[],partial:[],correct:[]}.
+// v1.5 OFFLINE FALLBACK: build the 5 ability-level answers from the teacher's
+// own rubric/model answer. Crude but honest - strong students echo the model,
+// weak students fumble a mangled fragment, and nobody is left "(left blank)".
+function localArchetypesFromRubric(q){
+  const model=(q.answer||"").trim();
+  const topic=(q.prompt||"").replace(/[?.!]+$/,"").trim();
+  if(!model && !topic)return null;
+  const base=model||topic;
+  const words=base.split(/\s+/);
+  const frag=(n)=>words.slice(0,Math.max(2,Math.ceil(words.length*n))).join(" ");
+  const mangle=(t)=>t.toLowerCase().replace(/'/g,"").replace(/,/g,"");
+  return {levels:{
+    20:`i dont rly know... ${mangle(frag(0.25))}? not sure`,
+    40:`I think it's something about ${mangle(frag(0.4))} but I might be mixing it up.`,
+    60:`${frag(0.6)}${words.length>4?"...":""} - that's the main part, I think.`,
+    80:model?model:`${topic} - ${frag(0.8)}.`,
+    95:model?(model+(q.type==="es"?" This matters because it connects to what we covered in class.":"")):`${topic}. ${frag(1)}.`
+  }};
+}
+
 async function archetypeAnswersForTest(test,writtenIdxs){
   const subj=state.subject||"the subject";
   const blocks=writtenIdxs.map((qi,i)=>{
@@ -3892,7 +3923,14 @@ async function rerollAnswer(testId,sid,qi){
   const t=state.tests.find(x=>x.id===testId);const sub=t.assignments[state.activeClassIdx][sid];
   const s=findStudent(sid);const q=t.questions[qi];
   const ov=showBusy(`${s.first} is rewriting answer...`);
-  sub.answers[qi]=await studentAnswer(s,q);
+  let ans=await studentAnswer(s,q);
+  // Offline fallback: pull from rubric-derived levels at the student's ability.
+  if(!ans||!ans.text&&ans.pick===undefined){
+    const arch=localArchetypesFromRubric(q);
+    if(arch)ans={text:pickFromLevels(arch.levels,effectiveAbilityFor(s,q))};
+  }
+  if(ans)sub.answers[qi]=ans;
+  else toast("AI is resting and this question has no rubric to draw from.");
   ov.close();showView("grading");
 }
 
@@ -5131,7 +5169,14 @@ async function generateGossipLine(){
 }
 
 async function generateNeed(student){
-  return await aiLine(`In 4-9 words, write a single brief note about what ${student.first} (story: "${student.story}") needs from their form tutor this week. Examples of TONE (do not copy): 'seems withdrawn lately', 'asked about extra help'. Just the note itself.`,80);
+  const ai=await aiLine(`In 4-9 words, write a single brief note about what ${student.first} (story: "${student.story}") needs from their form tutor this week. Examples of TONE (do not copy): 'seems withdrawn lately', 'asked about extra help'. Just the note itself.`,80);
+  if(ai)return ai;
+  // Local fallback DERIVED FROM REAL STATE - the need names what's actually wrong.
+  if(student.mood<35)return "seems withdrawn - needs a quiet check-in";
+  if(student.effort<35)return "homework slipping - needs structure";
+  if(combinedAvg(student)>0&&combinedAvg(student)<45)return "struggling with the material - extra help";
+  if(student.mood>75&&student.effort>70)return "ready for a bigger challenge";
+  return "asked to talk - hasn't said what about";
 }
 
 function logActivity(entry){
